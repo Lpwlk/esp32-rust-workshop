@@ -1,16 +1,24 @@
+//! Firmware for node-B.
+//!
+//! Per-node settings: override any field of `NodeConfig::DEFAULT` below
+//! (see `src/config.rs` for all of them, their meaning and limits). Settings that
+//! must match on both nodes, like the baud rate, are in `config::shared` instead.
 #![no_std]
 #![no_main]
 #![deny(clippy::mem_forget)]
 
-use esp_backtrace as _;
-/// RGB LED pattern at boot: aurora, sunset, ocean, ember or sakura.
-/// It can be changed at runtime from the CLI (`list`, `pattern <name>`).
-const LED_PATTERN: &str = "sunset";
+use esp32_rust_workshop::config::{LedMode, NodeConfig};
 
-// App descriptor required by the ESP-IDF second-stage bootloader.
-esp_bootloader_esp_idf::esp_app_desc!();
+const CONFIG: NodeConfig = NodeConfig {
+    name: "node-B",
+    // Examples of per-node overrides (uncomment / edit):
+    // data_period_ms: 1000,
+    // status_period_ms: 5000,
+    // rgb: RgbConfig { pattern: "ocean", ..NodeConfig::DEFAULT.rgb },
+    // pins: Pins { led1: 22, ..NodeConfig::DEFAULT.pins },
+    led1: LedMode::PeerButton,
+    led2: LedMode::RxFlash,
+    ..NodeConfig::DEFAULT
+};
 
-#[esp_hal::main]
-fn main() -> ! {
-    esp32_rust_workshop::run("node-B", LED_PATTERN)
-}
+esp32_rust_workshop::node_firmware!(CONFIG);

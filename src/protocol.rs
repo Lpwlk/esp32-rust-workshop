@@ -4,11 +4,13 @@
 //! between `$` and `*`:
 //!
 //! ```text
-//! $DAT,<node>,<seq>,<t_ms>,<btn>,<events>*CS     periodic data (every 500 ms)
+//! $DAT,<node>,<seq>,<t_ms>,<btn>,<events>,<period_ms>*CS  periodic data
 //! $EVT,<node>,<seq>,<t_ms>,<RISE|FALL>,<key>*CS  button edge, key = 64-bit random hex
 //! ```
 //!
 //! `seq` is shared by both frame types so the receiver can detect lost frames.
+//! `period_ms` is the sender's DAT period: nodes may use different periods, and the
+//! receiver needs the peer's one to decide when the link is down.
 
 use core::fmt::Write as _;
 
@@ -36,7 +38,7 @@ impl Edge {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Payload {
-    Data { pressed: bool, events: u32 },
+    Data { pressed: bool, events: u32, period_ms: u32 },
     Event { edge: Edge, key: u64 },
 }
 
@@ -68,8 +70,8 @@ pub fn encode(frame: &Frame<'_>) -> String<MAX_FRAME> {
     let Frame { node, seq, t_ms, payload } = frame;
     // Writes can only fail on overflow; node names are short so it never happens.
     let _ = match payload {
-        Payload::Data { pressed, events } => {
-            write!(body, "DAT,{node},{seq},{t_ms},{},{events}", u8::from(*pressed))
+        Payload::Data { pressed, events, period_ms } => {
+            write!(body, "DAT,{node},{seq},{t_ms},{},{events},{period_ms}", u8::from(*pressed))
         }
         Payload::Event { edge, key } => write!(body, "EVT,{node},{seq},{t_ms},{},{key:016X}", edge.tag()),
     };
@@ -101,6 +103,7 @@ pub fn parse(line: &str) -> Result<Frame<'_>, ParseError> {
         "DAT" => Payload::Data {
             pressed: next()? == "1",
             events: next()?.parse().map_err(|_| ParseError::BadField)?,
+            period_ms: next()?.parse().map_err(|_| ParseError::BadField)?,
         },
         "EVT" => Payload::Event {
             edge: match next()? {

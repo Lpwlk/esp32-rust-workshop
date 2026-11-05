@@ -17,42 +17,66 @@ pub struct Pattern {
     pub description: &'static str,
     /// Key colors, in perceptual space (before gamma). The loop wraps to the first one.
     pub keys: &'static [RGB8],
-    /// Random brightness flicker, like a flame.
-    pub flicker: bool,
 }
 
 pub const PATTERNS: [Pattern; 5] = [
     Pattern {
-        name: "aurora",
-        description: "northern lights: emerald, ice blue, violet",
-        keys: &[rgb(0, 255, 110), rgb(0, 190, 255), rgb(110, 40, 255), rgb(0, 255, 180)],
-        flicker: false,
+        name: "viridis",
+        description: "matplotlib's viridis: purple, blue, teal, green, yellow",
+        // The 5 reference stops of viridis (#440154 #3B528B #21918C #5EC962 #FDE725),
+        // walked forward then back so the loop stays smooth (no jump yellow -> purple).
+        keys: &[
+            rgb(68, 1, 84),
+            rgb(59, 82, 139),
+            rgb(33, 145, 140),
+            rgb(94, 201, 98),
+            rgb(253, 231, 37),
+            rgb(94, 201, 98),
+            rgb(33, 145, 140),
+            rgb(59, 82, 139),
+        ],
     },
     Pattern {
         name: "sunset",
         description: "gold, orange, coral, purple dusk",
         keys: &[rgb(255, 170, 0), rgb(255, 90, 0), rgb(255, 30, 80), rgb(150, 0, 160)],
-        flicker: false,
     },
     Pattern {
         name: "ocean",
         description: "deep blue, azure, lagoon turquoise",
         keys: &[rgb(0, 40, 255), rgb(0, 140, 255), rgb(0, 230, 200), rgb(0, 180, 255)],
-        flicker: false,
     },
     Pattern {
-        name: "ember",
-        description: "glowing embers: red to amber, with flicker",
-        keys: &[rgb(255, 20, 0), rgb(255, 70, 0), rgb(255, 120, 0), rgb(255, 50, 0)],
-        flicker: true,
+        name: "aurora",
+        description: "northern lights: emerald, ice blue, violet",
+        keys: &[rgb(0, 255, 110), rgb(0, 190, 255), rgb(110, 40, 255), rgb(0, 255, 180)],
     },
     Pattern {
         name: "sakura",
         description: "cherry blossom: pink, pale rose, lavender",
         keys: &[rgb(255, 80, 140), rgb(255, 150, 190), rgb(190, 120, 255), rgb(255, 200, 220)],
-        flicker: false,
     },
 ];
+
+/// `const` version of [`find`] (exact, case-sensitive), used by the compile-time config check.
+pub const fn find_const(name: &str) -> Option<usize> {
+    let name = name.as_bytes();
+    let mut i = 0;
+    while i < PATTERNS.len() {
+        let candidate = PATTERNS[i].name.as_bytes();
+        if candidate.len() == name.len() {
+            let mut j = 0;
+            while j < name.len() && candidate[j] == name[j] {
+                j += 1;
+            }
+            if j == name.len() {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
 
 pub fn find(name: &str) -> Option<usize> {
     PATTERNS.iter().position(|p| p.name.eq_ignore_ascii_case(name))
@@ -83,13 +107,11 @@ pub struct Animator {
     pub settings: Settings,
     start: Instant,
     last_frame: Instant,
-    noise: u32,
-    flicker: f32,
 }
 
 impl Animator {
-    pub fn new(settings: Settings, seed: u32) -> Self {
-        Self { settings, start: Instant::now(), last_frame: Instant::now(), noise: seed | 1, flicker: 1.0 }
+    pub fn new(settings: Settings) -> Self {
+        Self { settings, start: Instant::now(), last_frame: Instant::now() }
     }
 
     /// Renders a new frame when one is due (every `1 / freq_hz`).
@@ -105,17 +127,7 @@ impl Animator {
         let t = self.start.elapsed().as_millis() % u64::from(cycle_ms.max(1));
         let phase = t as f32 / cycle_ms as f32;
 
-        let mut level = f32::from(brightness.min(100)) / 100.0;
-        if pattern.flicker {
-            // xorshift noise, low-pass filtered so the flame wavers instead of strobing.
-            self.noise ^= self.noise << 13;
-            self.noise ^= self.noise >> 17;
-            self.noise ^= self.noise << 5;
-            let target = 0.55 + 0.45 * (self.noise % 1000) as f32 / 1000.0;
-            self.flicker += (target - self.flicker) * 0.25;
-            level *= self.flicker;
-        }
-
+        let level = f32::from(brightness.min(100)) / 100.0;
         led.set(color_at(pattern.keys, phase, level));
     }
 }

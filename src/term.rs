@@ -7,6 +7,9 @@ use critical_section::Mutex;
 use esp_println::print;
 
 use crate::{
+    cli,
+    config::{self, NodeConfig, shared},
+    ext_leds::ExtLeds,
     fx,
     protocol::{Edge, Frame, ParseError, Payload},
 };
@@ -39,7 +42,10 @@ pub fn prompt_clear() {
 #[doc(hidden)]
 pub fn prompt_draw() {
     if PROMPT_ON.load(Ordering::Relaxed) {
-        critical_section::with(|cs| print!("\x1b[1;35mcli ›\x1b[0m {}", PROMPT.borrow_ref(cs)));
+        // Copy, then print outside the critical section: printing can take a while,
+        // and interrupts (UART RX at 5 Mbaud) must keep running meanwhile.
+        let text = critical_section::with(|cs| PROMPT.borrow_ref(cs).clone());
+        print!("\x1b[1;35mcli ›\x1b[0m {text}");
     }
 }
 
@@ -83,23 +89,6 @@ fn stamp(t_ms: u64) -> (u64, u64) {
 /// Inner width of the banner box, in characters.
 const BOX: usize = 62;
 
-fn box_row(color: &str, args: core::fmt::Arguments<'_>) {
-    let mut text: heapless::String<128> = heapless::String::new();
-    let _ = core::fmt::Write::write_fmt(&mut text, args);
-    // `{:<w$}` pads by character count, so the right border stays aligned.
-    out!("{CYAN}│{RST}  {color}{text:<w$}{RST}{CYAN}│{RST}", w = BOX - 2);
-}
-
-pub fn banner(node: &str, baud: u32, data_period_ms: u64) {
-    out!();
-    out!("{CYAN}╭{:─<BOX$}╮{RST}", "");
-    box_row(BOLD, format_args!("ESP32-S31 UART link  ·  {node}"));
-    box_row(GRAY, format_args!("UART1 {baud} 8N1  ·  TX GPIO2  ·  RX GPIO3"));
-    box_row(GRAY, format_args!("button GPIO4 (jumper to GND)  ·  IRQ on both edges"));
-    box_row(GRAY, format_args!("DAT every {data_period_ms} ms  ·  EVT + random key on each edge"));
-    out!("{CYAN}╰{:─<BOX$}╯{RST}", "");
-}
-
 /// Hardware facts read at boot, shown in the "chip" card.
 pub struct ChipInfo {
     pub rev_major: u8,
@@ -108,7 +97,6 @@ pub struct ChipInfo {
     pub mac: [u8; 6],
     pub reset: heapless::String<32>,
     pub rng_samples: [u32; 3],
-    pub led: fx::Settings,
 }
 
 /// Width of the label column in cards.
@@ -123,13 +111,19 @@ fn card_split(title: &str) {
     out!("{CYAN}├─ {BOLD}{title}{RST}{CYAN} {:─<w$}┤{RST}", "", w = BOX - 3 - title.chars().count());
 }
 
+/// One `label  value` row. `value` must be plain text (no ANSI codes), since padding
+/// and truncation count characters.
 fn card_row(label: &str, args: core::fmt::Arguments<'_>) {
     let mut value: heapless::String<128> = heapless::String::new();
     let _ = core::fmt::Write::write_fmt(&mut value, args);
-    out!(
-        "{CYAN}│{RST}  {GRAY}{label:<LABEL$}{RST}{value:<w$}{CYAN}│{RST}",
-        w = BOX - 2 - LABEL
-    );
+    // Pad to the card width, or cut with "…" so the right border never moves.
+    let w = BOX - 2 - LABEL;
+    if value.chars().count() > w {
+        let cut = value.char_indices().nth(w - 1).map_or(value.len(), |(i, _)| i);
+        value.truncate(cut);
+        let _ = value.push('…');
+    }
+    out!("{CYAN}│{RST}  {GRAY}{label:<LABEL$}{RST}{value:<w$}{CYAN}│{RST}");
 }
 
 /// Prints `items` (separated by " · ") on as many rows as needed to fit the card.
@@ -154,9 +148,42 @@ fn card_list(label: &str, items: &str) {
     }
 }
 
-/// Build and hardware description, printed right after the banner.
-pub fn build_card(chip: &ChipInfo) {
-    card_top("build");
+/// `5000000` -> `5 Mbaud`, `115200` -> `115.2 kbaud`.
+struct Baud(u32);
+
+impl core::fmt::Display for Baud {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let b = self.0;
+        if b.is_multiple_of(1_000_000) {
+            write!(f, "{} Mbaud", b / 1_000_000)
+        } else if b >= 1000 {
+            write!(f, "{}.{} kbaud", b / 1000, b % 1000 / 100)
+        } else {
+            write!(f, "{b} baud")
+        }
+    }
+}
+
+/// The boot card: shared link settings, this node's config, build, chip, LEDs and CLI.
+pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo) {
+    let p = cfg.pins;
+    out!();
+    card_top("link · shared, must match on both nodes");
+    card_row("uart", format_args!("UART1 · {} · 8N1 · RX by interrupt", Baud(shared::BAUD_RATE)));
+    card_row("format", format_args!("$TYPE,node,seq,t_ms,…*XOR  (NMEA-style)"));
+    card_row("frames", format_args!("DAT (periodic) · EVT + 64-bit key per edge"));
+
+    card_split("node · this board's config");
+    card_row("name", format_args!("{}", cfg.name));
+    card_row("board", format_args!("ESP32-S31-Function-CoreBoard-1"));
+    card_row("uart io", format_args!("TX GPIO{} · RX GPIO{}", p.uart_tx, p.uart_rx));
+    card_row("DAT", format_args!("every {} ms", cfg.data_period_ms));
+    card_row("status", format_args!("stats line every {} ms", cfg.status_period_ms));
+    card_row("timeout", format_args!("link DOWN after {} peer periods", cfg.link_timeout_periods));
+    card_row("button", format_args!("GPIO{} ↔ GND · IRQ on both edges", p.button));
+    card_row("filter", format_args!("{} ms debounce · {} ms lockout", cfg.debounce_ms, cfg.lockout_ms));
+
+    card_split("build");
     card_row("firmware", format_args!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
     card_row("git", format_args!("{}", env!("BUILD_GIT")));
     card_row("built", format_args!("{}", env!("BUILD_DATE")));
@@ -174,8 +201,21 @@ pub fn build_card(chip: &ChipInfo) {
     card_row("reset", format_args!("{}", chip.reset));
     let [a, b, c] = chip.rng_samples;
     card_row("TRNG", format_args!("{a:08X} {b:08X} {c:08X}"));
-    let led = chip.led;
-    card_swatch_row("LED", &led, format_args!("{} · {} Hz · cycle {} ms · {}%", led.pattern().name, led.freq_hz, led.cycle_ms, led.brightness));
+
+    card_split("rgb led");
+    let rgb = cfg.rgb;
+    let pattern = &fx::PATTERNS[fx::find(rgb.pattern).unwrap_or(0)];
+    card_swatch_row("pattern", pattern, format_args!("{}", pattern.name));
+    card_row("timing", format_args!("{} Hz refresh · {} ms cycle · {}%", rgb.freq_hz, rgb.cycle_ms, rgb.brightness));
+    card_row("driver", format_args!("WS2812 on GPIO60 · RMT channel 0"));
+
+    card_split("breadboard leds");
+    card_row("LED1", format_args!("GPIO{} · {}", p.led1, cfg.led1));
+    card_row("LED2", format_args!("GPIO{} · {}", p.led2, cfg.led2));
+
+    card_split("cli");
+    card_row("port", format_args!("USB Serial/JTAG (this console)"));
+    card_row("usage", format_args!("type `help` then Enter"));
     out!("{CYAN}╰{:─<BOX$}╯{RST}", "");
     out!();
 }
@@ -198,7 +238,7 @@ fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str) {
     let from = if tx { "" } else { frame.node };
     let (ps, pms) = stamp(u64::from(frame.t_ms));
     match frame.payload {
-        Payload::Data { pressed, events } => out!(
+        Payload::Data { pressed, events, .. } => out!(
             "{GRAY}{s:>6}.{ms:03}{RST} {dir} {DAT_BADGE} DAT {RST} {GRAY}#{:05}{RST} {YELLOW}{from:<7}{RST} {GRAY}t={ps}.{pms:03}s{RST}  btn {}  {GRAY}events{RST} {events}{extra}",
             frame.seq,
             button_state(pressed),
@@ -224,6 +264,11 @@ pub fn sent(now_ms: u64, frame: &Frame<'_>, raw_edges: Option<u32>) {
 
 pub fn received(now_ms: u64, frame: &Frame<'_>) {
     frame_line(now_ms, false, frame, "");
+}
+
+pub fn bounce_ignored(now_ms: u64, raw_edges: u32) {
+    let (s, ms) = stamp(now_ms);
+    out!("{GRAY}{s:>6}.{ms:03}   ·  bounce ignored ({raw_edges} edge(s), level unchanged){RST}");
 }
 
 pub fn lost(now_ms: u64, count: u32) {
@@ -263,31 +308,26 @@ pub fn status(now_ms: u64, stats: &Stats, link_up: bool) {
     );
 }
 
-/// Prints a 16-character color swatch of `pattern` and returns its width.
-fn swatch(pattern: &fx::Pattern) -> usize {
-    for i in 0..16 {
-        // 16 samples along the loop, so the swatch shows the actual fade.
-        let c = fx::color_at(pattern.keys, i as f32 / 16.0, 1.0);
+/// Prints a `width`-character color swatch of `pattern` and returns its width.
+fn swatch(pattern: &fx::Pattern, width: usize) -> usize {
+    for i in 0..width {
+        // Samples along the loop, so the swatch shows the actual fade.
+        let c = fx::color_at(pattern.keys, i as f32 / width as f32, 1.0);
         print!("\x1b[38;2;{};{};{}m█", c.r, c.g, c.b);
     }
     print!("{RST}");
-    16
+    width
 }
 
 /// Card row whose value starts with a color swatch of the current pattern.
-fn card_swatch_row(label: &str, led: &fx::Settings, args: core::fmt::Arguments<'_>) {
+fn card_swatch_row(label: &str, pattern: &fx::Pattern, args: core::fmt::Arguments<'_>) {
     let mut value: heapless::String<128> = heapless::String::new();
     let _ = core::fmt::Write::write_fmt(&mut value, args);
     prompt_clear();
     print!("{CYAN}│{RST}  {GRAY}{label:<LABEL$}{RST}");
-    let used = swatch(led.pattern());
+    let used = swatch(pattern, 16);
     esp_println::println!(" {value:<w$}{CYAN}│{RST}", w = BOX - 2 - LABEL - used - 1);
     prompt_draw();
-}
-
-pub fn cli_hint() {
-    out!("{GRAY}CLI on this USB port: type {RST}{BOLD}help{RST}{GRAY} then Enter.{RST}");
-    out!();
 }
 
 pub fn cli_echo(line: &str) {
@@ -302,21 +342,129 @@ pub fn cli_ok(args: core::fmt::Arguments<'_>) {
     out!("  {GREEN}✓{RST} {args}");
 }
 
-pub fn cli_help() {
-    out!("  {BOLD}commands{RST}");
-    for (cmd, what) in [
-        ("list", "show the LED patterns"),
-        ("pattern <name|1-5>", "select a pattern  (alias p)"),
-        ("next", "next pattern  (alias n)"),
-        ("freq <1-200>", "LED refresh rate in Hz  (alias f)"),
-        ("cycle <200-60000>", "duration of one fade loop in ms  (alias c)"),
-        ("bright <0-100>", "brightness in %  (alias b)"),
-        ("status", "current LED settings  (alias st)"),
-        ("help", "this list"),
-    ] {
-        out!("    {CYAN}{cmd:<20}{RST}{GRAY}{what}{RST}");
+/// `help` (no topic): every command, grouped, from the table in `cli`.
+/// `help <topic>`: details on a command, or on a setting key.
+pub fn cli_help(topic: Option<&str>, cfg: &NodeConfig, defaults: &NodeConfig) {
+    let Some(topic) = topic else {
+        for (group, title) in [
+            (cli::Group::Settings, "settings"),
+            (cli::Group::Shortcuts, "shortcuts"),
+            (cli::Group::Info, "info"),
+        ] {
+            out!("  {BOLD}{title}{RST}");
+            for c in cli::COMMANDS.iter().filter(|c| c.group == group) {
+                out!("    {CYAN}{:<20}{RST}{GRAY}{}{RST}", c.usage, c.summary);
+            }
+        }
+        out!("  {GRAY}`help <command>` or `help <key>` for details. Backspace edits, Ctrl+U clears,{RST}");
+        out!("  {GRAY}Ctrl+C quits espflash.{RST}");
+        return;
+    };
+
+    if let Some(c) = cli::find_help(topic) {
+        out!("  {BOLD}{}{RST} {GRAY}—{RST} {}", c.name, c.summary);
+        out!("    {GRAY}usage{RST}     {CYAN}{}{RST}", c.usage);
+        if !c.aliases.is_empty() {
+            let mut aliases: heapless::String<32> = heapless::String::new();
+            for (i, a) in c.aliases.iter().enumerate() {
+                let _ = aliases.push_str(if i == 0 { "" } else { ", " });
+                let _ = aliases.push_str(a);
+            }
+            out!("    {GRAY}aliases{RST}   {aliases}");
+        }
+        for line in c.details {
+            out!("    {line}");
+        }
+        for (i, ex) in c.examples.iter().enumerate() {
+            let label = if i == 0 { "examples" } else { "" };
+            out!("    {GRAY}{label:<10}{RST}{CYAN}{ex}{RST}");
+        }
+        if c.name == "set" {
+            for (row, chunk) in config::KEYS.chunks(4).enumerate() {
+                let mut keys: heapless::String<96> = heapless::String::new();
+                for (i, (name, _)) in chunk.iter().enumerate() {
+                    let _ = keys.push_str(if i == 0 { "" } else { " · " });
+                    let _ = keys.push_str(name);
+                }
+                let label = if row == 0 { "keys" } else { "" };
+                out!("    {GRAY}{label:<10}{RST}{keys}");
+            }
+        }
+    } else if let Some(k) = config::Key::from_name(topic) {
+        let (what, values) = k.describe();
+        out!("  {BOLD}{topic}{RST} {GRAY}—{RST} {what}");
+        out!("    {GRAY}values{RST}    {values}");
+        out!("    {GRAY}current{RST}   {}   {GRAY}(build {}){RST}", cfg.value(k), defaults.value(k));
+        out!("    {GRAY}change{RST}    {CYAN}set {topic} <value>{RST}");
+    } else if config::READ_ONLY.contains(&topic) {
+        out!("  {BOLD}{topic}{RST} {GRAY}—{RST} read-only: set in src/bin/uart_node_*.rs or config::shared, then rebuild");
+    } else {
+        cli_error(format_args!("no help for '{topic}' (try `help`)"));
     }
-    out!("  {GRAY}Backspace edits, Ctrl+U clears the line. Ctrl+C quits espflash.{RST}");
+}
+
+// --- Verbose output ----------------------------------------------------------
+
+/// The exact line on the wire, its size, and (RX) time since the peer's previous frame.
+pub fn wire(line: &[u8], delta_ms: Option<u64>) {
+    let text = core::str::from_utf8(line).unwrap_or("<non-UTF-8>").trim_end();
+    // Size on the wire, including the `\n` terminator (stripped from received lines).
+    let size = text.len() + 1;
+    match delta_ms {
+        Some(d) => out!("{GRAY}             wire {DIM}{text}{RST}{GRAY}  {size} B  +{d} ms{RST}"),
+        None => out!("{GRAY}             wire {DIM}{text}{RST}{GRAY}  {size} B{RST}"),
+    }
+}
+
+pub fn link_counters(c: &crate::link::Counters, peer_period_ms: Option<u32>) {
+    out!(
+        "{GRAY}            bytes tx {} · rx {} · RX buffer peak {}/{} · peer DAT period {}{RST}",
+        c.tx_bytes,
+        c.rx_bytes,
+        c.rx_peak,
+        c.rx_capacity,
+        peer_period_ms.map_or(Ms(u32::MAX), Ms)
+    );
+}
+
+/// `2500 ms`, or `?` when unknown (u32::MAX).
+struct Ms(u32);
+
+impl core::fmt::Display for Ms {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 == u32::MAX { f.write_str("?") } else { write!(f, "{} ms", self.0) }
+    }
+}
+
+/// `config`: every setting, read-only ones first, changed ones marked.
+pub fn cli_config(cfg: &NodeConfig, defaults: &NodeConfig) {
+    let p = cfg.pins;
+    out!("  {BOLD}{:<22}{:<16}{RST}{GRAY}build value{RST}", "key", "value");
+    let fixed: [(&str, u32); 7] = [
+        ("name", 0),
+        ("pins.uart_tx", p.uart_tx.into()),
+        ("pins.uart_rx", p.uart_rx.into()),
+        ("pins.button", p.button.into()),
+        ("pins.led1", p.led1.into()),
+        ("pins.led2", p.led2.into()),
+        ("shared.baud_rate", shared::BAUD_RATE),
+    ];
+    for (key, n) in fixed {
+        if key == "name" {
+            out!("  {GRAY}{key:<22}{:<16}read-only (rebuild){RST}", cfg.name);
+        } else {
+            out!("  {GRAY}{key:<22}{n:<16}read-only (rebuild){RST}");
+        }
+    }
+    for (key, k) in config::KEYS {
+        let now = cfg.value(k);
+        let build = defaults.value(k);
+        if now == build {
+            out!("  {CYAN}{key:<22}{RST}{now:<16}");
+        } else {
+            out!("  {CYAN}{key:<22}{RST}{BOLD}{YELLOW}{now:<16}{RST}{GRAY}{build}  (changed){RST}");
+        }
+    }
 }
 
 pub fn cli_list(current: usize) {
@@ -325,16 +473,16 @@ pub fn cli_list(current: usize) {
         let mark = if i == current { "\x1b[1;35m▶\x1b[0m" } else { " " };
         prompt_clear();
         print!("  {mark} {GRAY}{}{RST} {BOLD}{:<7}{RST} ", i + 1, p.name);
-        swatch(p);
+        swatch(p, 16);
         esp_println::println!("  {GRAY}{}{RST}", p.description);
         prompt_draw();
     }
 }
 
-pub fn cli_status(led: &fx::Settings) {
+pub fn cli_status(led: &fx::Settings, leds: &ExtLeds) {
     prompt_clear();
     print!("  {BOLD}LED{RST}  ");
-    swatch(led.pattern());
+    swatch(led.pattern(), 16);
     esp_println::println!(
         "  {BOLD}{}{RST} {GRAY}·{RST} {} Hz {GRAY}·{RST} cycle {} ms {GRAY}·{RST} {}%",
         led.pattern().name,
@@ -343,4 +491,7 @@ pub fn cli_status(led: &fx::Settings) {
         led.brightness
     );
     prompt_draw();
+    for i in 0..2 {
+        out!("  {BOLD}LED{}{RST} {GRAY}GPIO{}{RST}  {}", i + 1, leds.pins[i], leds.modes[i]);
+    }
 }

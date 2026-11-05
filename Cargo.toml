@@ -33,7 +33,10 @@ esp-backtrace = { version = "0.20.0", features = [
   "panic-handler",
   "println",
 ] }
-esp-println = { version = "0.18.0", features = ["esp32s31"] }
+# No `critical-section` feature: it masks interrupts during every print (up to ms
+# while USB drains), which would let the 5 Mbaud RX FIFO overflow. We only print
+# from the main loop, so the lock isn't needed.
+esp-println = { version = "0.18.0", default-features = false, features = ["esp32s31", "auto", "colors"] }
 critical-section = "1.2.0"
 heapless = "0.9.3"
 # RGB LED (WS2812-type on GPIO60) driven by the RMT peripheral. No chip feature needed:
