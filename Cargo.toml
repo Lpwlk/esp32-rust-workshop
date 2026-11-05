@@ -1,0 +1,52 @@
+[package]
+edition      = "2024"
+name         = "esp32-rust-workshop"
+rust-version = "1.95"
+version      = "0.1.0"
+
+# Two almost identical firmwares: one per ESP32-S31-Function-CoreBoard-1.
+# All the logic lives in src/lib.rs; the binaries only differ by node name.
+
+# no_std firmware: the standard test harness can't be built for this target,
+# so `cargo test` must skip these targets.
+[lib]
+test  = false
+bench = false
+
+[[bin]]
+name  = "uart-node-a"
+path  = "src/bin/uart_node_a.rs"
+test  = false
+bench = false
+
+[[bin]]
+name  = "uart-node-b"
+path  = "src/bin/uart_node_b.rs"
+test  = false
+bench = false
+
+[dependencies]
+esp-hal = { version = "~1.2.2", features = ["esp32s31", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s31"] }
+esp-backtrace = { version = "0.20.0", features = [
+  "esp32s31",
+  "panic-handler",
+  "println",
+] }
+esp-println = { version = "0.18.0", features = ["esp32s31"] }
+critical-section = "1.2.0"
+heapless = "0.9.3"
+# RGB LED (WS2812-type on GPIO60) driven by the RMT peripheral. No chip feature needed:
+# esp-hal already has `esp32s31`, and Cargo unifies it.
+esp-hal-smartled = "0.18.0"
+smart-leds-trait = "0.3"
+
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug         = 2
+lto           = 'fat'
+opt-level     = 's'
