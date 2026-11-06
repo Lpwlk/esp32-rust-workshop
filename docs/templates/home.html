@@ -1,0 +1,23 @@
+{#- Home page layout (from the Lpwlk Zensical template): a hero above the content
+    of index.md. Selected with `template: home.html` in the page front matter. -#}
+{% extends "main.html" %}
+
+{% block hero %}
+  <section class="custom-hero">
+    <div class="hero-container">
+      <div class="hero-text">
+        <p class="hero-title">{{ config.site_name }}</p>
+        <p class="hero-subtitle">{{ config.site_description }}</p>
+        <div class="md-typeset hero-actions">
+          <a href="{{ 'getting-started/' | url }}" class="md-button md-button--primary">Get started</a>
+          <a href="{{ 'reference/cli/' | url }}" class="md-button hero-button">CLI reference</a>
+        </div>
+      </div>
+      <div class="hero-logo">
+        <img src="{{ 'assets/logo/logo-compact-dark.svg' | url }}#only-dark" alt="Lpwlk logo">
+        <img src="{{ 'assets/logo/logo-compact-light.svg' | url }}#only-light" alt="Lpwlk logo">
+      </div>
+    </div>
+  </section>
+  {{ super() }}
+{% endblock %}

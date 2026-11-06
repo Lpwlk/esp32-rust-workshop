@@ -1,0 +1,11 @@
+/target
+**/.DS_Store
+**/*.rs.bk
+/site
+/.cache
+
+# Python tooling (scripts/dev.py)
+/.venv
+__pycache__/
+/scripts/logs
+/.boards.json

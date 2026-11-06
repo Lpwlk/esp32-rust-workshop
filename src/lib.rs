@@ -2,14 +2,17 @@
 //!
 //! Each board:
 //! - sends a `DAT` frame (counter, timestamp, button state, period) periodically,
+//!   or replies to the peer's frames (`tx_mode on-rx`), or stays quiet;
 //! - sends an `EVT` frame with a random 64-bit key on each rising/falling edge
-//!   of a jumper "button" (GPIO interrupt on both edges),
-//! - decodes and displays everything it receives from the other board,
-//! - drives the on-board RGB LED and two LEDs on the breadboard,
+//!   of a jumper "button" (GPIO interrupt on both edges);
+//! - decodes and displays everything it receives from the other board;
+//! - can change the link speed together with the peer (`baud`), and send bursts
+//!   of frames to measure the link (`burst`);
+//! - drives the on-board RGB LED and two LEDs on the breadboard;
 //! - offers a small CLI on the USB console.
 //!
 //! **Configuration**: see [`config`]. Wire-level settings shared by both nodes are
-//! in [`config::shared`]; everything else is per node, in `src/bin/uart_node_*.rs`.
+//! in [`config::shared`]; everything else is per node, in `src/bin/node_*.rs`.
 //!
 //! Default wiring (header J2 labels = GPIO numbers):
 //!
@@ -26,16 +29,21 @@
 //! ```
 #![no_std]
 
+// Hardware glue (this crate).
 pub mod button;
 pub mod cli;
-pub mod config;
 pub mod ext_leds;
 pub mod fx;
 pub mod led;
 pub mod link;
-pub mod protocol;
+pub mod rtt_console;
+pub mod settings;
 pub mod term;
-mod trng;
+pub mod trng;
+
+// Hardware-independent logic, tested on the host (`cargo test-host`). Re-exported
+// so the rest of the firmware and the node configs keep using `crate::config`, etc.
+pub use workshop_core::{baud, burst, config, line, persist, protocol, rtt, seq, units, wire};
 
 use esp_hal::{
     clock::CpuClock,
@@ -43,15 +51,20 @@ use esp_hal::{
     rng::Rng,
     time::{Duration, Instant},
 };
-use heapless::Vec;
 
 use crate::{
+    baud::{BaudAction, BaudControl, BaudError},
+    burst::{BurstRx, BurstTx},
     button::{Button, ButtonUpdate},
-    config::{NodeConfig, shared},
+    config::{NodeConfig, TxMode, shared},
     ext_leds::{ExtLeds, LedInputs},
+    line::{LineBuffer, LineEvent},
     link::Link,
     protocol::{Edge, Frame, MAX_FRAME, Payload},
+    rtt::RttTracker,
+    seq::SeqCheck,
     term::Stats,
+    wire::{DatClock, DatDelta, Dir},
 };
 
 /// Expands to a complete node firmware: compile-time config check, app
@@ -78,8 +91,59 @@ macro_rules! node_firmware {
     };
 }
 
+/// After switching speed on the peer's request, don't transmit for this long, so
+/// the peer has switched too before our first frame at the new speed.
+const SWITCH_HOLD_US: u64 = 50_000;
+/// A back-to-back burst sends for at most this long per loop iteration, so the
+/// CLI, the LEDs and the receive side keep running during long bursts.
+const BURST_SLICE_US: u64 = 2_000;
+/// With the `watchdog` feature: the chip resets if the main loop doesn't come
+/// back for this long (its longest normal iteration, a `save`, takes ~50 ms).
+pub const WATCHDOG_MS: u64 = 2_000;
+
+/// Hardware watchdog on TIMG0, fed once per main loop iteration (`watchdog`
+/// feature). Without the feature, feeding does nothing.
+struct Watchdog {
+    #[cfg(feature = "watchdog")]
+    wdt: esp_hal::timer::timg::Wdt<esp_hal::peripherals::TIMG0<'static>>,
+}
+
+impl Watchdog {
+    #[cfg_attr(not(feature = "watchdog"), allow(unused_variables))]
+    fn start(timg0: esp_hal::peripherals::TIMG0<'static>) -> Self {
+        #[cfg(feature = "watchdog")]
+        {
+            use esp_hal::timer::timg::{MwdtStage, TimerGroup};
+            let mut wdt = TimerGroup::new(timg0).wdt;
+            wdt.set_timeout(MwdtStage::Stage0, Duration::from_millis(WATCHDOG_MS));
+            wdt.enable();
+            Self { wdt }
+        }
+        #[cfg(not(feature = "watchdog"))]
+        Self {}
+    }
+
+    fn feed(&mut self) {
+        #[cfg(feature = "watchdog")]
+        self.wdt.feed();
+    }
+}
+
+fn now_us() -> u64 {
+    Instant::now().duration_since_epoch().as_micros()
+}
+
 fn now_ms() -> u64 {
-    Instant::now().duration_since_epoch().as_millis()
+    now_us() / 1000
+}
+
+fn ms(v: u32) -> Duration {
+    Duration::from_millis(u64::from(v))
+}
+
+/// A period in ms with decimals (config / CLI) as a timer duration.
+fn ms_f(v: f32) -> Duration {
+    Duration::from_micros(units::ms_to_us(v))
 }
 
 /// Takes a GPIO by number, as given in the config.
@@ -87,24 +151,6 @@ fn pin(n: u8) -> AnyPin<'static> {
     // SAFETY: `NodeConfig::check` guarantees at compile time that every configured
     // pin is distinct and not used elsewhere by the firmware (RESERVED_PINS).
     unsafe { AnyPin::steal(n) }
-}
-
-/// What we know about the other node, from its frames.
-#[derive(Default)]
-struct Peer {
-    seq: Option<u32>,
-    last_rx: Option<Instant>,
-    /// Its data period, announced in its DAT frames.
-    period_ms: Option<u32>,
-    button: bool,
-}
-
-impl Peer {
-    fn link_up(&self, cfg: &NodeConfig) -> bool {
-        let period = self.period_ms.unwrap_or(cfg.data_period_ms);
-        let timeout = Duration::from_millis(u64::from(period) * u64::from(cfg.link_timeout_periods));
-        self.last_rx.is_some_and(|t| t.elapsed() < timeout)
-    }
 }
 
 fn fx_settings(rgb: &config::RgbConfig) -> fx::Settings {
@@ -116,8 +162,34 @@ fn fx_settings(rgb: &config::RgbConfig) -> fx::Settings {
     }
 }
 
-fn ms(v: u32) -> Duration {
-    Duration::from_millis(u64::from(v))
+/// What we know about the other node, from its frames.
+#[derive(Default)]
+struct Peer {
+    seq: Option<u32>,
+    last_rx: Option<Instant>,
+    /// Its data period (µs), announced in its DAT frames.
+    period_us: Option<u32>,
+    button: bool,
+}
+
+impl Peer {
+    fn timeout_us(&self, cfg: &NodeConfig) -> u64 {
+        let period_us = self.period_us.map_or(units::ms_to_us(cfg.data_period_ms), u64::from);
+        period_us * u64::from(cfg.link_timeout_periods)
+    }
+
+    fn link_up(&self, cfg: &NodeConfig) -> bool {
+        self.last_rx.is_some_and(|t| t.elapsed().as_micros() < self.timeout_us(cfg))
+    }
+}
+
+/// What `set console` really does when the `rtt` feature isn't built in.
+fn console_note(console: config::Console) -> &'static str {
+    match (console, rtt_console::BUILT) {
+        (config::Console::Rtt, false) => " (no RTT in this build: staying on serial; rebuild with --features rtt)",
+        (config::Console::Both, false) => " (no RTT in this build: serial only; rebuild with --features rtt)",
+        _ => "",
+    }
 }
 
 /// Entry point shared by both binaries (see [`node_firmware!`]).
@@ -126,194 +198,544 @@ fn ms(v: u32) -> Duration {
 /// CLI can change (`set`, `reset`); `defaults` is kept to show and restore it.
 pub fn run(defaults: &'static NodeConfig) -> ! {
     let mut cfg = *defaults;
+    // Before any output, so the boot card also goes to RTT (feature `rtt`).
+    rtt_console::init();
+    rtt_console::set_route(cfg.console);
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    // Settings saved with `save` (feature `persist`), on top of the build config.
+    let mut store = settings::Store::new(peripherals.FLASH);
+    let boot_load = store.load(&mut cfg);
+    rtt_console::set_route(cfg.console);
     let p = cfg.pins;
 
-    let mut link = Link::new(peripherals.UART1, pin(p.uart_tx), pin(p.uart_rx), shared::BAUD_RATE);
-    let mut button = Button::new(peripherals.IO_MUX, pin(p.button), ms(cfg.debounce_ms), ms(cfg.lockout_ms));
-    let mut leds = ExtLeds::new([(pin(p.led1), p.led1), (pin(p.led2), p.led2)], [cfg.led1, cfg.led2]);
-    let mut rgb_led = led::Led::new(peripherals.RMT, peripherals.GPIO60);
+    let link = Link::new(peripherals.UART1, pin(p.uart_tx), pin(p.uart_rx), shared::BAUD_RATE);
+    let button = Button::new(peripherals.IO_MUX, pin(p.button), ms(cfg.debounce_ms), ms(cfg.lockout_ms));
+    let leds = ExtLeds::new([(pin(p.led1), p.led1), (pin(p.led2), p.led2)], [cfg.led1, cfg.led2]);
+    let rgb_led = led::Led::new(peripherals.RMT, peripherals.GPIO60);
+
+    let boot_pin = esp_hal::gpio::Input::new(peripherals.GPIO61, esp_hal::gpio::InputConfig::default());
+    let boot_button = workshop_core::button::PolledButton::new(boot_pin.is_low(), 20_000, 100_000);
     // esp-hal doesn't start the TRNG on the S31: without this, every key is identical.
     trng::enable();
     let rng = Rng::new();
-    let mut fx = fx::Animator::new(fx_settings(&cfg.rgb));
+    let fx = fx::Animator::new(fx_settings(&cfg.rgb));
 
-    term::boot_card(&cfg, &chip_info(&rng));
-    let mut cli = cli::Cli::new(peripherals.USB_DEVICE);
+    term::boot_card(&cfg, &chip_info(&rng), &system_info(&cfg, defaults, boot_load));
+    let cli = cli::Cli::new(peripherals.USB_DEVICE);
 
-    let mut stats = Stats::default();
-    let mut peer = Peer::default();
-    let mut seq: u32 = 0;
-    let mut events_sent: u32 = 0;
-    let mut rx_line: Vec<u8, MAX_FRAME> = Vec::new();
-    let mut rx_overflow = false;
-    let mut last_data = Instant::now();
-    let mut last_status = Instant::now();
-
+    let mut node = Node {
+        cfg,
+        defaults,
+        link,
+        button,
+        leds,
+        rgb_led,
+        fx,
+        rng,
+        cli,
+        stats: Stats::default(),
+        peer: Peer::default(),
+        seq: 0,
+        events_sent: 0,
+        rx_lines: LineBuffer::new(),
+        last_data: Instant::now(),
+        dat_clock: DatClock::new(),
+        last_status: Instant::now(),
+        baud: BaudControl::new(shared::BAUD_RATE),
+        tx_hold_until_us: 0,
+        rtt: RttTracker::new(),
+        burst_id: 0,
+        burst_tx: None,
+        burst_rx: None,
+        store,
+        boot_load,
+        boot_pin,
+        boot_button,
+        // Last, so the boot itself is never cut short.
+        watchdog: Watchdog::start(peripherals.TIMG0),
+    };
     loop {
+        node.step();
+    }
+}
+
+/// Everything one node owns and knows.
+struct Node {
+    cfg: NodeConfig,
+    defaults: &'static NodeConfig,
+    link: Link,
+    button: Button,
+    leds: ExtLeds,
+    rgb_led: led::Led,
+    fx: fx::Animator,
+    rng: Rng,
+    cli: cli::Cli,
+    stats: Stats,
+    peer: Peer,
+    /// Next sequence number (DAT, EVT, BAU, ECH).
+    seq: u32,
+    events_sent: u32,
+    rx_lines: LineBuffer<MAX_FRAME>,
+    last_data: Instant,
+    /// Time between consecutive DAT frames, sent or received (wire timing).
+    dat_clock: DatClock,
+    last_status: Instant,
+    baud: BaudControl,
+    /// No transmission before this time (just switched speed on the peer's request).
+    tx_hold_until_us: u64,
+    rtt: RttTracker,
+    burst_id: u32,
+    burst_tx: Option<BurstTx>,
+    burst_rx: Option<BurstRx>,
+    /// Saved settings in flash (`save`, `forget`).
+    store: settings::Store,
+    /// What the boot did with the saved settings (shown by `info`).
+    boot_load: settings::BootLoad,
+    watchdog: Watchdog,
+    boot_pin: esp_hal::gpio::Input<'static>,
+    boot_button: workshop_core::button::PolledButton,
+}
+
+impl Node {
+    /// One iteration of the main loop.
+    fn step(&mut self) {
+        self.watchdog.feed();
         // --- LEDs and host CLI ------------------------------------------------
-        fx.tick(&mut rgb_led);
-        leds.update(&LedInputs { button: button.is_pressed(), peer_button: peer.button, link_up: peer.link_up(&cfg) });
-        if let Some(cmd) = cli.poll() {
-            apply(cmd, &mut cfg, defaults, &mut fx, &mut leds, &mut button);
+        self.fx.tick(&mut self.rgb_led);
+        let inputs = LedInputs {
+            button: self.button.is_pressed(),
+            peer_button: self.peer.button,
+            link_up: self.peer.link_up(&self.cfg),
+        };
+        self.leds.update(&inputs);
+        if let Some(cmd) = self.cli.poll() {
+            self.apply(cmd);
         }
+
 
         // --- Button edge -> EVT frame -------------------------------------------
-        match button.poll() {
+        match self.button.poll() {
             Some(ButtonUpdate::Edge(ev)) => {
-                let key = (u64::from(rng.random()) << 32) | u64::from(rng.random());
-                let frame =
-                    Frame { node: cfg.name, seq, t_ms: now_ms() as u32, payload: Payload::Event { edge: ev.edge, key } };
-                if let Some(line) = send(&mut link, &frame, &mut stats, &mut leds) {
-                    term::sent(now_ms(), &frame, Some(ev.raw_edges));
-                    if cfg.verbose {
-                        term::wire(line.as_bytes(), None);
-                    }
-                }
-                seq = seq.wrapping_add(1);
-                events_sent += 1;
+                let key = (u64::from(self.rng.random()) << 32) | u64::from(self.rng.random());
+                self.send(Payload::Event { edge: ev.edge, key }, Some(ev.raw_edges));
+                self.events_sent += 1;
             }
-            Some(ButtonUpdate::Ignored { raw_edges }) if cfg.verbose => term::bounce_ignored(now_ms(), raw_edges),
-            Some(ButtonUpdate::Ignored { .. }) => {}
-            None => {}
+            Some(ButtonUpdate::Ignored { raw_edges }) if self.cfg.verbose => term::bounce_ignored(now_ms(), raw_edges),
+            _ => {}
         }
 
-        // --- Periodic DAT frame -------------------------------------------------
-        // Periods are read from `cfg` every time, so CLI changes apply immediately.
-        if last_data.elapsed() >= ms(cfg.data_period_ms) {
-            last_data = Instant::now();
-            let frame = Frame {
-                node: cfg.name,
-                seq,
-                t_ms: now_ms() as u32,
-                payload: Payload::Data {
-                    pressed: button.is_pressed(),
-                    events: events_sent,
-                    period_ms: cfg.data_period_ms,
-                },
-            };
-            if let Some(line) = send(&mut link, &frame, &mut stats, &mut leds) {
-                term::sent(now_ms(), &frame, None);
-                if cfg.verbose {
+        // --- Periodic DAT frame (read from `cfg` every time: CLI changes apply at once)
+        if self.last_data.elapsed() >= ms_f(self.cfg.data_period_ms) {
+            self.last_data = Instant::now();
+            if self.cfg.tx_mode == TxMode::Periodic && now_us() >= self.tx_hold_until_us {
+                let period_us = units::ms_to_us(self.cfg.data_period_ms) as u32;
+                let payload = Payload::Data { pressed: self.button.is_pressed(), events: self.events_sent, period_us };
+                self.send(payload, None);
+            }
+        }
+
+        self.burst_tx_step();
+        self.receive();
+        self.timers();
+
+        // --- Status line ----------------------------------------------------------
+        if self.last_status.elapsed() >= ms_f(self.cfg.status_period_ms) {
+            self.last_status = Instant::now();
+            term::status(now_ms(), &self.stats, self.peer.link_up(&self.cfg), self.baud.current(), self.rtt.stats());
+            if self.cfg.verbose {
+                term::link_counters(&self.link.counters(), self.peer.period_us);
+            }
+        }
+    }
+
+    /// Sends a frame with the next sequence number, and prints it (with, for a DAT,
+    /// the time since the previous DAT, sent or received).
+    fn send(&mut self, payload: Payload, raw_edges: Option<u32>) {
+        let frame = Frame { node: self.cfg.name, seq: self.seq, t_ms: now_ms() as u32, payload };
+        let line = protocol::encode(&frame);
+        match self.link.send(line.as_bytes()) {
+            Ok(wire_end_us) => {
+                self.stats.tx += 1;
+                self.leds.on_tx();
+                // Both timed from when the frame ends on the wire, like received ones.
+                self.rtt.sent(self.seq, wire_end_us);
+                let delta = self.dat_mark(&payload, Dir::Tx, wire_end_us);
+                term::sent(now_ms(), &frame, raw_edges, delta);
+                if self.cfg.verbose {
                     term::wire(line.as_bytes(), None);
                 }
             }
-            seq = seq.wrapping_add(1);
+            Err(_) => term::uart_error(now_ms(), "TX error"),
         }
+        self.seq = self.seq.wrapping_add(1);
+    }
 
-        // --- Receive (bytes buffered by the UART interrupt) ----------------------
-        if let Some(e) = link.take_error() {
-            term::uart_error(now_ms(), match e {
-                esp_hal::uart::RxError::FifoOverflowed => "RX FIFO overflow",
-                esp_hal::uart::RxError::GlitchOccurred => "glitch on RX line",
-                esp_hal::uart::RxError::FrameFormatViolated => "framing error (baud rate? GND? wires too long?)",
-                esp_hal::uart::RxError::ParityMismatch => "parity error",
-                _ => "RX error",
-            });
-            stats.bad += 1;
+    /// For a DAT frame, the time since the previous DAT (either direction).
+    fn dat_mark(&mut self, payload: &Payload, dir: Dir, wire_end_us: u64) -> Option<DatDelta> {
+        matches!(payload, Payload::Data { .. }).then(|| self.dat_clock.mark(dir, wire_end_us)).flatten()
+    }
+
+    // --- Receive ------------------------------------------------------------------
+
+    fn receive(&mut self) {
+        if let Some(e) = self.link.take_error() {
+            self.stats.bad += 1;
+            match self.active_burst_rx() {
+                Some(rx) => rx.bad += 1, // counted in the burst summary, not printed
+                None => term::uart_error(
+                    now_ms(),
+                    match e {
+                        esp_hal::uart::RxError::FifoOverflowed => "RX FIFO overflow",
+                        esp_hal::uart::RxError::GlitchOccurred => "glitch on RX line",
+                        esp_hal::uart::RxError::FrameFormatViolated => {
+                            "framing error (baud rate? GND? wires too long?)"
+                        }
+                        esp_hal::uart::RxError::ParityMismatch => "parity error",
+                        _ => "RX error",
+                    },
+                ),
+            }
         }
-        if link.take_dropped() > 0 {
-            stats.bad += 1;
+        if self.link.take_dropped() > 0 {
+            self.stats.bad += 1;
             term::uart_error(now_ms(), "RX buffer full, bytes dropped");
         }
         let mut chunk = [0u8; 64];
         loop {
-            let n = link.read(&mut chunk);
+            let n = self.link.read(&mut chunk);
             if n == 0 {
                 break;
             }
             for &byte in &chunk[..n] {
-                if byte != b'\n' {
-                    rx_overflow |= rx_line.push(byte).is_err();
-                    continue;
+                // Copy the line out: handling it may switch speed and reset `rx_lines`.
+                let line: Option<heapless::Vec<u8, MAX_FRAME>> = match self.rx_lines.push(byte) {
+                    Some(LineEvent::Line(l)) => heapless::Vec::from_slice(l).ok(),
+                    Some(LineEvent::TooLong) => {
+                        let _ = self.link.take_line_end(); // keep line ends in step
+                        self.stats.bad += 1;
+                        term::uart_error(now_ms(), "line too long, dropped");
+                        None
+                    }
+                    None => None,
+                };
+                if let Some(line) = line {
+                    // When this line's `\n` was on the wire (noted by the UART interrupt).
+                    let wire_end_us = self.link.take_line_end().unwrap_or_else(now_us);
+                    self.handle_line(&line, wire_end_us);
                 }
-                if rx_overflow {
-                    stats.bad += 1;
-                    term::uart_error(now_ms(), "line too long, dropped");
-                } else if handle_line(&rx_line, &mut stats, &mut peer, cfg.verbose) {
-                    leds.on_rx();
-                }
-                rx_line.clear();
-                rx_overflow = false;
             }
         }
+    }
 
-        // --- Status line ----------------------------------------------------------
-        if last_status.elapsed() >= ms(cfg.status_period_ms) {
-            last_status = Instant::now();
-            term::status(now_ms(), &stats, peer.link_up(&cfg));
-            if cfg.verbose {
-                term::link_counters(&link.counters(), peer.period_ms);
+    /// The burst being received, if frames still arrive.
+    fn active_burst_rx(&mut self) -> Option<&mut BurstRx> {
+        let now = now_us();
+        self.burst_rx.as_mut().filter(|rx| !rx.is_stale(now))
+    }
+
+    fn handle_line(&mut self, line: &[u8], wire_end_us: u64) {
+        let parsed = core::str::from_utf8(line).map_err(|_| protocol::ParseError::Malformed).and_then(protocol::parse);
+        let frame = match parsed {
+            Ok(frame) => frame,
+            Err(e) => {
+                self.stats.bad += 1;
+                match self.active_burst_rx() {
+                    Some(rx) => rx.bad += 1,
+                    None => term::rx_error(now_ms(), e, line),
+                }
+                return;
+            }
+        };
+        let now = now_us();
+        let since_previous = self.peer.last_rx.map(|t| t.elapsed().as_millis());
+        self.peer.last_rx = Some(Instant::now());
+        self.leds.on_rx();
+
+        // Burst frames: counted, not printed, outside the frame sequence.
+        if let Payload::Burst { index, count } = frame.payload {
+            self.burst_frame(frame.node, frame.seq, index, count, line.len() + 1, now);
+            self.baud_action(&frame.payload, now);
+            return;
+        }
+
+        self.stats.rx += 1;
+        match seq::check(self.peer.seq, frame.seq) {
+            SeqCheck::Lost(missing) => {
+                self.stats.lost += missing;
+                term::lost(now_ms(), missing);
+            }
+            SeqCheck::Restarted => term::peer_restarted(now_ms(), frame.node),
+            SeqCheck::First | SeqCheck::InOrder => {}
+        }
+        self.peer.seq = Some(frame.seq);
+        let mut rtt = None;
+        match frame.payload {
+            Payload::Data { pressed, period_us, .. } => {
+                self.peer.button = pressed;
+                self.peer.period_us = Some(period_us);
+            }
+            Payload::Event { edge, .. } => {
+                self.peer.button = edge == Edge::Falling;
+            }
+            Payload::Echo { echo_seq } => rtt = self.rtt.echo(echo_seq, wire_end_us),
+            Payload::Baud { .. } | Payload::Burst { .. } => {}
+        }
+        let delta = self.dat_mark(&frame.payload, Dir::Rx, wire_end_us);
+        term::received(now_ms(), &frame, rtt, delta);
+        if self.cfg.verbose {
+            term::wire(line, since_previous);
+        }
+
+        let reply = matches!(frame.payload, Payload::Data { .. } | Payload::Event { .. });
+        let seq = frame.seq;
+        let payload = frame.payload;
+        self.baud_action(&payload, now);
+        if reply && self.cfg.tx_mode == TxMode::OnRx && now_us() >= self.tx_hold_until_us {
+            self.send(Payload::Echo { echo_seq: seq }, None);
+        }
+    }
+
+    // --- Link speed -------------------------------------------------------------
+
+    fn set_baud(&mut self, baud: u32) {
+        if self.link.set_baud(baud).is_err() {
+            term::uart_error(now_ms(), "baud rate not supported by the UART");
+        }
+        // A line started at the old speed is garbage now.
+        self.rx_lines = LineBuffer::new();
+    }
+
+    fn baud_action(&mut self, payload: &Payload, now: u64) {
+        match self.baud.on_frame(payload, now) {
+            Some(BaudAction::AckThenSwitch(baud)) => {
+                self.send(Payload::Baud { baud, ack: true }, None);
+                self.set_baud(baud); // waits for the ACK to leave first
+                self.tx_hold_until_us = now_us() + SWITCH_HOLD_US;
+                term::link_event(
+                    now_ms(),
+                    format_args!("peer asked for {}: acknowledged and switched", term::Baud(baud)),
+                );
+            }
+            Some(BaudAction::Switch(baud)) => {
+                self.set_baud(baud);
+                term::link_event(now_ms(), format_args!("peer acknowledged: switched to {}", term::Baud(baud)));
+            }
+            Some(BaudAction::Confirmed(baud)) => {
+                term::link_event(now_ms(), format_args!("✓ frames arrive at {}: switch confirmed", term::Baud(baud)));
+            }
+            _ => {}
+        }
+    }
+
+    fn timers(&mut self) {
+        let now = now_us();
+        match self.baud.tick(now, self.peer.timeout_us(&self.cfg)) {
+            Some(BaudAction::NoAck(baud)) => term::link_event(
+                now_ms(),
+                format_args!(
+                    "✗ no answer to the switch to {}: staying at {}",
+                    term::Baud(baud),
+                    term::Baud(self.baud.current())
+                ),
+            ),
+            Some(BaudAction::Revert { from, to }) => {
+                self.set_baud(to);
+                term::link_event(
+                    now_ms(),
+                    format_args!("✗ no valid frame at {}: back to {}", term::Baud(from), term::Baud(to)),
+                );
+            }
+            _ => {}
+        }
+        if self.burst_rx.as_ref().is_some_and(|rx| rx.is_stale(now)) {
+            self.finish_burst_rx();
+        }
+    }
+
+    // --- Bursts -------------------------------------------------------------------
+
+    fn start_burst(&mut self, count: u32, rate_hz: f32) {
+        if self.burst_tx.is_some() {
+            term::cli_error(format_args!("a burst is already being sent"));
+            return;
+        }
+        self.burst_id = self.burst_id.wrapping_add(1);
+        term::burst_start(now_ms(), self.burst_id, count, rate_hz);
+        self.burst_tx = Some(BurstTx::new(self.burst_id, count, rate_hz, now_us()));
+    }
+
+    fn burst_tx_step(&mut self) {
+        let Some(tx) = self.burst_tx.as_mut() else { return };
+        let slice_end = now_us() + BURST_SLICE_US;
+        while now_us() < slice_end {
+            let Some(index) = tx.next(now_us()) else { break };
+            let frame = Frame {
+                node: self.cfg.name,
+                seq: tx.id,
+                t_ms: now_ms() as u32,
+                payload: Payload::Burst { index, count: tx.count },
+            };
+            let line = protocol::encode(&frame);
+            if self.link.send(line.as_bytes()).is_err() {
+                term::uart_error(now_ms(), "TX error during burst");
+                break;
+            }
+            tx.sent(line.len());
+            self.leds.on_tx();
+        }
+        if tx.is_done() {
+            let (id, frames, throughput) = (tx.id, tx.sent, tx.throughput());
+            self.burst_tx = None;
+            term::burst_sent(now_ms(), id, frames, &throughput, self.baud.current());
+        }
+    }
+
+    fn burst_frame(&mut self, node: &str, id: u32, index: u32, count: u32, bytes: usize, now: u64) {
+        if !self.burst_rx.as_ref().is_some_and(|rx| rx.matches(node, id)) {
+            self.finish_burst_rx(); // a previous burst that lost its end
+            self.burst_rx = Some(BurstRx::new(node, id, count, now));
+        }
+        if let Some(rx) = self.burst_rx.as_mut() {
+            rx.frame(index, bytes, now);
+            if rx.is_complete() {
+                self.finish_burst_rx();
+            }
+        }
+    }
+
+    fn finish_burst_rx(&mut self) {
+        if let Some(rx) = self.burst_rx.take() {
+            term::burst_received(now_ms(), &rx.node, rx.id, &rx.summary(), self.baud.current());
+        }
+    }
+
+    // --- CLI --------------------------------------------------------------------
+
+    /// Pushes the (possibly changed) config to the parts that keep their own copy.
+    fn sync(&mut self) {
+        self.fx.settings = fx_settings(&self.cfg.rgb);
+        self.leds.modes = [self.cfg.led1, self.cfg.led2];
+        self.button.set_timing(ms(self.cfg.debounce_ms), ms(self.cfg.lockout_ms));
+        rtt_console::set_route(self.cfg.console);
+    }
+
+    /// `set <key> <value>`: validates, applies, and reports the result.
+    fn set_key(&mut self, key: &str, value: &str) {
+        use config::{Key, SetError};
+        match self.cfg.set(key, value) {
+            Ok(k) => {
+                if k == Key::Console {
+                    // Confirm on both sides before switching, so the console being
+                    // left knows where the output went.
+                    rtt_console::set_route(config::Console::Both);
+                    term::cli_ok(format_args!(
+                        "{} = {}{}",
+                        k.name(),
+                        self.cfg.value(k),
+                        console_note(self.cfg.console)
+                    ));
+                    self.sync();
+                    return;
+                }
+                self.sync();
+                term::cli_ok(format_args!("{} = {}", k.name(), self.cfg.value(k)));
+                if k == Key::RgbPattern {
+                    term::cli_status(&self.fx.settings, self.fx.last, &self.leds);
+                }
+            }
+            Err(SetError::UnknownKey) => term::cli_error(format_args!("unknown key `{key}` (see `config`)")),
+            Err(SetError::ReadOnly) => term::cli_error(format_args!(
+                "`{key}` is read-only: change it in src/bin/node_*.rs (or config::shared) and rebuild"
+            )),
+            Err(SetError::BadValue(expected)) => term::cli_error(format_args!("`{key}`: expected {expected}")),
+            Err(SetError::Invalid(msg)) => term::cli_error(format_args!("{}", msg.trim_start_matches("config: "))),
+        }
+    }
+
+    /// Applies a CLI command and reports the result.
+    fn apply(&mut self, cmd: cli::Command) {
+        use cli::Command;
+        use config::Key;
+
+        match cmd {
+            Command::Help(topic) => term::cli_help(topic.as_deref(), &self.cfg, self.defaults),
+            Command::List => term::cli_list(self.fx.settings.pattern),
+            Command::Status => term::cli_status(&self.fx.settings, self.fx.last, &self.leds),
+            Command::Config => term::cli_config(&self.cfg, self.defaults),
+            Command::Set { key, value } => self.set_key(&key, &value),
+            Command::NextPattern => {
+                let next = (self.fx.settings.pattern + 1) % fx::PATTERNS.len();
+                self.set_key("rgb.pattern", fx::PATTERNS[next].name);
+            }
+            Command::Reset(None) => {
+                self.cfg = *self.defaults;
+                self.sync();
+                term::cli_ok(format_args!("all settings back to their build values"));
+            }
+            Command::Reset(Some(key)) => match Key::from_name(&key) {
+                Some(k) => {
+                    self.cfg.reset(k, self.defaults);
+                    self.sync();
+                    term::cli_ok(format_args!("{} = {}  (build value)", k.name(), self.cfg.value(k)));
+                }
+                None if config::READ_ONLY.contains(&key.as_str()) => {
+                    term::cli_error(format_args!("`{key}` is read-only, it always has its build value"))
+                }
+                None => term::cli_error(format_args!("unknown key `{key}` (see `config`)")),
+            },
+            Command::Info => term::boot_card(
+                &self.cfg,
+                &chip_info(&self.rng),
+                &system_info(&self.cfg, self.defaults, self.boot_load),
+            ),
+            Command::Save => match self.store.save(&self.cfg, self.defaults) {
+                Ok(0) => term::cli_ok(format_args!("saved: nothing differs from the build config, boots on it")),
+                Ok(n) => term::cli_ok(format_args!("saved {n} setting(s): applied at every boot (`forget` to erase)")),
+                Err(e) => term::cli_error(format_args!("not saved: {e}")),
+            },
+            Command::Forget => match self.store.forget() {
+                Ok(()) => term::cli_ok(format_args!("saved settings erased: next boot uses the build config")),
+                Err(e) => term::cli_error(format_args!("{e}")),
+            },
+            Command::Reboot => {
+                term::cli_ok(format_args!("rebooting…"));
+                // Let the console drain the message before the reset.
+                let t = Instant::now();
+                while t.elapsed() < Duration::from_millis(50) {}
+                esp_hal::system::software_reset();
+            }
+            Command::Baud(None) => term::baud_info(self.baud.current(), self.baud.boot()),
+            Command::Baud(Some(baud)) => match self.baud.request(baud, now_us()) {
+                Ok(()) => {
+                    term::link_event(now_ms(), format_args!("asking the peer to switch to {}…", term::Baud(baud)));
+                    self.send(Payload::Baud { baud, ack: false }, None);
+                }
+                Err(BaudError::Same) => term::cli_error(format_args!("the link is already at {}", term::Baud(baud))),
+                Err(BaudError::Busy) => term::cli_error(format_args!("a speed change is already in progress")),
+            },
+            Command::Burst { count: None, rate_hz: None } => self.cli.start_burst_wizard(self.cfg.burst),
+            Command::Burst { count, rate_hz } => {
+                self.start_burst(count.unwrap_or(self.cfg.burst.count), rate_hz.unwrap_or(self.cfg.burst.rate_hz));
             }
         }
     }
 }
 
-/// Pushes the (possibly changed) config to the parts that keep their own copy.
-fn sync(cfg: &NodeConfig, fx: &mut fx::Animator, leds: &mut ExtLeds, button: &mut Button) {
-    fx.settings = fx_settings(&cfg.rgb);
-    leds.modes = [cfg.led1, cfg.led2];
-    button.set_timing(ms(cfg.debounce_ms), ms(cfg.lockout_ms));
-}
-
-/// `set <key> <value>`: validates, applies, and reports the result.
-fn set_key(cfg: &mut NodeConfig, key: &str, value: &str, fx: &mut fx::Animator, leds: &mut ExtLeds, button: &mut Button) {
-    use config::{Key, SetError};
-    match cfg.set(key, value) {
-        Ok(k) => {
-            sync(cfg, fx, leds, button);
-            term::cli_ok(format_args!("{} = {}", k.name(), cfg.value(k)));
-            if k == Key::RgbPattern {
-                term::cli_status(&fx.settings, leds);
-            }
-        }
-        Err(SetError::UnknownKey) => term::cli_error(format_args!("unknown key `{key}` (see `config`)")),
-        Err(SetError::ReadOnly) => term::cli_error(format_args!(
-            "`{key}` is read-only: change it in src/bin/uart_node_*.rs (or config::shared) and rebuild"
-        )),
-        Err(SetError::BadValue(expected)) => term::cli_error(format_args!("`{key}`: expected {expected}")),
-        Err(SetError::Invalid(msg)) => term::cli_error(format_args!("{}", msg.trim_start_matches("config: "))),
-    }
-}
-
-/// Applies a CLI command and reports the result.
-fn apply(
-    cmd: cli::Command,
-    cfg: &mut NodeConfig,
+/// Compiled-in features and saved settings, for the boot card.
+fn system_info(
+    cfg: &NodeConfig,
     defaults: &NodeConfig,
-    fx: &mut fx::Animator,
-    leds: &mut ExtLeds,
-    button: &mut Button,
-) {
-    use cli::Command;
-    use config::Key;
-
-    match cmd {
-        Command::Help(topic) => term::cli_help(topic.as_deref(), cfg, defaults),
-        Command::List => term::cli_list(fx.settings.pattern),
-        Command::Status => term::cli_status(&fx.settings, leds),
-        Command::Config => term::cli_config(cfg, defaults),
-        Command::Set { key, value } => set_key(cfg, &key, &value, fx, leds, button),
-        Command::NextPattern => {
-            let next = (fx.settings.pattern + 1) % fx::PATTERNS.len();
-            set_key(cfg, "rgb.pattern", fx::PATTERNS[next].name, fx, leds, button);
-        }
-        Command::Reset(None) => {
-            *cfg = *defaults;
-            sync(cfg, fx, leds, button);
-            term::cli_ok(format_args!("all settings back to their build values"));
-        }
-        Command::Reset(Some(key)) => match Key::from_name(&key) {
-            Some(k) => {
-                cfg.reset(k, defaults);
-                sync(cfg, fx, leds, button);
-                term::cli_ok(format_args!("{} = {}  (build value)", k.name(), cfg.value(k)));
-            }
-            None if config::READ_ONLY.contains(&key.as_str()) => {
-                term::cli_error(format_args!("`{key}` is read-only, it always has its build value"))
-            }
-            None => term::cli_error(format_args!("unknown key `{key}` (see `config`)")),
-        },
+    boot_load: settings::BootLoad,
+) -> term::SystemInfo {
+    term::SystemInfo {
+        features: [
+            ("persist", cfg!(feature = "persist")),
+            ("watchdog", cfg!(feature = "watchdog")),
+            ("rtt", cfg!(feature = "rtt")),
+        ],
+        boot_load,
+        unsaved: persist::changed(cfg, defaults),
+        watchdog_ms: cfg!(feature = "watchdog").then_some(WATCHDOG_MS),
     }
 }
 
@@ -322,7 +744,8 @@ fn chip_info(rng: &Rng) -> term::ChipInfo {
     let rev = esp_hal::efuse::chip_revision();
     let mut reset = heapless::String::new();
     let _ = match esp_hal::system::reset_reason() {
-        Some(reason) => write!(reset, "{reason:?}"),
+        // Name and raw code, as printed by the ROM at boot (`rst:0x17`).
+        Some(reason) => write!(reset, "{reason:?} (rst 0x{:02X})", reason as u32),
         None => write!(reset, "unknown"),
     };
     let mut mac = [0u8; 6];
@@ -334,62 +757,5 @@ fn chip_info(rng: &Rng) -> term::ChipInfo {
         mac,
         reset,
         rng_samples: [rng.random(), rng.random(), rng.random()],
-    }
-}
-
-/// Decodes one received line. Returns whether it was a valid frame.
-fn handle_line(line: &[u8], stats: &mut Stats, peer: &mut Peer, verbose: bool) -> bool {
-    let parsed = core::str::from_utf8(line)
-        .map_err(|_| protocol::ParseError::Malformed)
-        .and_then(protocol::parse);
-    let frame = match parsed {
-        Ok(frame) => frame,
-        Err(e) => {
-            stats.bad += 1;
-            term::rx_error(now_ms(), e, line);
-            return false;
-        }
-    };
-
-    stats.rx += 1;
-    let since_previous = peer.last_rx.map(|t| t.elapsed().as_millis());
-    peer.last_rx = Some(Instant::now());
-    match peer.seq {
-        Some(prev) if frame.seq > prev.wrapping_add(1) => {
-            let missing = frame.seq - prev - 1;
-            stats.lost += missing;
-            term::lost(now_ms(), missing);
-        }
-        Some(prev) if frame.seq <= prev => term::peer_restarted(now_ms(), frame.node),
-        _ => {}
-    }
-    peer.seq = Some(frame.seq);
-    match frame.payload {
-        Payload::Data { pressed, period_ms, .. } => {
-            peer.button = pressed;
-            peer.period_ms = Some(period_ms);
-        }
-        Payload::Event { edge, .. } => peer.button = edge == Edge::Falling,
-    }
-    term::received(now_ms(), &frame);
-    if verbose {
-        term::wire(line, since_previous);
-    }
-    true
-}
-
-/// Encodes and sends `frame`; returns the line sent (shown in verbose mode).
-fn send(link: &mut Link, frame: &Frame<'_>, stats: &mut Stats, leds: &mut ExtLeds) -> Option<heapless::String<MAX_FRAME>> {
-    let line = protocol::encode(frame);
-    match link.send(line.as_bytes()) {
-        Ok(()) => {
-            stats.tx += 1;
-            leds.on_tx();
-            Some(line)
-        }
-        Err(_) => {
-            term::uart_error(now_ms(), "TX error");
-            None
-        }
     }
 }

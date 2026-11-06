@@ -1,0 +1,113 @@
+# Tests, firmware build and documentation site.
+#
+# - Every push and pull request: formatting, host tests (including the check that
+#   the generated reference pages match the code), firmware build + clippy for each
+#   Cargo feature combination, site build.
+# - Push to `main`: the site (Zensical pages + rustdoc API) is published on GitHub
+#   Pages. Repository setting needed once: Settings > Pages > Source: GitHub Actions.
+#
+# On-target tests (`cargo test-target`) need a board, so they don't run here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup component add rustfmt
+      - name: rustfmt (rustfmt.toml)
+        run: cargo fmt --all -- --check
+
+  host-tests:
+    name: Host tests (workshop-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # rust-toolchain.toml selects stable + the RISC-V target; rustup installs it.
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit, property and doc tests + generated pages up to date
+        run: cargo test-host --locked
+      - name: Clippy (core, host)
+        run: cargo clippy -p workshop-core --target host-tuple --all-targets -- -D warnings
+
+  firmware:
+    name: Firmware (${{ matrix.features.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each Cargo feature must build on its own: features are additive, and a
+        # `#[cfg]` mistake usually only shows up with a feature off.
+        features:
+          - { name: default, flags: "" }
+          - { name: none, flags: "--no-default-features" }
+          - { name: all, flags: "--all-features" }
+          - { name: rtt only, flags: "--no-default-features --features rtt" }
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.features.name }}
+      - name: Build both nodes
+        run: cargo build --release --locked ${{ matrix.features.flags }}
+      - name: Clippy (firmware)
+        run: cargo clippy --release --locked ${{ matrix.features.flags }} -- -D warnings
+
+  site:
+    name: Documentation site
+    needs: [format, host-tests, firmware]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install zensical
+      - name: Pages
+        run: zensical build --clean
+      - name: API documentation (rustdoc)
+        run: |
+          cargo doc -p workshop-core --target host-tuple --no-deps
+          cargo doc -p esp32-rust-workshop --no-deps
+          mkdir -p site/api/core site/api/firmware
+          cp -r target/"$(rustc --print host-tuple)"/doc/. site/api/core/
+          cp -r target/riscv32imafc-unknown-none-elf/doc/. site/api/firmware/
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Publish on GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: site
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/configure-pages@v6
+      - uses: actions/deploy-pages@v5
+        id: deployment

@@ -1,0 +1,41 @@
+# cargo-embed settings (probe-rs): RTT console of a firmware built with `--features rtt`.
+#
+#   espflash flash --chip esp32s31 --port <port> target/riscv32imafc-unknown-none-elf/release/node-a
+#   cargo embed --release --features rtt --bin node-a --probe <id>
+#
+# Flashing is DISABLED on purpose: probe-rs 0.32 writes the chip revision it reads
+# (v3.4 on our boards, which are v0.0) as the app's *minimum* revision, so the
+# bootloader refuses the app and the board boot-loops until reflashed with espflash.
+# Flash with espflash (or `cargo run`), then let cargo-embed only attach.
+
+[default.general]
+chip = "esp32s31"
+
+[default.probe]
+# The board's built-in USB Serial/JTAG.
+protocol = "Jtag"
+
+[default.flashing]
+enabled = false
+
+[default.reset]
+# Attach to the running firmware; the script resets it right after flashing.
+enabled = false
+
+[default.rtt]
+enabled = true
+# Wait up to 5 s for the RTT control block (the firmware sets it up at boot).
+timeout = 5000
+up_channels = [
+    { channel = 0, mode = "NoBlockTrim", format = "String", show_timestamps = true },
+]
+down_channels = [
+    { channel = 0, mode = "NoBlockSkip" },
+]
+# One tab: the console, with an input line that goes to the CLI (down channel 0).
+tabs = [
+    { up_channel = 0, down_channel = 0, name = "console" },
+]
+
+[default.gdb]
+enabled = false

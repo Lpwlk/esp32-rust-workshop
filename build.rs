@@ -1,5 +1,7 @@
 fn main() {
     linker_be_nice();
+    // On-target tests (tests/hil.rs, `cargo test-target`) are embedded-test binaries.
+    println!("cargo:rustc-link-arg-tests=-Tembedded-test.x");
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
     build_info();
@@ -35,20 +37,24 @@ fn build_info() {
     };
     set("BUILD_GIT", &git);
 
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     set("BUILD_DATE", &format_utc(secs));
 
-    for (key, var) in [("BUILD_PROFILE", "PROFILE"), ("BUILD_OPT_LEVEL", "OPT_LEVEL"), ("BUILD_TARGET", "TARGET"), ("BUILD_HOST", "HOST")] {
+    for (key, var) in [
+        ("BUILD_PROFILE", "PROFILE"),
+        ("BUILD_OPT_LEVEL", "OPT_LEVEL"),
+        ("BUILD_TARGET", "TARGET"),
+        ("BUILD_HOST", "HOST"),
+    ] {
         set(key, &env::var(var).unwrap_or_else(|_| "?".into()));
     }
 
     let manifest = std::fs::read_to_string("Cargo.toml").unwrap_or_default();
     let edition = manifest
         .lines()
-        .find_map(|l| l.trim().strip_prefix("edition")?.trim().strip_prefix('=').map(|v| v.trim().trim_matches('"').to_string()))
+        .find_map(|l| {
+            l.trim().strip_prefix("edition")?.trim().strip_prefix('=').map(|v| v.trim().trim_matches('"').to_string())
+        })
         .unwrap_or_else(|| "?".into());
     set("BUILD_EDITION", &edition);
 
@@ -81,12 +87,7 @@ fn format_utc(secs: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 fn linker_be_nice() {
@@ -148,8 +149,5 @@ fn linker_be_nice() {
         std::process::exit(0);
     }
 
-    println!(
-        "cargo:rustc-link-arg=--error-handling-script={}",
-        std::env::current_exe().unwrap().display()
-    );
+    println!("cargo:rustc-link-arg=--error-handling-script={}", std::env::current_exe().unwrap().display());
 }

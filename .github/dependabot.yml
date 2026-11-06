@@ -1,0 +1,16 @@
+# Weekly pull requests for outdated dependencies. esp-hal & co. move fast and
+# break APIs between minor versions: review their changelogs before merging.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      esp-rs:
+        patterns: ["esp-*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: pip
+    directory: /scripts
+    schedule: { interval: monthly }

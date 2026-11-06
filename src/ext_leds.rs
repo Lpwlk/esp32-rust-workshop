@@ -2,30 +2,29 @@
 //!
 //! Wiring per LED: GPIO -> 330 Ω resistor -> LED anode (long leg), cathode -> GND.
 //! At 3.3 V that's ~4 mA for a red LED, well within the GPIO limits.
+//!
+//! What each mode shows is decided by [`workshop_core::leds::led_on`] (tested on
+//! the host); this module only drives the pins.
 
 use esp_hal::{
     gpio::{AnyPin, Level, Output, OutputConfig},
-    time::{Duration, Instant},
+    time::Instant,
+};
+pub use workshop_core::leds::LedInputs;
+use workshop_core::{
+    config::LedMode,
+    leds::{Activity, led_on},
 };
 
-use crate::config::LedMode;
-
-/// How long an LED stays on for one `rx`/`tx` flash.
-const FLASH: Duration = Duration::from_millis(40);
-
-/// Inputs the LED modes can follow, refreshed by the main loop.
-pub struct LedInputs {
-    pub button: bool,
-    pub peer_button: bool,
-    pub link_up: bool,
+fn now_ms() -> u64 {
+    Instant::now().duration_since_epoch().as_millis()
 }
 
 pub struct ExtLeds {
     outputs: [Output<'static>; 2],
     pub modes: [LedMode; 2],
     pub pins: [u8; 2],
-    last_rx: Option<Instant>,
-    last_tx: Option<Instant>,
+    activity: Activity,
 }
 
 impl ExtLeds {
@@ -38,35 +37,23 @@ impl ExtLeds {
             ],
             modes,
             pins: [n1, n2],
-            last_rx: None,
-            last_tx: None,
+            activity: Activity::default(),
         }
     }
 
     pub fn on_rx(&mut self) {
-        self.last_rx = Some(Instant::now());
+        self.activity.last_rx_ms = Some(now_ms());
     }
 
     pub fn on_tx(&mut self) {
-        self.last_tx = Some(Instant::now());
+        self.activity.last_tx_ms = Some(now_ms());
     }
 
     /// Recomputes both LEDs; call every loop iteration (cheap: two register writes).
     pub fn update(&mut self, inputs: &LedInputs) {
-        let now_ms = Instant::now().duration_since_epoch().as_millis();
-        let flashing = |t: Option<Instant>| t.is_some_and(|t| t.elapsed() < FLASH);
+        let now = now_ms();
         for (out, mode) in self.outputs.iter_mut().zip(self.modes) {
-            let on = match mode {
-                LedMode::Off => false,
-                LedMode::On => true,
-                LedMode::Blink { period_ms } => now_ms % u64::from(period_ms.max(2)) < u64::from(period_ms / 2),
-                LedMode::Button => inputs.button,
-                LedMode::PeerButton => inputs.peer_button,
-                LedMode::Link => inputs.link_up,
-                LedMode::RxFlash => flashing(self.last_rx),
-                LedMode::TxFlash => flashing(self.last_tx),
-            };
-            out.set_level(Level::from(on));
+            out.set_level(Level::from(led_on(mode, inputs, self.activity, now)));
         }
     }
 }

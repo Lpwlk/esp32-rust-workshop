@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4b1791b57f7f43472f8f96523ce460058270330d05a186618d1c9966a3c68005 # shrinks to (name, seq, t_ms, payload) = ("-Bx", 2628889658, 1775749024, Event { edge: Falling, key: 7868062953044085122 }), pos = Index(18111348726914832496), flip = 32

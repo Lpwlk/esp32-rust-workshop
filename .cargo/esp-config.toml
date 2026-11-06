@@ -1,0 +1,14 @@
+# Settings of the esp-rs crates themselves (esp-hal, esp-println, esp-bootloader…),
+# read at build time through `ESP_<CRATE>_CONFIG_<OPTION>` environment variables.
+# Included by .cargo/config.toml. Each crate lists its options in its
+# `esp_config.yml` and in its docs ("Configuration" section).
+#
+# This firmware keeps the defaults. To change one, uncomment it and rebuild.
+[env]
+# Interrupt tables and constants in RAM: faster interrupts, a bit more RAM (default true).
+# ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
+# A watchpoint on the stack guard: a stack overflow panics instead of silently
+# corrupting memory (default true).
+# ESP_HAL_CONFIG_STACK_GUARD_MONITORING = "false"
+# Log level of the `log` crate: not used by this firmware (it prints directly).
+# ESP_LOG = "info"
