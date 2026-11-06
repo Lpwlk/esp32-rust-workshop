@@ -1,0 +1,22 @@
+[package]
+description  = "Hardware-independent logic of the UART workshop firmware, unit-tested on the host."
+name         = "workshop-core"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+publish.workspace      = true
+repository.workspace   = true
+
+# Plain `no_std` Rust, no esp-hal: this crate builds for the ESP32-S31 (the firmware
+# uses it) and for the host, where `cargo test-host` runs its tests and doc examples.
+
+[dependencies]
+heapless.workspace         = true
+smart-leds-trait.workspace = true
+
+[dev-dependencies]
+# Property-based tests (host only: dev-dependencies are never built for the firmware).
+proptest = { version = "1.7", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

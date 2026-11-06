@@ -1,0 +1,7 @@
+# Code style, enforced by CI (`cargo fmt --all -- --check`). Run `cargo fmt --all`
+# or `python3 scripts/dev.py format` before committing.
+#
+# Wide lines and "Max" heuristics: keeps short `if`/`match` arms and struct
+# literals on one line, the style this firmware was written in.
+max_width = 120
+use_small_heuristics = "Max"

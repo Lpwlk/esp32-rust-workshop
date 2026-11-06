@@ -1,0 +1,11 @@
+<!-- Generated from the source by `workshop_core::docgen`. Do not edit: run `UPDATE_DOCS=1 cargo test-host`. -->
+
+# RGB patterns
+
+| # | Name | Keys | Description |
+|---|---|---|---|
+| 1 | `viridis` | <span style="background:#440154" title="#440154">&nbsp;&nbsp;&nbsp;</span><span style="background:#3B528B" title="#3B528B">&nbsp;&nbsp;&nbsp;</span><span style="background:#21918C" title="#21918C">&nbsp;&nbsp;&nbsp;</span><span style="background:#5EC962" title="#5EC962">&nbsp;&nbsp;&nbsp;</span><span style="background:#FDE725" title="#FDE725">&nbsp;&nbsp;&nbsp;</span><span style="background:#5EC962" title="#5EC962">&nbsp;&nbsp;&nbsp;</span><span style="background:#21918C" title="#21918C">&nbsp;&nbsp;&nbsp;</span><span style="background:#3B528B" title="#3B528B">&nbsp;&nbsp;&nbsp;</span> | matplotlib's viridis: purple, blue, teal, green, yellow |
+| 2 | `sunset` | <span style="background:#FFAA00" title="#FFAA00">&nbsp;&nbsp;&nbsp;</span><span style="background:#FF5A00" title="#FF5A00">&nbsp;&nbsp;&nbsp;</span><span style="background:#FF1E50" title="#FF1E50">&nbsp;&nbsp;&nbsp;</span><span style="background:#9600A0" title="#9600A0">&nbsp;&nbsp;&nbsp;</span> | gold, orange, coral, purple dusk |
+| 3 | `ocean` | <span style="background:#0028FF" title="#0028FF">&nbsp;&nbsp;&nbsp;</span><span style="background:#008CFF" title="#008CFF">&nbsp;&nbsp;&nbsp;</span><span style="background:#00E6C8" title="#00E6C8">&nbsp;&nbsp;&nbsp;</span><span style="background:#00B4FF" title="#00B4FF">&nbsp;&nbsp;&nbsp;</span> | deep blue, azure, lagoon turquoise |
+| 4 | `aurora` | <span style="background:#00FF6E" title="#00FF6E">&nbsp;&nbsp;&nbsp;</span><span style="background:#00BEFF" title="#00BEFF">&nbsp;&nbsp;&nbsp;</span><span style="background:#6E28FF" title="#6E28FF">&nbsp;&nbsp;&nbsp;</span><span style="background:#00FFB4" title="#00FFB4">&nbsp;&nbsp;&nbsp;</span> | northern lights: emerald, ice blue, violet |
+| 5 | `sakura` | <span style="background:#FF508C" title="#FF508C">&nbsp;&nbsp;&nbsp;</span><span style="background:#FF96BE" title="#FF96BE">&nbsp;&nbsp;&nbsp;</span><span style="background:#BE78FF" title="#BE78FF">&nbsp;&nbsp;&nbsp;</span><span style="background:#FFC8DC" title="#FFC8DC">&nbsp;&nbsp;&nbsp;</span> | cherry blossom: pink, pale rose, lavender |

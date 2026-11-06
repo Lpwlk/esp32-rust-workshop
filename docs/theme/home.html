@@ -1,0 +1,60 @@
+{#-
+  Home page template (front matter of docs/book/index.md: `template: home.html`).
+  Adds a hero above the page content; styles in docs/book/assets/stylesheets/home.css.
+-#}
+{% extends "main.html" %}
+
+{% block hero %}
+<section class="ws-hero">
+  <div class="ws-hero__inner">
+
+    <div class="ws-hero__text">
+      <span class="ws-pill">
+        <span class="ws-pill__dot"></span>
+        no_std Rust · esp-hal 1.2 · ESP32-S31
+      </span>
+
+      <h1 class="ws-hero__title">
+        Two boards, one wire,<br>
+        <span class="ws-gradient">5&nbsp;Mbaud.</span>
+      </h1>
+
+      <p class="ws-hero__subtitle">
+        A hands-on firmware workshop: two ESP32-S31 boards talk over UART,
+        debounce a jumper button, drive LEDs, change speed together and measure
+        their link, all configurable from a live CLI.
+      </p>
+
+      <div class="ws-hero__actions">
+        <a href="{{ 'getting-started/' | url }}" class="md-button md-button--primary">
+          Get started
+        </a>
+        <a href="{{ 'wiring/' | url }}" class="md-button">Wiring</a>
+        <a href="{{ 'guide-rust/' | url }}" class="md-button">Rust &amp; Cargo guide</a>
+      </div>
+
+      <dl class="ws-stats">
+        <div><dt>5 Mbaud</dt><dd>UART link, 0 % rate error</dd></div>
+        <div><dt>5</dt><dd>frame types, XOR-checked</dd></div>
+        <div><dt>~100</dt><dd>host tests, property tests included</dd></div>
+        <div><dt>0</dt><dd>hand-written reference pages</dd></div>
+      </dl>
+    </div>
+
+    <div class="ws-term" aria-label="Example of the board console">
+      <div class="ws-term__bar">
+        <span></span><span></span><span></span>
+        <em>espflash monitor · node-a</em>
+      </div>
+<pre class="ws-term__body"><code><span class="g">     2.539</span> <span class="c">TX ▶</span> <span class="b-dat"> DAT </span> <span class="g">#00000</span>          btn <span class="g">○ released</span>
+<span class="g">     4.083</span> <span class="ok">RX ◀</span> <span class="b-dat"> DAT </span> <span class="g">#00005</span> <span class="y">node-B</span>  btn <span class="y">● pressed</span>
+<span class="g">     6.210</span> <span class="ok">RX ◀</span> <span class="b-evt"> EVT </span> <span class="g">#00006</span> <span class="y">node-B</span>  <span class="y">▼ FALL</span>  key <b>0x9F3A21C4E07B5D12</b>
+<span class="g">     7.539</span> <span class="c">TX ▶</span> <span class="b-lnk"> BAU </span> <span class="g">#00003</span>          <b>REQ</b> 1 Mbaud
+<span class="g">     7.544</span> <span class="m">LINK ⇄  peer acknowledged: switched to 1 Mbaud</span>
+<span class="g">──── 10s ── tx 4 · rx 4 · lost 0 · bad 0 ──</span> <span class="ok-b">● link UP</span>
+<span class="p">cli ›</span> burst 1000 max<span class="ws-cursor"></span></code></pre>
+    </div>
+
+  </div>
+</section>
+{% endblock %}
