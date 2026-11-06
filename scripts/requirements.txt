@@ -2,4 +2,4 @@
 rich>=13          # console and logs of dev.py
 pyserial>=3.5     # finds the boards on USB (scripts/boards.py)
 zensical>=0.1     # documentation site
-black>=24         # Python formatting (dev.py format)
+black>=26.10.1         # Python formatting (dev.py format)
