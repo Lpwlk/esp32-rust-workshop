@@ -68,6 +68,13 @@ hide:
 
 </div>
 
+## See it run { .ws-section }
+
+![Boot of node A: the boot card, then frames exchanged with node B](assets/demo/boot.gif)
+
+Real sessions, colors included: the [console tour](console.md) shows the CLI, the
+link tests and RTT.
+
 ## Quick start { .ws-section }
 
 === "Flash the boards"
@@ -113,6 +120,14 @@ Header J2 labels are GPIO numbers. Full details, resistor values and pins to avo
 -   :lucide-rocket:{ .lg .middle } [__Getting started__](getting-started.md)
 
     Toolchain, flashing, console, configuring a node.
+
+-   :lucide-terminal-square:{ .lg .middle } [__The console__](console.md)
+
+    Boot card, frame lines, CLI, link tests and RTT, in recordings.
+
+-   :lucide-code:{ .lg .middle } [__Examples__](examples.md)
+
+    Runnable Rust: frames, settings, debouncing, the CLI. Compiled by CI.
 
 -   :lucide-sliders-horizontal:{ .lg .middle } [__Configuration__](configuration.md)
 

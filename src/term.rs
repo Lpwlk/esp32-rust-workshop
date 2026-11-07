@@ -341,8 +341,8 @@ fn pad_visible<const N: usize>(s: &mut heapless::String<N>, width: usize) {
 /// One frame line, for both directions, in fixed columns:
 ///
 /// ```text
-///    12.513 TX ▶  DAT  #00004          btn ○ released  ev     3  Δ   357.206 ms ← RX
-///    14.656 RX ◀  DAT  #00004 node-B   btn ● pressed   ev     4  Δ  2142.821 ms ← TX
+///    12.513 TX ▶  DAT  #00004          btn ○ released  event     3  Δ   357.206 ms ← RX
+///    14.656 RX ◀  DAT  #00004 node-B   btn ● pressed   event     4  Δ  2142.821 ms ← TX
 ///    14.810 RX ◀  ECH  #00005 node-B   echo of #00004            rtt 182 µs
 ///    15.002 TX ▶  EVT  #00005          ▼ press    key 0123456789ABCDEF  3 edges
 /// ```

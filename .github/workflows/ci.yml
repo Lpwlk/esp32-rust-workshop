@@ -46,6 +46,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Unit, property and doc tests + generated pages up to date
         run: cargo test-host --locked
+      - name: Examples (crates/workshop-core/examples, included in the docs)
+        run: |
+          for ex in crates/workshop-core/examples/*.rs; do
+            echo "::group::$(basename "$ex")"
+            cargo run -q --locked -p workshop-core --target host-tuple --example "$(basename "$ex" .rs)"
+            echo "::endgroup::"
+          done
       - name: Clippy (core, host)
         run: cargo clippy -p workshop-core --target host-tuple --all-targets -- -D warnings
 

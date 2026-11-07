@@ -101,8 +101,9 @@ python3 scripts/dev.py docs api --open      # rustdoc of the core and the firmwa
 `.github/workflows/ci.yml`:
 
 1. **format**: `cargo fmt --all -- --check`;
-2. **host-tests**: `cargo test-host` (including the freshness check) and clippy on
-   the core;
+2. **host-tests**: `cargo test-host` (including the freshness check), every
+   example of `crates/workshop-core/examples/` (the code shown on the
+   [Examples](examples.md) page), and clippy on the core;
 3. **firmware**: release build of both nodes and clippy, for four Cargo feature
    combinations (default, none, all, `rtt` alone). The default build also:
     - writes a **Flash / RAM table** in the job summary (`scripts/memsize.py`); on a

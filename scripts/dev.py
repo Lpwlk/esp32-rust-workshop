@@ -351,6 +351,13 @@ def check() -> None:
             "clippy, core (host)",
             "cargo clippy -p workshop-core --target host-tuple --all-targets -- -D warnings".split(),
         ),
+        *[
+            (
+                f"example {ex.stem} (shown in the docs)",
+                f"cargo run -q -p workshop-core --target host-tuple --example {ex.stem}".split(),
+            )
+            for ex in sorted((ROOT / "crates/workshop-core/examples").glob("*.rs"))
+        ],
         ("firmware build", ["cargo", "build", "--release"]),
         ("clippy, firmware", "cargo clippy --release -- -D warnings".split()),
     ]

@@ -154,7 +154,8 @@ Wire the boards first ([Wiring](wiring.md)). What to look at:
 
 1. **format**: `cargo fmt --all -- --check`;
 2. **host tests**: `cargo test-host` (unit, property, doc tests, docs freshness),
-   then clippy on `workshop-core` with `-D warnings`;
+   the [examples](examples.md) (each one runs, with its `assert!`s), then clippy on
+   `workshop-core` with `-D warnings`;
 3. **firmware**: `cargo build --release` and clippy with `-D warnings`, for each
    Cargo feature combination (default, none, all, `rtt` alone), plus the Flash / RAM
    table in the job summary;
