@@ -69,6 +69,7 @@ mod imp {
     }
 
     impl Store {
+        // --8<-- [start:store]
         pub fn new(flash: FLASH<'static>) -> Self {
             let mut flash = FlashStorage::new(flash);
             let mut table = [0u8; partitions::PARTITION_TABLE_MAX_LEN];
@@ -94,6 +95,7 @@ mod imp {
                 Err(LoadError::OtherNode(_)) => BootLoad::OtherNode,
             }
         }
+        // --8<-- [end:store]
 
         /// Saves the settings of `live` that differ from `build`; returns how many.
         pub fn save(&mut self, live: &NodeConfig, build: &NodeConfig) -> Result<usize, StoreError> {
@@ -111,6 +113,7 @@ mod imp {
     }
 }
 
+// --8<-- [start:stub]
 #[cfg(not(feature = "persist"))]
 mod imp {
     use super::*;
@@ -138,3 +141,4 @@ mod imp {
 
 /// The saved-settings area in flash.
 pub use imp::Store;
+// --8<-- [end:stub]

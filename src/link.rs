@@ -25,6 +25,7 @@ use esp_hal::{
 use heapless::Deque;
 use workshop_core::wire::{rx_line_end_us, tx_line_end_us};
 
+// --8<-- [start:statics]
 const RX_BUFFER: usize = 2048;
 /// RX interrupt when the FIFO holds this many bytes (half of its 128 bytes)...
 const RX_FIFO_THRESHOLD: u16 = 64;
@@ -44,11 +45,13 @@ static RX_PEAK: AtomicU32 = AtomicU32::new(0);
 static RX_LINE_ENDS: Mutex<RefCell<Deque<u64, 32>>> = Mutex::new(RefCell::new(Deque::new()));
 /// Current baud rate, for the timing corrections in the interrupt.
 static BAUD: AtomicU32 = AtomicU32::new(0);
+// --8<-- [end:statics]
 
 fn now_us() -> u64 {
     Instant::now().duration_since_epoch().as_micros()
 }
 
+// --8<-- [start:isr]
 #[handler]
 fn on_uart1() {
     critical_section::with(|cs| {
@@ -96,6 +99,7 @@ fn on_uart1() {
         uart.clear_interrupts(UartInterrupt::RxFifoFull | UartInterrupt::RxTimeout);
     });
 }
+// --8<-- [end:isr]
 
 /// Byte counters, shown in verbose mode.
 pub struct Counters {
@@ -110,6 +114,7 @@ pub struct Link {
     tx_bytes: u32,
 }
 
+// --8<-- [start:init]
 fn uart_config(baud: u32) -> Config {
     Config::default()
         .with_baudrate(baud)
@@ -127,7 +132,9 @@ impl Link {
         });
         Link { tx_bytes: 0 }
     }
+    // --8<-- [end:init]
 
+    // --8<-- [start:send]
     /// Queues `data` for transmission. A frame (< 100 bytes) fits in the 128-byte
     /// TX FIFO, so this returns almost immediately, with the time (µs since boot)
     /// at which its last byte will have left on the wire.
@@ -145,6 +152,7 @@ impl Link {
             Ok(tx_line_end_us(queued_at, len, BAUD.load(Ordering::Relaxed)))
         })
     }
+    // --8<-- [end:send]
 
     /// Changes the baud rate. Waits until everything queued has left at the old
     /// speed (so a `BAU ACK` is fully sent before switching), then reconfigures the

@@ -1,14 +1,21 @@
+---
+hide:
+  - toc
+---
+
 # The console
 
 Everything the firmware does shows up on its console: over the **USB serial**
 port (`espflash monitor`) by default, or through the debug probe (**RTT**). Same
 text, same colors. The recordings on this page are real sessions on two
 ESP32-S31-Function-CoreBoard-1 boards (node A shown, node B running alongside),
-captured with `scripts/record.py`.
+captured with `scripts/record.py`. They are text, not videos: pause them, seek
+with the progress bar, or select and copy a line.
 
 ## Boot
 
-![Boot of node A: ROM, bootloader, then the boot card and the first frames](assets/demo/boot.gif)
+<div class="asciicast" data-cast="../assets/demo/boot.cast" data-poster="npt:0:12"></div>
+<p class="asciicast-caption">Node A after a reset: the boot card, then frames exchanged with node B · recorded on the boards, <a href="../assets/demo/boot.cast">.cast</a></p>
 
 After the ROM and the ESP-IDF bootloader, the firmware prints its **boot card**:
 everything that defines this node, in one screen.
@@ -60,7 +67,8 @@ The stats line comes every `status_period_ms`: frames sent and received, lost
 
 ## The CLI
 
-![Typing commands: help, a setting, a pattern, verbose mode](assets/demo/cli.gif)
+<div class="asciicast" data-cast="../assets/demo/cli.cast" data-poster="npt:0:7"></div>
+<p class="asciicast-caption"><code>help</code>, <code>help period</code>, <code>pattern ocean</code>, <code>period 4Hz</code> (Δ drops to 250 ms), <code>verbose</code> (raw frames on the wire) · recorded on the boards, <a href="../assets/demo/cli.cast">.cast</a></p>
 
 The prompt `cli ›` stays on the last line while frames scroll above it. It edits
 like a shell:
@@ -118,7 +126,8 @@ Every command, with its examples (each one is checked by a unit test):
 
 ## Link tests
 
-![Changing the speed of both nodes, then a burst of 500 frames](assets/demo/link.gif)
+<div class="asciicast" data-cast="../assets/demo/link.cast" data-poster="npt:0:10"></div>
+<p class="asciicast-caption"><code>baud 1M</code> confirmed by both nodes, <code>burst 500 max</code>, then back to 5 Mbaud · recorded on the boards, <a href="../assets/demo/link.cast">.cast</a></p>
 
 - **`baud 1M`**: node A asks (`BAU REQ`), node B answers (`ACK`) and both
   switch; the first `DAT` received at the new speed confirms it. Without an
@@ -133,7 +142,8 @@ Every command, with its examples (each one is checked by a unit test):
 
 ## RTT, through the debug probe
 
-![The same console, read over RTT with probe-rs](assets/demo/rtt.gif)
+<div class="asciicast" data-cast="../assets/demo/rtt.cast" data-poster="npt:0:9"></div>
+<p class="asciicast-caption"><code>probe-rs attach</code>: <code>info</code> and <code>pattern aurora</code> typed at probe-rs's <code>cli></code> prompt, answered over RTT · recorded on the boards, <a href="../assets/demo/rtt.cast">.cast</a></p>
 
 Built with `--features rtt`, the firmware also writes its console into RAM
 buffers that the probe reads in the background: no serial port, and it never
@@ -176,7 +186,7 @@ probe-rs.
 `set console serial|rtt|both|auto` chooses where the output goes at run time:
 [Logs and console](guide-rust.md#logs-and-console).
 
-## Recording these GIFs
+## Recording a session
 
 ```sh
 brew install agg gifsicle    # asciicast → GIF, then GIF compression

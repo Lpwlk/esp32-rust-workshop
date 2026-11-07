@@ -2,7 +2,8 @@
 
 From nothing to two boards talking, in four steps.
 
-![Boot of node A, then frames exchanged with node B](assets/demo/boot.gif)
+<div class="asciicast" data-cast="../assets/demo/boot.cast" data-poster="npt:0:12"></div>
+<p class="asciicast-caption">Node A after a reset: the boot card, then frames exchanged with node B · recorded on the boards, <a href="../assets/demo/boot.cast">.cast</a></p>
 
 ## 1. Install the tools
 

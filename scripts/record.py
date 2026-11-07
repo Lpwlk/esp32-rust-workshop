@@ -1,5 +1,8 @@
 """Record a terminal session as an asciicast (and a GIF) for the docs.
 
+The docs play the `.cast` files with asciinema-player (smooth, sharp, small);
+the GIFs are for the README, where GitHub runs no JavaScript.
+
 Runs a command (usually `espflash monitor` or `probe-rs attach`) in a
 pseudo-terminal of a fixed size, so it prints exactly what a user sees, colors
 included. It types scripted input like a person would (one key at a time), and
@@ -154,29 +157,15 @@ def main() -> None:
             )
         gif = args.cast.with_suffix(".gif")
         subprocess.run(
-            [
-                "agg",
-                "--theme",
-                "monokai",
-                "--font-size",
-                "14",
-                "--idle-time-limit",
-                "1.5",
-                "--speed",
-                str(args.speed),
-                "--last-frame-duration",
-                "4",
-                str(args.cast),
-                str(gif),
-            ],
+            ["agg", "--theme", "monokai", "--font-size", "15", "--line-height", "1.3",
+             "--idle-time-limit", "1.2", "--speed", str(args.speed),
+             "--last-frame-duration", "3", str(args.cast), str(gif)],
             check=True,
-        )
+        )  # fmt: skip
         if shutil.which("gifsicle"):
-            # Each scroll redraws the whole screen: lossy + a small palette divides
-            # the size by 2-3 without visible loss on terminal colors.
-            subprocess.run(
-                ["gifsicle", "-O3", "--lossy=60", "--colors", "32", "-b", str(gif)], check=True
-            )
+            # Lossless: a 256-color palette is plenty for a terminal. (Lossy
+            # compression halves the size again, but smears gradients and text.)
+            subprocess.run(["gifsicle", "-O3", "--colors", "256", "-b", str(gif)], check=True)
         print(f"{gif}: {gif.stat().st_size // 1024} KB")
 
 

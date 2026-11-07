@@ -1,7 +1,7 @@
 //! Firmware for node-B.
 //!
 //! Per-node settings: override any field of `NodeConfig::DEFAULT` below
-//! (see `src/config.rs` for all of them, their meaning and limits). Settings that
+//! (see `crates/workshop-core/src/config.rs`, or the settings reference). Settings that
 //! must match on both nodes, like the baud rate, are in `config::shared` instead.
 #![no_std]
 #![no_main]

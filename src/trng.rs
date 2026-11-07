@@ -9,6 +9,7 @@
 //! (`components/hal/esp32s31/include/hal/trng_ll.h`). Remove it once esp-hal
 //! enables the TRNG itself on the S31.
 
+// --8<-- [start:trng]
 /// `LP_PERI_CLKRST.rng_ctrl`: bit 30 = bus clock enable, bit 31 = reset.
 const LP_PERI_CLKRST_RNG_CTRL: u32 = 0x2071_0000 + 0x3c;
 /// `LP_TRNG.conf`: bit 30 = noise CRC enable, bit 31 = sampling enable.
@@ -29,3 +30,4 @@ pub fn enable() {
     modify(TRNG_DATE, |v| v | (1 << 28)); // TRNG clock on
     modify(TRNG_CONF, |v| v | (1 << 31) | (1 << 30)); // sampling + noise CRC on
 }
+// --8<-- [end:trng]

@@ -44,6 +44,7 @@ impl Source {
 
 const COUNT: usize = 2;
 
+// --8<-- [start:isr]
 /// Each button's pin, owned by the interrupt handler.
 static PINS: Mutex<RefCell<[Option<Input<'static>>; COUNT]>> = Mutex::new(RefCell::new([None, None]));
 /// Time of each button's last raw edge (µs since boot), `None` once handled.
@@ -72,8 +73,10 @@ fn on_gpio_edge() {
         }
     });
 }
+// --8<-- [end:isr]
 
 /// Owns the GPIO driver and its interrupt handler; create it once, then the buttons.
+// --8<-- [start:new]
 pub struct Gpio {
     _io: Io<'static>,
 }
@@ -109,6 +112,7 @@ impl Button {
         });
         Self { source, debouncer: Debouncer::new(pressed, debounce.as_micros(), lockout.as_micros()) }
     }
+    // --8<-- [end:new]
 
     pub fn source(&self) -> Source {
         self.source

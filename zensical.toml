@@ -32,7 +32,16 @@ copyright = """
 Copyright &copy; 2026 Lpwlk
 """
 
-extra_css = ["styles/extra.css"]
+extra_css = [
+  "styles/extra.css",
+  "https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.css",
+]
+# Console recordings: asciinema-player plays docs/book/assets/demo/*.cast
+# (javascripts/casts.js mounts each player when it scrolls into view).
+extra_javascript = [
+  "https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.min.js",
+  "javascripts/casts.js",
+]
 
 # Top-level sections are rendered as tabs (navigation.tabs).
 nav = [
@@ -41,6 +50,7 @@ nav = [
     "getting-started.md",
     "console.md",
     "examples.md",
+    "firmware.md",
     "configuration.md",
     "wiring.md",
     "architecture.md",

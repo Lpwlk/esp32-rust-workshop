@@ -38,6 +38,7 @@ impl Cli {
         self.wizard = Some(wizard);
     }
 
+    // --8<-- [start:poll]
     /// Processes pending key presses, from USB and (feature `rtt`) from the probe's
     /// terminal. Returns a command when Enter completes a valid line.
     pub fn poll(&mut self) -> Option<Command> {
@@ -76,6 +77,7 @@ impl Cli {
         }
         None
     }
+    // --8<-- [end:poll]
 
     fn answer(&mut self, line: &str) -> Option<Command> {
         let wizard = self.wizard.as_mut()?;

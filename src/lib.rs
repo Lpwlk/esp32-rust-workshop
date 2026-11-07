@@ -74,6 +74,7 @@ use crate::{
 /// const CONFIG: NodeConfig = NodeConfig { name: "node-A", ..NodeConfig::DEFAULT };
 /// esp32_rust_workshop::node_firmware!(CONFIG);
 /// ```
+// --8<-- [start:macro]
 #[macro_export]
 macro_rules! node_firmware {
     ($config:path) => {
@@ -90,6 +91,7 @@ macro_rules! node_firmware {
         }
     };
 }
+// --8<-- [end:macro]
 
 /// After switching speed on the peer's request, don't transmit for this long, so
 /// the peer has switched too before our first frame at the new speed.
@@ -101,6 +103,7 @@ const BURST_SLICE_US: u64 = 2_000;
 /// back for this long (its longest normal iteration, a `save`, takes ~50 ms).
 pub const WATCHDOG_MS: u64 = 2_000;
 
+// --8<-- [start:watchdog]
 /// Hardware watchdog on TIMG0, fed once per main loop iteration (`watchdog`
 /// feature). Without the feature, feeding does nothing.
 struct Watchdog {
@@ -128,6 +131,7 @@ impl Watchdog {
         self.wdt.feed();
     }
 }
+// --8<-- [end:watchdog]
 
 fn now_us() -> u64 {
     Instant::now().duration_since_epoch().as_micros()
@@ -146,12 +150,14 @@ fn ms_f(v: f32) -> Duration {
     Duration::from_micros(units::ms_to_us(v))
 }
 
+// --8<-- [start:pin]
 /// Takes a GPIO by number, as given in the config.
 fn pin(n: u8) -> AnyPin<'static> {
     // SAFETY: `NodeConfig::check` guarantees at compile time that every configured
     // pin is distinct and not used elsewhere by the firmware (RESERVED_PINS).
     unsafe { AnyPin::steal(n) }
 }
+// --8<-- [end:pin]
 
 fn fx_settings(rgb: &config::RgbConfig) -> fx::Settings {
     fx::Settings {
@@ -196,6 +202,7 @@ fn console_note(console: config::Console) -> &'static str {
 ///
 /// `defaults` is the compiled-in config. The firmware works on a copy that the
 /// CLI can change (`set`, `reset`); `defaults` is kept to show and restore it.
+// --8<-- [start:run]
 pub fn run(defaults: &'static NodeConfig) -> ! {
     let mut cfg = *defaults;
     // Before any output, so the boot card also goes to RTT (feature `rtt`).
@@ -224,6 +231,7 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
 
     term::boot_card(&cfg, &chip_info(&rng), &system_info(&cfg, defaults, boot_load));
     let cli = cli::Cli::new(peripherals.USB_DEVICE);
+    // --8<-- [end:run]
 
     let mut node = Node {
         cfg,
@@ -253,6 +261,7 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
         boot_load,
         _gpio: gpio,
         boot,
+        // --8<-- [start:loop]
         // Last, so the boot itself is never cut short.
         watchdog: Watchdog::start(peripherals.TIMG0),
     };
@@ -260,6 +269,7 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
         node.step();
     }
 }
+// --8<-- [end:loop]
 
 /// Everything one node owns and knows.
 struct Node {
@@ -301,6 +311,7 @@ struct Node {
 }
 
 impl Node {
+    // --8<-- [start:step]
     /// One iteration of the main loop.
     fn step(&mut self) {
         self.watchdog.feed();
@@ -345,6 +356,7 @@ impl Node {
         self.burst_tx_step();
         self.receive();
         self.timers();
+        // --8<-- [end:step]
 
         // --- Status line ----------------------------------------------------------
         if self.last_status.elapsed() >= ms_f(self.cfg.status_period_ms) {
@@ -391,6 +403,7 @@ impl Node {
 
     // --- Receive ------------------------------------------------------------------
 
+    // --8<-- [start:receive]
     fn receive(&mut self) {
         if let Some(e) = self.link.take_error() {
             self.stats.bad += 1;
@@ -440,6 +453,7 @@ impl Node {
             }
         }
     }
+    // --8<-- [end:receive]
 
     /// The burst being received, if frames still arrive.
     fn active_burst_rx(&mut self) -> Option<&mut BurstRx> {

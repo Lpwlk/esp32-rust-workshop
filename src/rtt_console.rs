@@ -83,6 +83,7 @@ pub fn rtt_on() -> bool {
     RTT_ON.load(Ordering::Relaxed)
 }
 
+// --8<-- [start:macro]
 /// Prints to the console(s) chosen by the `console` setting.
 #[macro_export]
 #[doc(hidden)]
@@ -98,6 +99,7 @@ macro_rules! con_print {
         }
     }};
 }
+// --8<-- [end:macro]
 
 /// [`con_print!`] with a newline.
 #[macro_export]

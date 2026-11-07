@@ -70,7 +70,8 @@ hide:
 
 ## See it run { .ws-section }
 
-![Boot of node A: the boot card, then frames exchanged with node B](assets/demo/boot.gif)
+<div class="asciicast" data-cast="assets/demo/boot.cast" data-poster="npt:0:12"></div>
+<p class="asciicast-caption">Node A after a reset: the boot card, then frames exchanged with node B · recorded on the boards, <a href="assets/demo/boot.cast">.cast</a></p>
 
 Real sessions, colors included: the [console tour](console.md) shows the CLI, the
 link tests and RTT.
@@ -132,6 +133,11 @@ Header J2 labels are GPIO numbers. Full details, resistor values and pins to avo
 -   :lucide-sliders-horizontal:{ .lg .middle } [__Configuration__](configuration.md)
 
     Cargo features, node config, saved settings, and where to change what.
+
+-   :lucide-cpu:{ .lg .middle } [__Firmware walkthrough__](firmware.md)
+
+    Boot, the main loop, the 5 Mbaud UART interrupt, shared state, flash, RMT,
+    raw registers: the embedded code explained, line by line.
 
 -   :lucide-blocks:{ .lg .middle } [__Architecture__](architecture.md)
 

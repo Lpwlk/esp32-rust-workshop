@@ -30,17 +30,15 @@ colored console with a real CLI. Built on [esp-hal](https://github.com/esp-rs/es
 | **Embedded hygiene** | hardware watchdog, reset reason, Cargo features (`persist`, `watchdog`, `rtt`), Flash/RAM report after each build |
 | **Tested on the host** | the hardware-free logic is its own crate: ~100 unit and property tests, examples and doctests, all run by CI |
 
-## See it run
+## The console
 
-<table>
-<tr>
-<td width="50%"><b>The CLI</b>: help, settings, patterns, verbose mode<br><img src="docs/book/assets/demo/cli.gif" alt="CLI session"></td>
-<td width="50%"><b>Link tests</b>: speed change on both nodes, then a burst<br><img src="docs/book/assets/demo/link.gif" alt="Link tests"></td>
-</tr>
-<tr>
-<td colspan="2"><b>RTT</b>: the same console, read through the debug probe with <code>probe-rs attach</code><br><img src="docs/book/assets/demo/rtt.gif" alt="RTT console"></td>
-</tr>
-</table>
+Every frame, sent or received, on one aligned line; a CLI that edits like a shell
+(history, cursor, `help <cmd>`); settings changed live:
+
+![CLI session: help period, pattern ocean, then period 4Hz: the Δ column drops to 250 ms](docs/book/assets/demo/cli.gif)
+
+More recordings, as smooth and pausable text (link tests at 1 Mbaud, bursts, the
+console over RTT with probe-rs): **[the console tour](https://lpwlk.github.io/esp32-rust-workshop/console/)**.
 
 ## Quick start
 
@@ -108,6 +106,7 @@ cargo run -p workshop-core --target host-tuple --example frames
 | [Getting started](https://lpwlk.github.io/esp32-rust-workshop/getting-started/) | tools, wiring, flashing, first commands |
 | [The console](https://lpwlk.github.io/esp32-rust-workshop/console/) | every part of the output, the CLI, link tests, RTT |
 | [Examples](https://lpwlk.github.io/esp32-rust-workshop/examples/) | runnable code: frames, settings, debouncing, CLI |
+| [Firmware walkthrough](https://lpwlk.github.io/esp32-rust-workshop/firmware/) | the embedded code explained: boot, main loop, UART interrupt, shared state, flash, RMT |
 | [Configuration](https://lpwlk.github.io/esp32-rust-workshop/configuration/) | Cargo features, node config, saved settings, where to change what |
 | [Architecture](https://lpwlk.github.io/esp32-rust-workshop/architecture/) | two crates, the main loop, 5 Mbaud reception, timing |
 | [Rust & Cargo guide](https://lpwlk.github.io/esp32-rust-workshop/guide-rust/) | Cargo, then Cargo for microcontrollers, and a cheat sheet |
