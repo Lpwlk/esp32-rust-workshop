@@ -542,10 +542,10 @@ Flash with espflash (right bootloader, revision accepted):
 espflash flash --chip esp32s31 --port /dev/cu.usbmodemXXXX target/riscv32imafc-unknown-none-elf/release/node-b
 ```
 
-Attach over RTT with probe-rs, without flashing (not tested on these boards):
+Attach over RTT with probe-rs, without flashing; type commands at its `cli>` prompt:
 
 ```sh
-probe-rs attach --chip esp32s31 --probe <id> target/riscv32imafc-unknown-none-elf/release/node-b
+probe-rs attach --chip esp32s31 --probe <id> --no-timestamps target/riscv32imafc-unknown-none-elf/release/node-b
 ```
 
 cargo-embed UI (Embed.toml: flashing disabled; not tested on these boards):

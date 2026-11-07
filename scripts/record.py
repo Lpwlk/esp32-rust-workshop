@@ -12,9 +12,11 @@ writes an asciicast v2 file; `agg` then turns it into a GIF.
 
 `--type T:TEXT` types TEXT then Enter, starting T seconds after the start.
 `--key T:KEYS` sends raw keys (no Enter), e.g. `--key 1:'\x12'` for Ctrl+R.
+`--start S` drops what was printed before S seconds (the boot, after a Ctrl+R).
 `--trim REGEX` drops output lines matching REGEX (tool banners, local paths).
 
-Standard library only (pty), plus `agg` for `--gif` (brew install agg).
+Standard library only (pty), plus `agg` for `--gif` (brew install agg), and
+gifsicle to shrink the GIF if it's installed (brew install gifsicle).
 """
 
 from __future__ import annotations
@@ -63,8 +65,13 @@ def record(cmd: list[str], seconds: float, cols: int, rows: int, typed, raw, tri
     while (now := time.monotonic() - start) < seconds:
         while keys and keys[0][0] <= now:
             os.write(fd, keys.pop(0)[1])
-        ready, _, _ = select.select([fd], [], [], 0.02)
+        ready, _, _ = select.select([fd], [], [], 0.05)
         if not ready:
+            # Quiet for 50 ms: an unfinished line is the prompt (or typed keys),
+            # not half of a line still arriving. Show it.
+            if pending:
+                events.append([round(now, 3), "o", pending.decode("utf-8", "replace")])
+                pending = b""
             continue
         try:
             data = os.read(fd, 65536)
@@ -73,24 +80,26 @@ def record(cmd: list[str], seconds: float, cols: int, rows: int, typed, raw, tri
         if not data:
             break
         pending += data
-        # Emit whole lines (so --trim can drop them), and a partial last line as is
-        # (the CLI prompt and typed keys have no newline).
+        # Emit whole lines only, so --trim sees each line in one piece.
         *lines, pending = pending.split(b"\n")
         out = "".join(
             line.decode("utf-8", "replace") + "\n"
             for line in lines
             if not trim or not trim.search(line.decode("utf-8", "replace"))
         )
-        if pending and not pending.endswith(b"\x1b"):
-            out += pending.decode("utf-8", "replace")
-            pending = b""
         if out:
             events.append([round(now, 3), "o", out])
-    os.kill(pid, signal.SIGTERM)
-    try:
-        os.waitpid(pid, 0)
-    except ChildProcessError:
-        pass
+    # Stop it like a user would (Ctrl+C), then for good if it doesn't listen:
+    # probe-rs can hang while releasing the probe.
+    os.kill(pid, signal.SIGINT)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if os.waitpid(pid, os.WNOHANG) != (0, 0):
+            break
+        time.sleep(0.1)
+    else:
+        # Don't wait for it: a process stuck in the USB driver may never be reaped.
+        os.kill(pid, signal.SIGKILL)
     return events
 
 
@@ -111,6 +120,12 @@ def main() -> None:
         help="raw keys, no Enter; escapes allowed: --key 1:'\\x12' (Ctrl+R)",
     )
     p.add_argument("--trim", help="drop output lines matching this regex")
+    p.add_argument(
+        "--start",
+        type=float,
+        default=0.0,
+        help="drop what was printed before this time, s (e.g. the boot)",
+    )
     p.add_argument("--speed", type=float, default=1.0, help="GIF playback speed")
     argv = sys.argv[1:]
     if "--" not in argv:
@@ -120,6 +135,8 @@ def main() -> None:
 
     trim = re.compile(args.trim) if args.trim else None
     events = record(cmd, args.seconds, args.cols, args.rows, args.type, args.key, trim)
+    if args.start:
+        events = [[round(t - args.start, 3), k, d] for t, k, d in events if t >= args.start]
     header = {
         "version": 2,
         "width": args.cols,
@@ -154,6 +171,12 @@ def main() -> None:
             ],
             check=True,
         )
+        if shutil.which("gifsicle"):
+            # Each scroll redraws the whole screen: lossy + a small palette divides
+            # the size by 2-3 without visible loss on terminal colors.
+            subprocess.run(
+                ["gifsicle", "-O3", "--lossy=60", "--colors", "32", "-b", str(gif)], check=True
+            )
         print(f"{gif}: {gif.stat().st_size // 1024} KB")
 
 

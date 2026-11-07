@@ -137,7 +137,15 @@ Every command, with its examples (each one is checked by a unit test):
 
 Built with `--features rtt`, the firmware also writes its console into RAM
 buffers that the probe reads in the background: no serial port, and it never
-blocks even when nobody reads.
+blocks even when nobody reads. It works both ways: `probe-rs attach` shows a
+`cli>` prompt (the name of the firmware's input channel), and what you type there
+goes to the same CLI. In the recording, `info` and `pattern aurora` are typed in
+probe-rs.
+
+!!! note "The first lines arrive all at once"
+    The firmware writes into a 4 KB buffer from boot, probe or not. When probe-rs
+    attaches, it first prints what the buffer still holds (the boot card is long
+    gone: type `info`), then the live output.
 
 === "dev.py"
 
@@ -150,7 +158,7 @@ blocks even when nobody reads.
     ```sh
     cargo build --release --features rtt --bin node-a
     espflash flash --chip esp32s31 target/riscv32imafc-unknown-none-elf/release/node-a
-    probe-rs attach --chip esp32s31 --probe <id> target/riscv32imafc-unknown-none-elf/release/node-a
+    probe-rs attach --chip esp32s31 --probe <id> --no-timestamps target/riscv32imafc-unknown-none-elf/release/node-a   # cli> prompt: type commands
     ```
 
 === "cargo-embed"
@@ -171,13 +179,20 @@ blocks even when nobody reads.
 ## Recording these GIFs
 
 ```sh
-brew install agg    # asciicast → GIF
-python3 scripts/record.py docs/book/assets/demo/cli.cast --gif --seconds 25 \
-    --type 3:"help" --type 8:"pattern ocean" \
+brew install agg gifsicle    # asciicast → GIF, then GIF compression
+python3 scripts/record.py docs/book/assets/demo/cli.cast --gif --seconds 30 --start 4.5 \
+    --key '0.8:\x12' --type 6:"help" --type 15:"pattern ocean" \
     -- espflash monitor --chip esp32s31 --port /dev/cu.usbmodemXXXX
 ```
 
 `scripts/record.py` runs the command in a pseudo-terminal (so colors are kept),
 types the `--type` commands one key at a time, and writes an asciicast that
-[agg](https://github.com/asciinema/agg) renders. Record from a committed tree, or
-the boot card shows `+dirty`.
+[agg](https://github.com/asciinema/agg) renders and gifsicle compresses.
+
+- `--key '0.8:\x12'` sends ++ctrl+r++: `espflash monitor` doesn't reset the chip
+  by itself, and shows nothing until it does;
+- `--start 4.5` drops the boot from the recording, `--trim REGEX` drops lines
+  (the ROM and bootloader logs);
+- record from a committed tree, or the boot card shows `+dirty`. The `.cast` files
+  are kept next to the GIFs (`docs/book/assets/demo/`), to re-render them with
+  other settings.
