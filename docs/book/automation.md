@@ -104,15 +104,46 @@ python3 scripts/dev.py docs api --open      # rustdoc of the core and the firmwa
 2. **host-tests**: `cargo test-host` (including the freshness check) and clippy on
    the core;
 3. **firmware**: release build of both nodes and clippy, for four Cargo feature
-   combinations (default, none, all, `rtt` alone);
-4. **site** (only if 1 to 3 pass): `zensical build --clean`, then `cargo doc` for
-   both crates, copied into `site/api/core/` and `site/api/firmware/` (separate
-   folders: two rustdoc outputs in one folder would overwrite each other's search
-   index);
-5. **deploy** (pushes to `main` only): publishes `site/` on GitHub Pages.
+   combinations (default, none, all, `rtt` alone). The default build also:
+    - writes a **Flash / RAM table** in the job summary (`scripts/memsize.py`); on a
+      pull request, the target branch is built too and each line shows the change
+      (`+1.2 KB`, `=`);
+    - on a push to `main`, keeps `node-a` / `node-b` (ELF) as the artifact
+      `firmware-<commit>` for 30 days: flash a past commit without rebuilding it
+      (`gh run download`, then `espflash flash --chip esp32s31 node-a`);
+4. **site** (once 1 and 2 pass, without waiting for the firmware matrix):
+   `zensical build --clean`, then `cargo doc` for both crates, copied into
+   `site/api/core/` and `site/api/firmware/` (separate folders: two rustdoc outputs
+   in one folder would overwrite each other's search index). The footer of every
+   page says which commit it was built from, with a link: CI adds `build_commit`,
+   `build_sha` and `build_date` to a copy of `zensical.toml`, read by
+   `docs/templates/partials/copyright.html`;
+5. **deploy** (pushes to `main` only): publishes `site/` on GitHub Pages, about
+   two minutes after the push.
 
 So the published documentation always matches the last commit of `main`, and
 a commit can't reach `main` with stale reference pages.
+
+## Releases
+
+`.github/workflows/release.yml` runs when a tag `v*` is pushed:
+
+```sh
+# bump `version` in [workspace.package] of Cargo.toml first, commit, then:
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+It checks that the tag matches the crate version, builds both nodes, and publishes
+a GitHub Release with:
+
+| File | Use |
+|---|---|
+| `node-a.elf`, `node-b.elf` | `espflash flash --chip esp32s31 --monitor node-a.elf`: keeps the settings saved with `save` |
+| `node-a.bin`, `node-b.bin` | full image (bootloader, partition table, app) written at 0x0 by any flasher: `espflash write-bin --chip esp32s31 0x0 node-a.bin`. It covers the settings area, so it resets saved settings |
+| `SHA256SUMS` | checksums of the files above |
+
+The release notes give the flashing commands, the memory table, and the list of
+changes since the previous tag.
 
 ## Checklist: when you change…
 

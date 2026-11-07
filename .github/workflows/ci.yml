@@ -3,8 +3,13 @@
 # - Every push and pull request: formatting, host tests (including the check that
 #   the generated reference pages match the code), firmware build + clippy for each
 #   Cargo feature combination, site build.
+# - Every build: a Flash / RAM table in the job summary (scripts/memsize.py); on
+#   pull requests, compared with the same firmware built from the target branch.
 # - Push to `main`: the site (Zensical pages + rustdoc API) is published on GitHub
-#   Pages. Repository setting needed once: Settings > Pages > Source: GitHub Actions.
+#   Pages, with the commit it was built from in the footer; the node-a / node-b
+#   ELF files are kept as artifacts for 30 days. Repository setting needed once:
+#   Settings > Pages > Source: GitHub Actions.
+# - Tags `v*`: see release.yml.
 #
 # On-target tests (`cargo test-target`) need a board, so they don't run here.
 name: CI
@@ -68,9 +73,44 @@ jobs:
       - name: Clippy (firmware)
         run: cargo clippy --release --locked ${{ matrix.features.flags }} -- -D warnings
 
+      # The default build only: memory report, artifacts.
+      - name: Build the target branch (pull requests, for the size comparison)
+        if: matrix.features.name == 'default' && github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          git worktree add ../base FETCH_HEAD
+          cd ../base && cargo build --release --locked --target-dir ../base-target \
+            || echo "::warning::the target branch doesn't build: no size comparison"
+      - name: Memory usage
+        if: matrix.features.name == 'default'
+        run: |
+          elf=target/riscv32imafc-unknown-none-elf/release
+          base=../base-target/riscv32imafc-unknown-none-elf/release
+          {
+            echo "### Memory usage (default features)"
+            if [ -d "$base" ]; then
+              echo "Compared with \`${{ github.base_ref }}\`."
+              python3 scripts/memsize.py --markdown --base-dir "$base" $elf/node-a $elf/node-b
+            else
+              python3 scripts/memsize.py --markdown $elf/node-a $elf/node-b
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the firmware (push to main)
+        if: matrix.features.name == 'default' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            target/riscv32imafc-unknown-none-elf/release/node-a
+            target/riscv32imafc-unknown-none-elf/release/node-b
+          retention-days: 30
+
   site:
     name: Documentation site
-    needs: [format, host-tests, firmware]
+    # Not the firmware matrix: the site goes live as soon as the docs are checked
+    # (host tests include the reference pages freshness check). The firmware API
+    # docs below still need the firmware to compile.
+    needs: [format, host-tests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -80,8 +120,16 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install zensical
-      - name: Pages
-        run: zensical build --clean
+      - name: Pages (with the commit in the footer)
+        run: |
+          # A copy of zensical.toml with the build info, read by
+          # docs/templates/partials/copyright.html.
+          sed '/^\[project.extra\]$/a\
+          build_commit = "'"${GITHUB_SHA::7}"'"\
+          build_sha = "'"$GITHUB_SHA"'"\
+          build_date = "'"$(date -u '+%Y-%m-%d %H:%M UTC')"'"
+          ' zensical.toml > zensical.ci.toml
+          zensical build --clean -f zensical.ci.toml
       - name: API documentation (rustdoc)
         run: |
           cargo doc -p workshop-core --target host-tuple --no-deps

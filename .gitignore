@@ -9,3 +9,4 @@
 __pycache__/
 /scripts/logs
 /.boards.json
+/zensical.ci.toml

@@ -70,8 +70,10 @@ UPDATE_DOCS=1 cargo test-host                     # regenerate reference pages
 ```
 
 CI (`.github/workflows/ci.yml`) checks formatting, runs the host tests, builds and
-lints the firmware for each feature combination, then publishes the docs on GitHub
-Pages from `main`.
+lints the firmware for each feature combination (with a Flash / RAM report), then
+publishes the docs on GitHub Pages from `main`. A `v*` tag publishes a
+[release](https://github.com/Lpwlk/esp32-rust-workshop/releases) with
+ready-to-flash firmware for both nodes (`.github/workflows/release.yml`).
 
 > **ESP32-S31 support is young.** esp-hal marks the chip as early-stage, and
 > probe-rs 0.32 writes a wrong minimum chip revision into the images it flashes.

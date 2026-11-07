@@ -1,0 +1,94 @@
+# Firmware release: push a tag `vX.Y.Z` matching `version` in Cargo.toml
+# ([workspace.package]) and this workflow publishes a GitHub Release with
+# ready-to-flash firmware for both nodes:
+#
+#   node-a.elf / node-b.elf    flash with `espflash flash` (backtraces decoded by
+#                              `espflash monitor --elf`)
+#   node-a.bin / node-b.bin    full image (bootloader + partition table + app),
+#                              written at 0x0 by any flasher (esptool, web flashers)
+#   SHA256SUMS
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release
+
+env:
+  CARGO_TERM_COLOR: always
+  # The version used day to day (scripts/dev.py, docs): images built the same way.
+  ESPFLASH_VERSION: "4.7.0"
+
+jobs:
+  release:
+    name: Build and publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tag matches the crate version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c "import json, sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name'] == 'esp32-rust-workshop'))")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} but Cargo.toml says ${version}: bump [workspace.package] version, or tag v${version}"
+            exit 1
+          fi
+
+      - name: Build both nodes
+        run: cargo build --release --locked
+
+      - name: Install espflash
+        run: |
+          sudo apt-get update && sudo apt-get install -y libudev-dev
+          cargo install espflash --version "$ESPFLASH_VERSION" --locked
+
+      - name: Firmware files
+        run: |
+          mkdir dist
+          for node in a b; do
+            elf=target/riscv32imafc-unknown-none-elf/release/node-$node
+            cp "$elf" dist/node-$node.elf
+            espflash save-image --chip esp32s31 --merge --skip-padding "$elf" dist/node-$node.bin
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -l dist
+
+      - name: Release notes
+        run: |
+          elf=target/riscv32imafc-unknown-none-elf/release
+          {
+            echo "Firmware for two ESP32-S31-Function-CoreBoard-1 boards (default features: persist, watchdog)."
+            echo
+            echo "### Flash"
+            echo
+            echo '```sh'
+            echo "espflash flash --chip esp32s31 --monitor node-a.elf    # board A"
+            echo "espflash flash --chip esp32s31 --monitor node-b.elf    # board B"
+            echo '```'
+            echo
+            echo "Or the full image at address 0, with any flasher:"
+            echo
+            echo '```sh'
+            echo "espflash write-bin --chip esp32s31 0x0 node-a.bin"
+            echo '```'
+            echo
+            echo "\`espflash flash\` keeps the settings saved on the board with \`save\`; the full image covers the start of the flash, settings area included, so it resets them."
+            echo
+            echo "### Memory usage"
+            python3 scripts/memsize.py --markdown $elf/node-a $elf/node-b
+            echo "### Changes"
+          } > notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag

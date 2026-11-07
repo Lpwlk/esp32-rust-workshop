@@ -107,18 +107,9 @@ def delta(now: int, before: int | None) -> str:
     return f"{'+' if d > 0 else '-'}{human(abs(d))}"
 
 
-def report(elf: Path, previous: Path | None = None) -> list[tuple[str, str, str, str, str]]:
-    """Rows `(region, used, size, %, change)`; `previous`: a JSON file where the last
-    result is kept, to show what changed since the previous build."""
-    u = usage(elf)
-    before = None
-    if previous is not None:
-        try:
-            before = json.loads(previous.read_text())
-        except (OSError, ValueError):
-            before = None
-        previous.parent.mkdir(parents=True, exist_ok=True)
-        previous.write_text(json.dumps(u.as_dict()))
+def rows(u: Usage, before: dict[str, int] | None) -> list[tuple[str, str, str, str, str]]:
+    """Rows `(region, used, size, %, change)`; `before`: an earlier [`Usage`] (as a
+    dict) to show what changed."""
 
     def row(region: str, used: int, size: int, key: str) -> tuple[str, str, str, str, str]:
         pct = f"{100 * used / size:.2f}%" if size else "-"
@@ -138,13 +129,57 @@ def report(elf: Path, previous: Path | None = None) -> list[tuple[str, str, str,
     ]
 
 
-def main() -> None:
-    import sys
+def report(elf: Path, previous: Path | None = None) -> list[tuple[str, str, str, str, str]]:
+    """Rows for `elf`; `previous`: a JSON file where the last result is kept, to show
+    what changed since the previous build (it's then updated)."""
+    u = usage(elf)
+    before = None
+    if previous is not None:
+        try:
+            before = json.loads(previous.read_text())
+        except (OSError, ValueError):
+            before = None
+        previous.parent.mkdir(parents=True, exist_ok=True)
+        previous.write_text(json.dumps(u.as_dict()))
+    return rows(u, before)
 
-    for path in sys.argv[1:]:
+
+def markdown(elf: Path, base: Path | None) -> str:
+    """A Markdown table for `elf` (CI job summary); `base`: the same firmware built
+    from the target branch, to show the change a pull request brings."""
+    before = usage(base).as_dict() if base is not None and base.exists() else None
+    head = "| Memory region | Used Size | Region Size | %age Used |"
+    rule = "|---|--:|--:|--:|"
+    out = [
+        f"#### `{elf.name}`",
+        "",
+        head + (" vs base |" if before else ""),
+        rule + ("--:|" if before else ""),
+    ]
+    for region, used, size, pct, d in rows(usage(elf), before):
+        line = f"| {region.strip()} | {used} | {size} | {pct} |"
+        out.append(line + (f" {d or '='} |" if before else ""))
+    return "\n".join(out) + "\n"
+
+
+def main() -> None:
+    import argparse
+
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("elf", nargs="+", type=Path, help="firmware ELF files")
+    p.add_argument("--markdown", action="store_true", help="Markdown tables (CI job summary)")
+    p.add_argument(
+        "--base-dir", type=Path, help="compare with the ELF of the same name in this folder"
+    )
+    args = p.parse_args()
+
+    for path in args.elf:
+        if args.markdown:
+            print(markdown(path, args.base_dir / path.name if args.base_dir else None))
+            continue
         print(f"{path}:")
         print(f"{'Memory region':>14}  {'Used Size':>10}  {'Region Size':>11}  {'%age Used':>9}")
-        for region, used, size, pct, change in report(Path(path)):
+        for region, used, size, pct, change in report(path):
             print(f"{region + ':':>14}  {used:>10}  {size:>11}  {pct:>9}  {change}")
 
 

@@ -156,8 +156,9 @@ Wire the boards first ([Wiring](wiring.md)). What to look at:
 2. **host tests**: `cargo test-host` (unit, property, doc tests, docs freshness),
    then clippy on `workshop-core` with `-D warnings`;
 3. **firmware**: `cargo build --release` and clippy with `-D warnings`, for each
-   Cargo feature combination (default, none, all, `rtt` alone);
-4. **site**: the documentation, only if all pass (see
+   Cargo feature combination (default, none, all, `rtt` alone), plus the Flash / RAM
+   table in the job summary;
+4. **site**: the documentation, once formatting and host tests pass (see
    [Formatting and generated docs](automation.md)).
 
 `python3 scripts/dev.py check` runs the same steps locally, in the same order. The
