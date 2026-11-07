@@ -71,7 +71,9 @@ pub struct Pins {
 /// - 33, 34: USB Serial/JTAG (USB D-/D+), used by the CLI, `espflash` and `probe-rs`;
 /// - 58, 59: UART0, the ROM / bootloader console;
 /// - 60: on-board RGB LED (also a strapping pin);
-/// - 61: BOOT button (strapping pin).
+/// - 50-57: on-board audio codec and amplifier, not on the header (wired on the
+///   board even though the firmware doesn't use them);
+/// - 61: BOOT button, read by the firmware like the jumper (also a strapping pin).
 pub const RESERVED_PINS: [u8; 20] = [26, 27, 28, 30, 31, 32, 33, 34, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61];
 /// GPIO numbers that don't exist: the ESP32-S31 has 60 GPIOs numbered 0-61,
 /// without 29 and 41 (datasheet, chapter 2 "Pins").
@@ -336,7 +338,7 @@ impl NodeConfig {
             while r < RESERVED_PINS.len() {
                 ensure!(
                     pins[a] != RESERVED_PINS[r],
-                    "config: a pin is reserved (flash, USB, console, RGB LED or BOOT)"
+                    "config: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)"
                 );
                 r += 1;
             }

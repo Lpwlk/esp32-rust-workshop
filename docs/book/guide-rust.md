@@ -302,9 +302,20 @@ codegen-units = 1
 debug = 2              # free: debug info stays in the ELF, not in the flash
 ```
 
-Measuring size: `cargo size` (with `cargo-binutils` and
-`rustup component add llvm-tools`), `cargo bloat`, or espflash's `App/part. size`
-line. `core::fmt` formatting is expensive in size; `defmt` moves formatting to the
+Measuring size:
+
+- `python3 scripts/dev.py size` (also printed after every `dev.py build` / `flash`):
+  flash and RAM used, like GCC's `--print-memory-usage`, with the change since the
+  previous build;
+- `cargo size` (cargo-binutils) for the size of each section, `cargo bloat` for
+  the biggest functions, or espflash's `App/part. size` line.
+
+!!! note "Why not the linker's own table?"
+    `rust-lld` knows `--print-memory-usage` too (`-C link-arg=--print-memory-usage`,
+    shown with `-W linker-messages`), but on esp-hal it prints one line per region
+    *alias*, and RAM always at 100 %: the linker script gives all the RAM left to
+    the stack. `scripts/memsize.py` reads the ELF sections instead and shows the
+    stack apart. `core::fmt` formatting is expensive in size; `defmt` moves formatting to the
 PC.
 
 ### Features and the HAL
@@ -460,10 +471,11 @@ Install probe-rs and cargo-embed:
 cargo install probe-rs-tools --locked
 ```
 
-Install cargo-binutils (`cargo size`, `cargo objdump`):
+Install cargo-binutils (`cargo size`, `cargo objdump`). The `llvm-tools` they
+call are installed by rustup from `rust-toolchain.toml`:
 
 ```sh
-cargo install cargo-binutils && rustup component add llvm-tools
+cargo install cargo-binutils --locked
 ```
 
 Create the project's Python environment (`.venv` with Python 3.13, Zensical, rich, pyserial and black):
@@ -624,6 +636,12 @@ Who pulls in a dependency:
 
 ```sh
 cargo tree -i heapless
+```
+
+Flash and RAM used, GCC-style (also printed after every `dev.py build`):
+
+```sh
+python3 scripts/dev.py size
 ```
 
 Firmware size per section:

@@ -102,7 +102,7 @@ esp32_rust_workshop::node_firmware!(CONFIG);
 - `..NodeConfig::DEFAULT` takes every field you don't name from the defaults,
   so a node file lists only what makes that node different.
 - `node_firmware!` adds `const _: () = CONFIG.check();`: a bad value is a **build
-  error** with a message (`config: a pin is reserved (flash, USB, console or RGB LED)`),
+  error** with a message (`config: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)`),
   not a crash on the board.
 - The [settings reference](reference/config.md) lists every field, its range and
   its default; it is generated from the code.
@@ -160,7 +160,7 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 
 | File | Holds |
 |---|---|
-| `rust-toolchain.toml` | Rust channel (stable), the RISC-V target, `rust-src`. rustup installs them on the first `cargo` command |
+| `rust-toolchain.toml` | Rust channel (stable), the RISC-V target, `rust-src`, `llvm-tools` (for `cargo size`). rustup installs them on the first `cargo` command |
 | `Cargo.toml` | workspace, shared versions (`[workspace.package]`, `[workspace.dependencies]`), features, profiles (`opt-level = "s"`, fat LTO) |
 | `.cargo/config.toml` | default target, `cargo run` = espflash, aliases `test-host` / `test-target`, frame pointers for backtraces |
 | `Embed.toml` | cargo-embed: RTT console only, flashing disabled (see the [probe-rs pitfall](guide-rust.md#flash-run-debug)) |

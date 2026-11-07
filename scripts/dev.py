@@ -8,6 +8,7 @@
     python3 scripts/dev.py boards                # plugged boards: MAC, port, probe, node
     python3 scripts/dev.py boards assign a 6C:1A # this board is node A (remembered)
     python3 scripts/dev.py build [a|b]           # firmware, release (both by default)
+    python3 scripts/dev.py size [a|b]            # flash / RAM used (also after each build)
     python3 scripts/dev.py flash a [-m]          # build + flash with espflash (+ monitor)
     python3 scripts/dev.py flash all             # both nodes on their boards
     python3 scripts/dev.py monitor a             # serial console + CLI, backtraces decoded
@@ -217,6 +218,29 @@ def cargo_build(nodes: list[str], rtt: bool, release: bool) -> None:
         + (["--features", "rtt"] if rtt else [])
         + [arg for n in nodes for arg in ("--bin", f"node-{n}")]
     )
+    memory_usage(nodes, release)
+
+
+def memory_usage(nodes: list[str], release: bool) -> None:
+    """Flash / RAM table of each node, like GCC's `--print-memory-usage`, with the
+    change since the previous build (scripts/memsize.py)."""
+    from devlib import console, log
+    from memsize import report
+    from rich.table import Table
+
+    for node in nodes:
+        path = elf(node, release)
+        if not path.exists():
+            log.warning(f"node-{node}: not built yet (`dev.py build {node}`)")
+            continue
+        last = path.parent / f".memsize-node-{node}.json"
+        table = Table(title=f"node-{node} memory", title_justify="left", box=None, pad_edge=False)
+        for col in ("Memory region", "Used Size", "Region Size", "%age Used", "Change"):
+            table.add_column(col, justify="right")
+        for region, used, size, pct, change in report(path, last):
+            style = "red" if change.startswith("+") else "green" if change else ""
+            table.add_row(region, used, size, pct, f"[{style}]{change}[/]" if style else "")
+        console.print(table)
 
 
 def flash(node: str, selector: str | None, monitor: bool, rtt: bool, release: bool) -> None:
@@ -509,6 +533,10 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--rtt", action="store_true", help="with the RTT console (feature rtt)")
     debug_arg(s)
 
+    s = sub.add_parser("size", help="flash and RAM used by the firmware (GCC-style table)")
+    s.add_argument("node", nargs="?", choices=NODES, help="a or b (default: both)")
+    debug_arg(s)
+
     s = sub.add_parser("flash", help="build and flash a node with espflash (or `all`)")
     s.add_argument("node", choices=[*NODES, "all"], help="a, b, or all (both, no monitor)")
     s.add_argument("--board", metavar="MAC|PORT|#", help="this board instead of the assigned one")
@@ -605,6 +633,8 @@ def main() -> None:
                 boards_list()
         case "build":
             cargo_build([args.node] if args.node else list(NODES), args.rtt, release)
+        case "size":
+            memory_usage([args.node] if args.node else list(NODES), release)
         case "flash":
             if args.node == "all":
                 flash_all(release)

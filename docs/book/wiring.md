@@ -40,6 +40,12 @@ GPIO4 has its internal pull-up enabled. A wire from `4` (J2 pin 32) to `G`
 - plugged: line low, **pressed**, `FALL` event;
 - removed: line high, **released**, `RISE` event.
 
+The board's **BOOT** button (GPIO61, nothing to wire) works the same way: press
+it for a `FALL`, release it for a `RISE`. Each `EVT` line in the console says which
+button sent it (`jumper` or `BOOT`), and `DAT` frames report "pressed" while
+either one is held. BOOT keeps its usual role at power-up: held during a reset, it
+starts the ROM's download mode instead of the firmware.
+
 ## Breadboard LEDs
 
 Each LED: GPIO → 330 Ω resistor → LED anode (long leg), cathode → GND. That's

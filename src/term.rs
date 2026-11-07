@@ -238,7 +238,7 @@ pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo, sys: &SystemInfo) {
     );
     card_row("status", format_args!("stats line every {}", Period(cfg.status_period_ms)));
     card_row("timeout", format_args!("link DOWN after {} peer periods", cfg.link_timeout_periods));
-    card_row("button", format_args!("GPIO{} ↔ GND · IRQ on both edges", p.button));
+    card_row("button", format_args!("jumper GPIO{} + BOOT GPIO61 · IRQ on both edges", p.button));
     card_row("filter", format_args!("{} ms debounce · {} ms lockout", cfg.debounce_ms, cfg.lockout_ms));
 
     card_split("build");
@@ -409,14 +409,18 @@ fn push_delta(extra: &mut heapless::String<96>, d: DatDelta) {
     let _ = core::fmt::Write::write_fmt(extra, format_args!("  {GRAY}Δ{RST} {BOLD}{num:>9}{RST} {GRAY}ms{RST} {prev}"));
 }
 
-/// A sent frame; `raw_edges`: interrupts behind an `EVT`; `delta`: for a `DAT`.
-pub fn sent(now_ms: u64, frame: &Frame<'_>, raw_edges: Option<u32>, delta: Option<DatDelta>) {
+/// A sent frame; `button`: for an `EVT`, which button and the interrupts behind
+/// it; `delta`: for a `DAT`.
+pub fn sent(now_ms: u64, frame: &Frame<'_>, button: Option<(&str, u32)>, delta: Option<DatDelta>) {
     let mut extra: heapless::String<96> = heapless::String::new();
     if let Some(d) = delta {
         push_delta(&mut extra, d);
     }
-    if let Some(n) = raw_edges.filter(|&n| n > 1) {
-        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {DIM}{n} edges{RST}"));
+    if let Some((name, n)) = button {
+        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {CYAN}{name}{RST}"));
+        if n > 1 {
+            let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {DIM}{n} edges{RST}"));
+        }
     }
     frame_line(now_ms, true, frame, &extra);
 }
@@ -434,9 +438,9 @@ pub fn received(now_ms: u64, frame: &Frame<'_>, rtt_us: Option<u64>, delta: Opti
     frame_line(now_ms, false, frame, &extra);
 }
 
-pub fn bounce_ignored(now_ms: u64, raw_edges: u32) {
+pub fn bounce_ignored(now_ms: u64, button: &str, raw_edges: u32) {
     let (s, ms) = stamp(now_ms);
-    out!("{GRAY}{s:>6}.{ms:03}   ·  bounce ignored ({raw_edges} edge(s), level unchanged){RST}");
+    out!("{GRAY}{s:>6}.{ms:03}   ·  {button}: bounce ignored ({raw_edges} edge(s), level unchanged){RST}");
 }
 
 pub fn lost(now_ms: u64, count: u32) {

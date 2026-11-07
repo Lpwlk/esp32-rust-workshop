@@ -93,58 +93,6 @@ impl Debouncer {
     }
 }
 
-/// A button read by polling instead of an interrupt (the board's BOOT button):
-/// the main loop passes the level it reads, the same [`Debouncer`] decides.
-///
-/// ```
-/// use workshop_core::button::{ButtonUpdate, PolledButton};
-/// use workshop_core::protocol::Edge;
-///
-/// let mut boot = PolledButton::new(false, 20_000, 100_000); // 20 ms debounce
-/// assert_eq!(boot.update(true, 0), None); // pressed: wait for it to settle
-/// assert_eq!(boot.update(true, 10_000), None);
-/// let Some(ButtonUpdate::Edge(ev)) = boot.update(true, 20_000) else { panic!() };
-/// assert_eq!(ev.edge, Edge::Falling);
-/// ```
-#[derive(Clone, Copy, Debug)]
-pub struct PolledButton {
-    debouncer: Debouncer,
-    raw_low: bool,
-    last_edge_us: Option<u64>,
-    raw_edges: u32,
-}
-
-impl PolledButton {
-    /// `pressed`: the level read at start-up (line low = pressed).
-    pub const fn new(pressed: bool, debounce_us: u64, lockout_us: u64) -> Self {
-        Self {
-            debouncer: Debouncer::new(pressed, debounce_us, lockout_us),
-            raw_low: pressed,
-            last_edge_us: None,
-            raw_edges: 0,
-        }
-    }
-
-    /// Feeds the level read now; returns an update once the line has settled.
-    pub fn update(&mut self, level_low: bool, now_us: u64) -> Option<ButtonUpdate> {
-        if level_low != self.raw_low {
-            self.raw_low = level_low;
-            self.raw_edges += 1;
-            self.last_edge_us = Some(now_us);
-        }
-        if !self.debouncer.ready(now_us) {
-            return None;
-        }
-        let last = self.last_edge_us?;
-        if !self.debouncer.settled(last, now_us) {
-            return None;
-        }
-        self.last_edge_us = None;
-        let raw_edges = core::mem::take(&mut self.raw_edges);
-        Some(self.debouncer.settle(level_low, raw_edges, now_us))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,27 +190,5 @@ mod tests {
         sim.deb.set_timing(5 * MS, 0);
         let updates = sim.run(&[(10, true), (20, false)], 100);
         assert_eq!(updates, [(15, edge(Edge::Falling, 1)), (25, edge(Edge::Rising, 1))]);
-    }
-
-    #[test]
-    fn polled_button_press_bounce_release() {
-        let mut b = PolledButton::new(false, 20 * MS, 100 * MS);
-        let mut updates = Vec::new();
-        // Pressed at 5 ms with two bounces, released at 400 ms, a glitch at 700 ms.
-        let level = |t: u64| matches!(t, 5..=7 | 9..=399) || t == 700;
-        for t in 0..=1000 {
-            if let Some(u) = b.update(level(t), t * MS) {
-                updates.push((t, u));
-            }
-        }
-        let edges: Vec<_> = updates
-            .iter()
-            .filter_map(|(t, u)| match u {
-                ButtonUpdate::Edge(e) => Some((*t, e.edge, e.raw_edges)),
-                ButtonUpdate::Ignored { .. } => None,
-            })
-            .collect();
-        assert_eq!(edges, [(29, Edge::Falling, 3), (420, Edge::Rising, 1)]);
-        assert!(matches!(updates.last(), Some((721, ButtonUpdate::Ignored { raw_edges: 2 }))), "{updates:?}");
     }
 }

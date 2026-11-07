@@ -42,7 +42,7 @@ hide:
 
     ---
 
-    A jumper "button" with debounce and lockout, five RGB fade patterns (viridis,
+    A jumper "button" and the BOOT button, on interrupts, with debounce and lockout, five RGB fade patterns (viridis,
     sunset…), two breadboard LEDs that follow the link or the peer's button.
 
     [:lucide-arrow-right: RGB patterns](reference/patterns.md)

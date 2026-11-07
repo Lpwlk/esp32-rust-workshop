@@ -79,8 +79,10 @@ one of ours is being sent. The math is in `workshop_core::wire`, tested on the h
 
 ## Button debouncing
 
-The GPIO interrupt only records that the line moved, and when. The loop then asks
-`workshop_core::button::Debouncer`:
+Two buttons, the jumper (`pins.button`) and BOOT (GPIO61), share esp-hal's single
+GPIO interrupt handler: it checks each pin's interrupt flag and only records that
+its line moved, and when. The loop then asks one
+`workshop_core::button::Debouncer` per button:
 
 - **debounce** (30 ms): the line must be quiet that long before its level is read;
 - **lockout** (150 ms): after an accepted edge, further changes are ignored. A

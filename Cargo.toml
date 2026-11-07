@@ -73,7 +73,6 @@ rtt = ["dep:rtt-target"]
 workshop-core = { path = "crates/workshop-core" }
 rtt-target = { version = "0.6.2", optional = true }
 esp-storage = { version = "0.10.0", features = ["esp32s31"], optional = true }
-es8311 = { version = "0.1.1", optional = true }
 esp-hal = { version = "~1.2.2", features = ["esp32s31", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s31"] }
 esp-backtrace = { version = "0.20.0", features = [

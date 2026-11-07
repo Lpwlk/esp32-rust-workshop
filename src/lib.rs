@@ -55,7 +55,7 @@ use esp_hal::{
 use crate::{
     baud::{BaudAction, BaudControl, BaudError},
     burst::{BurstRx, BurstTx},
-    button::{Button, ButtonUpdate},
+    button::{Button, ButtonUpdate, Source},
     config::{NodeConfig, TxMode, shared},
     ext_leds::{ExtLeds, LedInputs},
     line::{LineBuffer, LineEvent},
@@ -209,12 +209,14 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
     let p = cfg.pins;
 
     let link = Link::new(peripherals.UART1, pin(p.uart_tx), pin(p.uart_rx), shared::BAUD_RATE);
-    let button = Button::new(peripherals.IO_MUX, pin(p.button), ms(cfg.debounce_ms), ms(cfg.lockout_ms));
+    // One GPIO interrupt handler for both buttons (src/button.rs).
+    let gpio = button::Gpio::new(peripherals.IO_MUX);
+    let button = Button::new(&gpio, Source::Jumper, pin(p.button), ms(cfg.debounce_ms), ms(cfg.lockout_ms));
+    // BOOT button, active low on GPIO61 (board pull-up): same filter, same EVT frames.
+    let boot = Button::new(&gpio, Source::Boot, peripherals.GPIO61, ms(cfg.debounce_ms), ms(cfg.lockout_ms));
     let leds = ExtLeds::new([(pin(p.led1), p.led1), (pin(p.led2), p.led2)], [cfg.led1, cfg.led2]);
     let rgb_led = led::Led::new(peripherals.RMT, peripherals.GPIO60);
 
-    let boot_pin = esp_hal::gpio::Input::new(peripherals.GPIO61, esp_hal::gpio::InputConfig::default());
-    let boot_button = workshop_core::button::PolledButton::new(boot_pin.is_low(), 20_000, 100_000);
     // esp-hal doesn't start the TRNG on the S31: without this, every key is identical.
     trng::enable();
     let rng = Rng::new();
@@ -249,8 +251,8 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
         burst_rx: None,
         store,
         boot_load,
-        boot_pin,
-        boot_button,
+        _gpio: gpio,
+        boot,
         // Last, so the boot itself is never cut short.
         watchdog: Watchdog::start(peripherals.TIMG0),
     };
@@ -292,8 +294,10 @@ struct Node {
     /// What the boot did with the saved settings (shown by `info`).
     boot_load: settings::BootLoad,
     watchdog: Watchdog,
-    boot_pin: esp_hal::gpio::Input<'static>,
-    boot_button: workshop_core::button::PolledButton,
+    /// Keeps the GPIO interrupt handler installed.
+    _gpio: button::Gpio,
+    /// The board's BOOT button (`button` is the jumper).
+    boot: Button,
 }
 
 impl Node {
@@ -302,26 +306,30 @@ impl Node {
         self.watchdog.feed();
         // --- LEDs and host CLI ------------------------------------------------
         self.fx.tick(&mut self.rgb_led);
-        let inputs = LedInputs {
-            button: self.button.is_pressed(),
-            peer_button: self.peer.button,
-            link_up: self.peer.link_up(&self.cfg),
-        };
+        let inputs =
+            LedInputs { button: self.pressed(), peer_button: self.peer.button, link_up: self.peer.link_up(&self.cfg) };
         self.leds.update(&inputs);
         if let Some(cmd) = self.cli.poll() {
             self.apply(cmd);
         }
 
-
-        // --- Button edge -> EVT frame -------------------------------------------
-        match self.button.poll() {
-            Some(ButtonUpdate::Edge(ev)) => {
-                let key = (u64::from(self.rng.random()) << 32) | u64::from(self.rng.random());
-                self.send(Payload::Event { edge: ev.edge, key }, Some(ev.raw_edges));
-                self.events_sent += 1;
+        // --- Button edges (jumper, BOOT) -> EVT frames ------------------------------
+        for source in [Source::Jumper, Source::Boot] {
+            let update = match source {
+                Source::Jumper => self.button.poll(),
+                Source::Boot => self.boot.poll(),
+            };
+            match update {
+                Some(ButtonUpdate::Edge(ev)) => {
+                    let key = (u64::from(self.rng.random()) << 32) | u64::from(self.rng.random());
+                    self.send(Payload::Event { edge: ev.edge, key }, Some((source.name(), ev.raw_edges)));
+                    self.events_sent += 1;
+                }
+                Some(ButtonUpdate::Ignored { raw_edges }) if self.cfg.verbose => {
+                    term::bounce_ignored(now_ms(), source.name(), raw_edges)
+                }
+                _ => {}
             }
-            Some(ButtonUpdate::Ignored { raw_edges }) if self.cfg.verbose => term::bounce_ignored(now_ms(), raw_edges),
-            _ => {}
         }
 
         // --- Periodic DAT frame (read from `cfg` every time: CLI changes apply at once)
@@ -329,7 +337,7 @@ impl Node {
             self.last_data = Instant::now();
             if self.cfg.tx_mode == TxMode::Periodic && now_us() >= self.tx_hold_until_us {
                 let period_us = units::ms_to_us(self.cfg.data_period_ms) as u32;
-                let payload = Payload::Data { pressed: self.button.is_pressed(), events: self.events_sent, period_us };
+                let payload = Payload::Data { pressed: self.pressed(), events: self.events_sent, period_us };
                 self.send(payload, None);
             }
         }
@@ -350,7 +358,13 @@ impl Node {
 
     /// Sends a frame with the next sequence number, and prints it (with, for a DAT,
     /// the time since the previous DAT, sent or received).
-    fn send(&mut self, payload: Payload, raw_edges: Option<u32>) {
+    /// Either button held down: what `DAT` frames and the `button` LED mode show.
+    fn pressed(&self) -> bool {
+        self.button.is_pressed() || self.boot.is_pressed()
+    }
+
+    /// `button`: which button an `EVT` comes from, and its raw interrupt count.
+    fn send(&mut self, payload: Payload, button: Option<(&'static str, u32)>) {
         let frame = Frame { node: self.cfg.name, seq: self.seq, t_ms: now_ms() as u32, payload };
         let line = protocol::encode(&frame);
         match self.link.send(line.as_bytes()) {
@@ -360,7 +374,7 @@ impl Node {
                 // Both timed from when the frame ends on the wire, like received ones.
                 self.rtt.sent(self.seq, wire_end_us);
                 let delta = self.dat_mark(&payload, Dir::Tx, wire_end_us);
-                term::sent(now_ms(), &frame, raw_edges, delta);
+                term::sent(now_ms(), &frame, button, delta);
                 if self.cfg.verbose {
                     term::wire(line.as_bytes(), None);
                 }
@@ -616,6 +630,7 @@ impl Node {
         self.fx.settings = fx_settings(&self.cfg.rgb);
         self.leds.modes = [self.cfg.led1, self.cfg.led2];
         self.button.set_timing(ms(self.cfg.debounce_ms), ms(self.cfg.lockout_ms));
+        self.boot.set_timing(ms(self.cfg.debounce_ms), ms(self.cfg.lockout_ms));
         rtt_console::set_route(self.cfg.console);
     }
 
@@ -722,11 +737,7 @@ impl Node {
 }
 
 /// Compiled-in features and saved settings, for the boot card.
-fn system_info(
-    cfg: &NodeConfig,
-    defaults: &NodeConfig,
-    boot_load: settings::BootLoad,
-) -> term::SystemInfo {
+fn system_info(cfg: &NodeConfig, defaults: &NodeConfig, boot_load: settings::BootLoad) -> term::SystemInfo {
     term::SystemInfo {
         features: [
             ("persist", cfg!(feature = "persist")),

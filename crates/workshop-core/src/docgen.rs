@@ -24,7 +24,8 @@ pub fn reserved_reason(gpio: u8) -> Option<&'static str> {
         58 => "UART0 TX: ROM / bootloader console",
         59 => "UART0 RX: ROM / bootloader console",
         60 => "on-board RGB LED (strapping pin)",
-        61 => "BOOT button (strapping pin)",
+        50..=57 => "on-board audio codec and amplifier (not on the header)",
+        61 => "BOOT button, read by the firmware like the jumper (strapping pin)",
         _ => return None,
     })
 }

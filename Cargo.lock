@@ -551,15 +551,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
-name = "es8311"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf031db4dbb8876a09dd5506ac5df00463fa0e03b59aa42302c9c018ff1a9ac"
-dependencies = [
- "embedded-hal 1.0.0",
-]
-
-[[package]]
 name = "esp-backtrace"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -778,7 +769,6 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "embedded-test",
- "es8311",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
