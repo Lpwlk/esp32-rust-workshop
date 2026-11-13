@@ -1,5 +1,5 @@
 [workspace]
-members         = [".", "crates/workshop-core"]
+members         = [".", "crates/workshop-core", "crates/workshop-presets"]
 # Plain `cargo build` / `cargo run` = the firmware. Tests: `cargo test-host`, `cargo test-target`.
 default-members = ["."]
 resolver        = "3"
@@ -90,6 +90,10 @@ heapless.workspace = true
 # esp-hal already has `esp32s31`, and Cargo unifies it.
 esp-hal-smartled = "0.18.0"
 smart-leds-trait.workspace = true
+
+# Host-side tool the build script uses to turn presets/uart/*.toml into the node configs.
+[build-dependencies]
+workshop-presets = { path = "crates/workshop-presets" }
 
 [dev-dependencies]
 embedded-test = "0.7.3"

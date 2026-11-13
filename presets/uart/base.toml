@@ -1,0 +1,109 @@
+# =============================================================================================
+# UART app: the defaults, written out and documented.
+#
+# This file is the reference of every setting and what it accepts; a preset only needs to
+# list what it changes (`extends = "base"` brings the rest). A test keeps this file equal to
+# `NodeConfig::DEFAULT`, so it can't say something the firmware doesn't do.
+#
+#   cargo presets show uart node-a       what a preset results in
+#   cargo presets check                  load and validate every preset
+#
+# Everything here is also available at run time in the CLI (`set <key> <value>`), except the
+# build-time settings: `name` and the pins.
+# =============================================================================================
+
+# Name sent in every frame: 1-12 printable characters, none of `,` `*` `$` or space.
+name = "node"
+
+# ---------------------------------------------------------------------------------------------
+# Timing
+# ---------------------------------------------------------------------------------------------
+
+# Period of the DAT frame sent to the peer while `tx_mode` is "periodic". Sent in the frame, so
+# the peer adapts its link timeout to it. A number is ms; units work: "250ms", "2s", "4Hz".
+# Range: 10 ms to 1 h.
+data_period_ms = 2500
+
+# Period of the stats line in the console (same units). Range: 100 ms to 1 h.
+status_period_ms = 10000
+
+# The peer counts as gone ("link DOWN") after this many of *its* data periods without a valid
+# frame. Range: 2-100.
+link_timeout_periods = 3
+
+# ---------------------------------------------------------------------------------------------
+# Jumper button (and BOOT): a change is accepted once the line has been quiet for `debounce_ms`,
+# then everything is ignored for `lockout_ms`.
+# ---------------------------------------------------------------------------------------------
+
+# Range: 1-1000 ms.
+debounce_ms = 30
+# Range: 0-5000 ms.
+lockout_ms = 150
+
+# ---------------------------------------------------------------------------------------------
+# What the two breadboard LEDs show. One of:
+#   "off" | "on" | "blink" | "blink 200" | "blink 2.5Hz"   always off / on / blinking (full period)
+#   "button"   on while this node's button is pressed
+#   "peer"     on while the *peer's* button is pressed
+#   "link"     on while the peer is alive
+#   "rx" | "tx"   short flash on each received / sent frame
+# ---------------------------------------------------------------------------------------------
+led1 = "peer"
+led2 = "rx"
+
+# ---------------------------------------------------------------------------------------------
+# Traffic
+# ---------------------------------------------------------------------------------------------
+
+# When this node sends frames on its own:
+#   "periodic"          a DAT frame every `data_period_ms`
+#   "periodic 2.5Hz"    same, and sets the period ( `data_period_ms`, if also written, wins)
+#   "on-rx"             no DAT: an ECH reply to each frame from the peer, which then shows its
+#                       round-trip time
+#   "quiet"             nothing on its own (button events only)
+tx_mode = "periodic"
+
+# Verbose console: raw frames, counters, ignored bounces.
+verbose = false
+
+# Where the console goes: "auto" (USB serial, plus RTT in a build with --features rtt),
+# "serial", "rtt" or "both" (the last two need the `rtt` feature).
+console = "auto"
+
+# ---------------------------------------------------------------------------------------------
+# Sections. In TOML every key written after a [section] header belongs to that section, so the
+# plain settings above must stay above the first [section]; in a preset too.
+# ---------------------------------------------------------------------------------------------
+
+# GPIO numbers (see docs/book/reference/pins.md for the ones to avoid). All different.
+[pins]
+# UART1 TX, wired to the peer's RX, and UART1 RX, wired to the peer's TX.
+uart_tx = 2
+uart_rx = 3
+# Jumper to GND (internal pull-up): plugged = pressed.
+button  = 4
+# Breadboard LEDs: GPIO -> 330 ohm -> LED anode, cathode -> GND.
+led1    = 20
+led2    = 21
+
+# The baud rate (5 Mbaud, 8N1) is not here: both boards must agree on it, it is the constant
+# `shared::BAUD_RATE` in crates/workshop-core/src/config.rs.
+
+# On-board RGB LED (GPIO60, not configurable).
+[rgb]
+# viridis | sunset | ocean | aurora | sakura (`list` in the CLI previews them)
+pattern    = "viridis"
+# Refresh rate: 1-200 Hz (a number is Hz; "20ms" works too)
+freq_hz    = 50
+# Duration of one fade loop, lower = faster: 200-60000 ms
+cycle_ms   = 6000
+# 0-100 %
+brightness = 40
+
+# Defaults of the CLI `burst` command.
+[burst]
+# Frames per burst: 1-100000
+count   = 1000
+# Frames per second: 0.1-20000, or 0 = back to back, as fast as the link allows
+rate_hz = 0

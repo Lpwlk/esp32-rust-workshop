@@ -5,6 +5,35 @@ fn main() {
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
     build_info();
+    presets();
+}
+
+/// Turns the TOML presets of each node into `$OUT_DIR/node_a.rs` / `node_b.rs`, which the
+/// binaries `include!` as their `NodeConfig`. A bad preset stops the build with a message
+/// naming the file and the key (see presets/README.md).
+///
+/// The preset of each binary is `node-a` / `node-b`, unless chosen with an environment variable:
+/// `PRESET_NODE_A`, `PRESET_NODE_B`, or `PRESET` for both.
+fn presets() {
+    use std::{env, path::Path};
+    use workshop_presets::{App, generate_for_build};
+
+    let manifest = env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let out = env::var("OUT_DIR").expect("cargo sets OUT_DIR");
+    let dir = Path::new(&manifest).join("presets").join(App::Uart.folder());
+    for var in ["PRESET", "PRESET_NODE_A", "PRESET_NODE_B"] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
+    let chosen = |specific: &str, default: &str| {
+        env::var(specific)
+            .or_else(|_| env::var("PRESET"))
+            .ok()
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| default.to_owned())
+    };
+    for (file, var, default) in [("node_a.rs", "PRESET_NODE_A", "node-a"), ("node_b.rs", "PRESET_NODE_B", "node-b")] {
+        generate_for_build(App::Uart, &dir, &chosen(var, default), &Path::new(&out).join(file));
+    }
 }
 
 /// Exposes build metadata to the firmware as `env!("BUILD_*")` (shown in the boot banner).

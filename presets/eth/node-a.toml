@@ -1,0 +1,8 @@
+# node-A of the Ethernet app: 192.168.77.11, talking to node-B (192.168.77.12) over UDP.
+# Flash it with `cd eth-lab && cargo run --release --bin node-a`.
+extends = "base"
+name    = "node-A"
+
+[net]
+address = "192.168.77.11"
+peer    = "192.168.77.12"

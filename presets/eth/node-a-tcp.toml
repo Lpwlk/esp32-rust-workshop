@@ -1,0 +1,8 @@
+# node-A over TCP: the same as `node-a`, frames travel in one TCP connection that node-A opens.
+# Build both ends with the TCP presets: `PRESET=node-a-tcp` / `PRESET=node-b-tcp`
+# (see presets/README.md).
+extends = "node-a"
+
+[net]
+transport = "tcp"
+tcp_role  = "client"
