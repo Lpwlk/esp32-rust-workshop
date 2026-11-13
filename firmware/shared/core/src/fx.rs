@@ -136,10 +136,43 @@ pub fn color_at(keys: &[RGB8], phase: f32, level: f32) -> RGB8 {
     RGB8 { r: mix(a.r, b.r), g: mix(a.g, b.g), b: mix(a.b, b.b) }
 }
 
+/// The color a pattern is *meant to look like* at `phase`, for a screen (the console's swatches).
+///
+/// [`color_at`] returns what is sent to the LED: the same color after gamma, because the LED emits
+/// light linearly. Showing that on a screen would make the preview darker and more saturated than
+/// the LED looks, since a screen applies its own gamma. This one skips the gamma step.
+pub fn preview_at(keys: &[RGB8], phase: f32) -> RGB8 {
+    let n = keys.len();
+    let pos = phase * n as f32;
+    let i = (pos as usize) % n;
+    let f = pos - pos as usize as f32;
+    let e = f * f * (3.0 - 2.0 * f);
+    let (a, b) = (keys[i], keys[(i + 1) % n]);
+    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * e + 0.5) as u8;
+    RGB8 { r: mix(a.r, b.r), g: mix(a.g, b.g), b: mix(a.b, b.b) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_vectors;
+
+    /// The preview is the key colors themselves at the keys, and the LED's output is its gamma.
+    #[test]
+    fn preview_is_the_color_before_gamma() {
+        for p in &PATTERNS {
+            let n = p.keys.len() as f32;
+            for (i, key) in p.keys.iter().enumerate() {
+                assert_eq!(preview_at(p.keys, i as f32 / n), *key, "{} key {i}", p.name);
+            }
+            for step in 0..200 {
+                let phase = step as f32 / 200.0;
+                let (preview, led) = (preview_at(p.keys, phase), color_at(p.keys, phase, 1.0));
+                // gamma 2.0 never brightens a channel (within rounding)
+                assert!(led.r <= preview.r && led.g <= preview.g && led.b <= preview.b, "{} @ {phase}", p.name);
+            }
+        }
+    }
 
     fn gamma(c: RGB8) -> RGB8 {
         let g = |x: u8| ((f32::from(x) / 255.0).powi(2) * 255.0 + 0.5) as u8;

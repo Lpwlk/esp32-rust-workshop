@@ -14,7 +14,8 @@ fn presets_dir(app: App) -> PathBuf {
     let root = std::env::var_os("FIRMWARE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
-    root.join(app.firmware_dir()).join("presets")
+    let dir = root.join(app.firmware_dir()).join("presets");
+    dir.canonicalize().unwrap_or(dir)
 }
 
 fn usage() -> ExitCode {

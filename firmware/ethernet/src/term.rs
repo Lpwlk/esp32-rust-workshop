@@ -673,7 +673,7 @@ pub fn burst_received(now_ms: u64, node: &str, id: u32, r: &BurstSummary, capaci
 fn swatch(pattern: &fx::Pattern, width: usize) -> usize {
     for i in 0..width {
         // Samples along the loop, so the swatch shows the actual fade.
-        let c = fx::color_at(pattern.keys, i as f32 / width as f32, 1.0);
+        let c = fx::preview_at(pattern.keys, i as f32 / width as f32);
         crate::con_print!("\x1b[38;2;{};{};{}m█", c.r, c.g, c.b);
     }
     crate::con_print!("{RST}");

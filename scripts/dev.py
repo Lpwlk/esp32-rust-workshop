@@ -385,7 +385,11 @@ def check() -> None:
         ("firmware build (UART)", ["cargo", "build", "--release"]),
         ("clippy, firmware (UART)", "cargo clippy --release -- -D warnings".split()),
         ("firmware build (Ethernet)", ["cargo", "build", "--release"], APP_DIRS["eth"]),
-        ("clippy, firmware (Ethernet)", "cargo clippy --release -- -D warnings".split(), APP_DIRS["eth"]),
+        (
+            "clippy, firmware (Ethernet)",
+            "cargo clippy --release -- -D warnings".split(),
+            APP_DIRS["eth"],
+        ),
     ]
     for i, (name, cmd, *where) in enumerate(steps, 1):
         log.info(f"[bold]{i}/{len(steps) + 1}[/] {name}")
@@ -541,7 +545,11 @@ def parser() -> argparse.ArgumentParser:
         default="uart",
         help="firmware that build / size / flash / monitor / rtt work on: uart (default) or eth (firmware/ethernet/)",
     )
-    p.add_argument("--preset", metavar="NAME", help="build firmware/<app>/presets/NAME.toml instead of node-a / node-b")
+    p.add_argument(
+        "--preset",
+        metavar="NAME",
+        help="build firmware/<app>/presets/NAME.toml instead of node-a / node-b",
+    )
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
     def node_arg(s: argparse.ArgumentParser, optional: bool = False) -> None:
@@ -601,7 +609,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument(
         "-u", "--update-docs", action="store_true", help="regenerate the reference pages"
     )
-    s = t.add_parser("target", help="firmware/uart/tests/hil.rs on a board (probe-rs), then reflash it")
+    s = t.add_parser(
+        "target", help="firmware/uart/tests/hil.rs on a board (probe-rs), then reflash it"
+    )
     node_arg(s, optional=True)
     s.add_argument("--keep", action="store_true", help="leave the test image on the board")
 

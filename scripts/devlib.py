@@ -109,7 +109,11 @@ def run(
 
 
 def live(
-    cmd: list[str], *, check: bool = True, extra_env: dict[str, str] | None = None, cwd: Path | None = None
+    cmd: list[str],
+    *,
+    check: bool = True,
+    extra_env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> int:
     """Runs `cmd` in the terminal as if typed there: its output (cargo's colors and
     errors, a serial monitor, the RTT console) isn't captured, and it reads the
@@ -123,7 +127,10 @@ def live(
     try:
         # The child gets the default Ctrl+C handling back.
         code = subprocess.call(
-            cmd, cwd=cwd or ROOT, env=env, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)
+            cmd,
+            cwd=cwd or ROOT,
+            env=env,
+            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL),
         )
     finally:
         signal.signal(signal.SIGINT, previous)

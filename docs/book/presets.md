@@ -4,8 +4,8 @@ A **preset** is a named, documented configuration of a node, in TOML. Both apps 
 
 | Folder | App | Built by | Default presets |
 |---|---|---|---|
-| [`uart/`](uart) | the UART firmware (repository root) | `cargo run --release --bin node-a` | `node-a`, `node-b` |
-| [`eth/`](eth) | the Ethernet firmware (`firmware/ethernet/`) | `cd firmware/ethernet && cargo run --release --bin node-a` | `node-a`, `node-b`, `node-a-tcp`, `node-b-tcp` |
+| `firmware/uart/presets/` | the UART firmware (`firmware/uart/`) | `cargo run --release --bin node-a` | `node-a`, `node-b` |
+| `firmware/ethernet/presets/` | the Ethernet firmware (`firmware/ethernet/`) | `cd firmware/ethernet && cargo run --release --bin node-a` | `node-a`, `node-b`, `node-a-tcp`, `node-b-tcp` |
 
 The build script reads the preset, checks it with the same code as the CLI's `set` command, and
 turns it into a `const NodeConfig` that the compiler checks once more. **A mistake stops the build**
@@ -18,8 +18,8 @@ and names the file and the key, nothing reaches the board half-configured.
 - `node-a.toml` / `node-b.toml` only list what differs from `base`: the node's name (and, for
   Ethernet, its address and its peer's).
 - The same settings are described, generated from the code, in
-  [`docs/book/reference/config.md`](../docs/book/reference/config.md) (UART) and
-  [`eth-config.md`](../docs/book/reference/eth-config.md) (Ethernet).
+  [settings reference](reference/config.md) (UART) and
+  [Ethernet settings](reference/eth-config.md).
 
 ## Writing a preset
 
