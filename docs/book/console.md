@@ -41,7 +41,7 @@ One line per frame, sent (`TX ▶`) or received (`RX ◀`), in fixed columns:
     12.156 RX ◀  DAT  #00003 node-B   btn ○ released  event     0  Δ  2142.844 ms ← TX
     12.513 TX ▶  DAT  #00004          btn ○ released  event     0  Δ   357.206 ms ← RX
     14.002 TX ▶  EVT  #00005          ▼ press    key 7A3F09C2E61B44D0  BOOT
-────   20s ── tx 7 · rx 7 · lost 0 · bad 0 ── ● link UP   ────
+─   20s ─ tx     7 · rx     7 · lost  0 · bad  0 ─ ● UP   5M
 ```
 
 | Column | Meaning |

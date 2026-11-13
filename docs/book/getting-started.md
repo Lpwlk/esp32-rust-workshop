@@ -112,7 +112,7 @@ Plug each board by its **USB Serial/JTAG** USB-C port.
 You should see the boot card, then one line per frame and, every few seconds:
 
 ```text
-────   20s ── tx 7 · rx 7 · lost 0 · bad 0 ── ● link UP   ────
+─   20s ─ tx     7 · rx     7 · lost  0 · bad  0 ─ ● UP   5M
 ```
 
 !!! warning "Link stays DOWN?"

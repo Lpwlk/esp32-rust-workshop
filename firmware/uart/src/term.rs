@@ -558,26 +558,54 @@ pub fn uart_error(now_ms: u64, what: &str) {
     out!("{GRAY}{s:>6}.{ms:03}{RST} {RED}UART ✗  {what}{RST}");
 }
 
-pub fn status(now_ms: u64, stats: &Stats, link_up: bool, baud: u32, rtt: Option<RttStats>) {
-    let (s, _) = stamp(now_ms);
-    let link = if link_up { "\x1b[1;32m● link UP  \x1b[0m" } else { "\x1b[1;31m● link DOWN\x1b[0m" };
-    let mut extra: heapless::String<64> = heapless::String::new();
-    if baud != shared::BAUD_RATE {
-        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!(" {MAGENTA}{}{RST}", Baud(baud)));
+/// Microseconds as milliseconds with two decimals: `4082` -> `4.08`.
+struct Ms(u64);
+
+impl core::fmt::Display for Ms {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}.{:02}", self.0 / 1000, self.0 % 1000 / 10)
     }
+}
+
+/// `text` right-aligned in `width` columns (a `Display` value formatted first, so padding applies
+/// to types that ignore it).
+fn cell<const N: usize>(value: impl core::fmt::Display) -> heapless::String<N> {
+    let mut s = heapless::String::new();
+    let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{value}"));
+    s
+}
+
+pub fn status(now_ms: u64, stats: &Stats, link_up: bool, baud: u32, rtt: Option<RttStats>) {
+    use core::fmt::Write;
+    let (s, _) = stamp(now_ms);
+    // `─  485s ─ tx   242 · rx   242 · lost  0 · bad  0 ─ ● UP   5M   ─ rtt  0.18 /  0.21 /  0.40 ms`
+    // Fixed-width fields: successive lines line up, and nothing shifts when a counter grows a digit.
+    let link = if link_up { "\x1b[1;32m● UP  \x1b[0m" } else { "\x1b[1;31m● DOWN\x1b[0m" };
+    // `5M`, `921k`, `1200`: the long form is in `baud` and the boot card.
+    let speed: heapless::String<8> = if baud.is_multiple_of(1_000_000) {
+        cell(format_args!("{}M", baud / 1_000_000))
+    } else if baud >= 1000 {
+        cell(format_args!("{}k", baud / 1000))
+    } else {
+        cell(baud)
+    };
+    let mut line: heapless::String<256> = heapless::String::new();
+    let _ = write!(
+        line,
+        "{GRAY}─ {s:>4}s ─ tx {:>5} · rx {:>5} · lost {:>2} · bad {:>2} ─{RST} {link} {MAGENTA}{:<4}{RST}",
+        stats.tx, stats.rx, stats.lost, stats.bad, &*speed
+    );
     if let Some(r) = rtt {
-        let _ = core::fmt::Write::write_fmt(
-            &mut extra,
-            format_args!(" {GRAY}rtt {}/{}/{}{RST}", Us(r.min_us), Us(r.avg_us), Us(r.max_us)),
+        // Three numbers with the unit once, right-aligned so the columns line up from line to line.
+        let (min, avg, max): (heapless::String<12>, heapless::String<12>, heapless::String<12>) =
+            (cell(Ms(r.min_us)), cell(Ms(r.avg_us)), cell(Ms(r.max_us)));
+        let _ = write!(
+            line,
+            " {GRAY}─ rtt{RST} {BOLD}{:>5}{RST} {GRAY}/{RST} {:>5} {GRAY}/{RST} {:>7} {GRAY}ms{RST}",
+            &*min, &*avg, &*max
         );
     }
-    out!(
-        "{GRAY}──── {s:>4}s ── tx {} · rx {} · lost {} · bad {} ──{RST} {link}{extra} {GRAY}────{RST}",
-        stats.tx,
-        stats.rx,
-        stats.lost,
-        stats.bad
-    );
+    out!("{line}");
 }
 
 // --- Link speed, round-trip time, bursts ----------------------------------------
@@ -834,17 +862,19 @@ pub fn wire(line: &[u8], delta_ms: Option<u64>) {
 }
 
 pub fn link_counters(c: &crate::link::Counters, peer_period_us: Option<u32>) {
-    let mut peer: heapless::String<24> = heapless::String::new();
-    let _ = match peer_period_us {
-        Some(us) => core::fmt::Write::write_fmt(&mut peer, format_args!("{}", Period(us as f32 / 1000.0))),
-        None => core::fmt::Write::write_str(&mut peer, "?"),
+    let peer: heapless::String<24> = match peer_period_us {
+        Some(us) => cell(Period(us as f32 / 1000.0)),
+        // The peer in `tx on-rx` mode sends no DAT, so it never announces a period.
+        None => cell("—"),
     };
+    //   link   tx 9.0 kB · rx 7.1 kB · RX buffer peak 33/2048 · peer DAT period 2.5 s
     out!(
-        "{GRAY}            bytes tx {} · rx {} · RX buffer peak {}/{} · peer DAT period {peer}{RST}",
-        c.tx_bytes,
-        c.rx_bytes,
+        "{GRAY}  link{RST}  tx {} · rx {} · RX buffer peak {}/{} · peer DAT period {}",
+        Bytes(c.tx_bytes.into()),
+        Bytes(c.rx_bytes.into()),
         c.rx_peak,
         c.rx_capacity,
+        &*peer
     );
 }
 

@@ -412,7 +412,7 @@ Which to use when:
 3. **On-target tests** (HIL) with `embedded-test`: `harness = false`, the
    `embedded-test.x` script, probe-rs as runner.
 4. **Validate the whole system** on the boards: here, two nodes and the stats line
-   (`lost 0 · bad 0 · link UP`).
+   (`lost  0 · bad  0 ─ ● UP`).
 
 ### Configuring an embedded project
 

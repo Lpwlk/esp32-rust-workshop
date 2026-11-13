@@ -140,7 +140,7 @@ Wire the boards first ([Wiring](wiring.md)). What to look at:
 
 | What | Good sign |
 |---|---|
-| Stats line (every `status_period_ms`) | `lost 0 · bad 0 ── ● link UP` |
+| Stats line (every `status_period_ms`) | `lost  0 · bad  0 ─ ● UP` |
 | `Δ` on each `DAT` line | the time since the previous `DAT`, **sent or received** (`Δ   904.288 ms ← RX`, right-aligned so the decimal points line up), measured on the wire; with both nodes at 2.5 s, the TX→RX and RX→TX deltas add up to 2500 ms |
 | Unplug and replug the button jumper | one `EVT` per edge, `bounces filtered` when it bounced |
 | `verbose wire` | each frame on the wire, its checksum, the RX buffer peak |
