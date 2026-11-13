@@ -1,0 +1,46 @@
+# Ethernet lab: the on-board RJ45 of the ESP32-S31-Function-CoreBoard-1 (YT8531 PHY, RGMII,
+# 10/100/1000 Mbit/s) with embassy-net.
+#
+# Standalone on purpose (own `[workspace]`, not a member of the firmware workspace): the EMAC
+# driver for the S31 is merged upstream (esp-rs/esp-hal #6192) but not in a release yet
+# (esp-hal 1.2.x has none), and it needs the async stack (esp-rtos + embassy), which the
+# blocking, 5 Mbaud node firmware does not use. Once a release ships it, pin the crates.io
+# versions here (and this can join the main workspace).
+[workspace]
+
+[package]
+name         = "eth-lab"
+description  = "Gigabit Ethernet on the ESP32-S31 CoreBoard: DHCP, a tiny HTTP status server, LEDs and a button."
+edition      = "2024"
+rust-version = "1.95"
+version      = "0.1.0"
+publish      = false
+
+[[bin]]
+name  = "eth-lab"
+path  = "src/main.rs"
+test  = false
+bench = false
+
+[dependencies]
+# esp-hal main, pinned to a commit (2026-11-13), all esp-rs crates from the same revision.
+esp-hal                = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "unstable", "embassy-time-05"] }
+esp-rtos               = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "embassy"] }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31"] }
+esp-backtrace          = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "panic-handler", "println"] }
+esp-println            = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", default-features = false, features = ["esp32s31", "auto", "colors"] }
+
+embassy-executor = "0.10.0"
+embassy-net      = { version = "0.9.0", features = ["dhcpv4", "medium-ethernet", "tcp", "udp"] }
+embassy-time     = "0.5.0"
+heapless         = "0.9.3"
+static_cell      = "2.1.0"
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug         = 2
+lto           = 'fat'
+opt-level     = 's'
