@@ -10,14 +10,22 @@ hide:
 
 <div class="grid cards" markdown>
 
--   :lucide-cable:{ .lg .middle } __UART link at 5 Mbaud__
+-   :lucide-network:{ .lg .middle } __Gigabit Ethernet link__
 
     ---
 
-    Five frame types (`DAT` `EVT` `BAU` `ECH` `BST`), XOR checksum, lost-frame
-    detection. Reception by interrupt into a 2 KB ring buffer, so nothing is lost
-    while the console prints. Or the same frames over Gigabit Ethernet (UDP or TCP):
-    see the [Ethernet app](ethernet.md).
+    The board's RJ45 port, cabled straight to the other board: static IP addresses, no switch, no DHCP.
+    One frame per UDP datagram, or one TCP connection; lost frames are detected, and back-to-back bursts
+    arrive intact. Four frame types (`DAT` `EVT` `ECH` `BST`) with an XOR checksum.
+
+    [:lucide-arrow-right: The Ethernet app](ethernet.md)
+
+-   :lucide-cable:{ .lg .middle } __UART link__
+
+    ---
+
+    The same node over three wires, as an alternative: the same frames (plus `BAU`, to change the speed
+    on both boards at once), reception by interrupt into a ring buffer so nothing is lost while the console prints.
 
     [:lucide-arrow-right: Frame protocol](reference/protocol.md)
 
@@ -34,8 +42,8 @@ hide:
 
     ---
 
-    Change the speed on both nodes at once (`baud 1M`, with automatic fallback),
-    measure the round-trip time (`tx on-rx`), fire bursts and read the throughput.
+    Measure the round-trip time (`tx on-rx`), fire bursts and read the throughput; on UART, change the
+    speed on both nodes at once (`baud`, with automatic fallback).
 
     [:lucide-arrow-right: How they work](architecture.md#link-tests)
 
@@ -108,6 +116,10 @@ link tests and RTT.
 
 ## Wiring at a glance { .ws-section }
 
+**Ethernet**: a cable between the two RJ45 ports (a straight cat5e is enough). The PHY uses GPIO5-19.
+
+**UART**: three wires.
+
 | Board A | | Board B | Each board |
 |---|:-:|---|---|
 | `2` GPIO2 (TX) | → | `3` GPIO3 (RX) | `4` GPIO4 ↔ `G`: jumper button |
@@ -139,12 +151,16 @@ Header J2 labels are GPIO numbers. Full details, resistor values and pins to avo
 
 -   :lucide-cpu:{ .lg .middle } [__Firmware walkthrough__](firmware.md)
 
-    Boot, the main loop, the 5 Mbaud UART interrupt, shared state, flash, RMT,
+    Boot, the main loop, the UART interrupt, shared state, flash, RMT,
     raw registers: the embedded code explained, line by line.
 
 -   :lucide-blocks:{ .lg .middle } [__Architecture__](architecture.md)
 
-    Two crates, the main loop, 5 Mbaud reception, link tests.
+    The crates, the main loop, frame reception, link tests.
+
+-   :lucide-timer:{ .lg .middle } [__Ferrite RTOS__](ferrite.md)
+
+    The project's own preemptive RTOS in Rust: a host-tested kernel and its ESP32-S31 port.
 
 -   :lucide-book-open:{ .lg .middle } [__Rust & Cargo guide__](guide-rust.md)
 

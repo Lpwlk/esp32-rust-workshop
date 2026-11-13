@@ -2,7 +2,7 @@
 
 # ESP32-S31 workshop
 
-**Two ESP32-S31 boards talking to each other, over a 5 Mbaud UART or over Gigabit Ethernet, in `no_std` Rust.**
+**Two ESP32-S31 boards talking to each other, over Gigabit Ethernet or over a UART, in `no_std` Rust.**
 
 [![CI](https://github.com/Lpwlk/esp32-rust-workshop/actions/workflows/ci.yml/badge.svg)](https://github.com/Lpwlk/esp32-rust-workshop/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-lpwlk.github.io-4D9DD1)](https://lpwlk.github.io/esp32-rust-workshop/)
@@ -21,7 +21,7 @@ ESP32-S31-Function-CoreBoard-1. The same node exists with two different **links*
 
 | | **Ethernet app** | **UART app** |
 |---|---|---|
-| link | the board's RJ45, Gigabit, UDP or TCP, static IPs | 5 Mbaud UART, three wires |
+| link | the board's RJ45, Gigabit, UDP or TCP, static IPs | UART, three wires |
 | folder | [`firmware/ethernet/`](firmware/ethernet) | [`firmware/uart/`](firmware/uart) |
 | run | `cd firmware/ethernet && cargo run --release --bin node-a` | `cd firmware/uart && cargo run --release --bin node-a` |
 | settings | [`firmware/ethernet/presets/`](firmware/ethernet/presets) | [`firmware/uart/presets/`](firmware/uart/presets) |
@@ -241,7 +241,7 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 | [Examples](https://lpwlk.github.io/esp32-rust-workshop/examples/) | runnable code: frames, settings, debouncing, CLI |
 | [Firmware walkthrough](https://lpwlk.github.io/esp32-rust-workshop/firmware/) | the UART app's code explained: boot, main loop, interrupt, shared state, flash, RMT |
 | [Configuration](https://lpwlk.github.io/esp32-rust-workshop/configuration/) | Cargo features, node config, saved settings, where to change what |
-| [Architecture](https://lpwlk.github.io/esp32-rust-workshop/architecture/) | the crates, the main loop, 5 Mbaud reception, timing |
+| [Architecture](https://lpwlk.github.io/esp32-rust-workshop/architecture/) | the crates, the main loop, frame reception, timing |
 | [Rust & Cargo guide](https://lpwlk.github.io/esp32-rust-workshop/guide-rust/) | Cargo, then Cargo for microcontrollers, and a cheat sheet |
 | [Reference](https://lpwlk.github.io/esp32-rust-workshop/reference/cli/) | CLI, settings, protocol, pins, patterns (UART and Ethernet): generated from the code |
 
