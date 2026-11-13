@@ -4,11 +4,14 @@ mros is a small **preemptive real-time kernel** written for this project, in `no
 ESP32-S31. It is the start of replacing the two ways the apps schedule their work today (the UART app's blocking
 loop, the Ethernet app's `esp-rtos` + Embassy) with a scheduler the project owns and can test.
 
-!!! warning "Status: the kernel is tested, the port is not run yet"
+!!! info "Status: the kernel is tested, the port ran its demo for 21 minutes"
     - **Kernel** (`firmware/shared/mros`): finished for a first version, **13 tests + 1 doc test on the host**.
-    - **ESP32-S31 port** (`firmware/mros-esp32s31`): **builds** (release, clippy clean; the save half of the
-      context switch was disassembled and its offsets checked), but **has not run on a board**: the two boards were busy when it was written.
-      Treat the context switch as unverified until the demo below prints what it should.
+    - **ESP32-S31 port** (`firmware/mros-esp32s31`): the demo ran on a board for **over 21 minutes (1.27 million
+      ticks)** with no fault. What that showed: tick, context switch, preemption, `delay`, the queue's blocking
+      `send`/`recv`, and round robin (the two spinners' counters stayed within 0.1 %, at about 104 switches
+      a second, as 10 ms slices plus the periodic tasks predict).
+    - **Not exercised on hardware yet:** the mutex and its priority inheritance, the semaphore, timeouts, floating-point
+      registers across a switch (the demo uses no floats), the wrap of the tick counter (after 49 days).
     - **The apps do not use it yet.** See [Moving the apps onto mros](#moving-the-apps-onto-mros) for why and how.
 
 ## Design
@@ -95,6 +98,16 @@ cargo run --release --example demo
 Five tasks: a 500 ms `ticker` (priority 6), a `producer` and a `consumer` joined by a queue (4 and 3), and two
 spinners that never block (2). If the kernel and the port work, the console shows the consumer receiving a number each
 second, and the spinners' loop counters, printed every 5 s, growing at about the same pace: that is the round robin.
+Measured on a board (from the 21-minute run):
+
+```text
+[1255000 ms] ticker: spin-a 2782999203 loops, spin-b 2785798101 loops, 130521 task switches
+[1260000 ms] ticker: spin-a 2811197525 loops, spin-b 2814008116 loops, 131041 task switches
+[1265000 ms] ticker: spin-a 2839397267 loops, spin-b 2842218131 loops, 131561 task switches
+```
+
+Per 5 s: 28.2 million loops each, 520 switches (100 a second between the spinners, the rest for the other tasks), and
+the `ticker` prints on the exact millisecond every time.
 
 ## Moving the apps onto mros
 
@@ -107,9 +120,13 @@ under firmware that works. What each move needs:
 | **UART** | a blocking loop on `esp-hal` 1.2.2 (crates.io) | the port builds on `esp-hal` `main` (it needs the S31 RTOS hooks), so the UART app stays on its loop until a release has them, or moves to the Ethernet workspace's `esp-hal`. |
 | **Tests** | host tests of `workshop-core`; on-target tests (`cargo test-target`) on the UART app | the kernel's tests are already in `cargo test-host`. Once the demo runs, the demo's expectations (a periodic task's jitter, the round robin's fairness) become on-target tests. |
 
-Suggested order: run the demo and check it; add a stack-usage and task-list command to the CLI (`tasks`) using the
+Suggested order: test what the demo doesn't cover (below); add a stack-usage and task-list command to the CLI (`tasks`) using the
 kernel's `state`/`priority`; move the Ethernet app's console task (already a separate task) onto mros as the
 first real user; then the executor.
+
+The demo doesn't cover the mutex, the semaphore, timeouts or floats: a second on-target demo should (two tasks
+doing float arithmetic and checking their results while switching all the time; a low/mid/high priority-inversion
+scenario; a semaphore signalled from the tick) before anything depends on them.
 
 ## What is missing
 
