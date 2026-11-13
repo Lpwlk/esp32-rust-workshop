@@ -15,9 +15,12 @@ target = "riscv32imafc-unknown-none-elf"
 
 
 [alias]
-# Unit tests, property tests and doc examples of crates/workshop-core, on this computer.
-test-host = ["test", "-p", "workshop-core", "--target", "host-tuple"]
-# On-target tests (tests/hil.rs), flashed and run on one board by probe-rs through its
+# Unit tests, property tests and doc examples of firmware/shared/core, on this computer.
+test-host = ["test", "-p", "workshop-core", "-p", "workshop-presets", "--target", "host-tuple"]
+# Look at and check the TOML presets (presets/): `cargo presets list`, `cargo presets show eth node-a`,
+# `cargo presets check`.
+presets = ["run", "-q", "-p", "workshop-presets", "--target", "host-tuple", "--bin", "presets", "--"]
+# On-target tests (firmware/uart/tests/hil.rs), flashed and run on one board by probe-rs through its
 # USB Serial/JTAG port. With two boards plugged in, pick one with PROBE_RS_PROBE
 # (see `probe-rs list`), e.g. PROBE_RS_PROBE=303a:1001:1C:29:04:D0:6C:1A cargo test-target
 test-target = [

@@ -1,26 +1,26 @@
 # Firmware walkthrough
 
-A guided tour of `src/`, the part of the project that touches the hardware. Each
+A guided tour of `firmware/uart/src/`, the part of the project that touches the hardware. Each
 block of code below is **included from the source file** when the site is built:
 what you read is what is compiled.
 
 The hardware-free logic (frame format, debouncing, settings, CLI parsing) lives in
-`crates/workshop-core` and is covered on the [Examples](examples.md) page. This
+`firmware/shared/core` and is covered on the [Examples](examples.md) page. This
 page is about the rest: peripherals, interrupts, memory, and how they fit in a
 `no_std` program with no operating system.
 
 | File | Role | Peripherals |
 |---|---|---|
-| `src/bin/node_a.rs`, `node_b.rs` | one binary per node: its config | none |
-| `src/lib.rs` | boot (`run`), the main loop (`Node::step`), watchdog | TIMG0 |
-| `src/link.rs` | UART link at 5 Mbaud, interrupt-driven reception | UART1, GPIO2, GPIO3 |
-| `src/button.rs` | jumper and BOOT button on GPIO interrupts | IO_MUX, GPIO4, GPIO61 |
-| `src/settings.rs` | settings saved in flash | FLASH |
-| `src/led.rs`, `fx.rs` | RGB LED, fade patterns | RMT, GPIO60 |
-| `src/ext_leds.rs` | the two breadboard LEDs | GPIO20/21 |
-| `src/trng.rs` | starts the true random number generator | LP_TRNG (raw registers) |
-| `src/cli.rs` | key presses from USB and RTT into the CLI | USB_DEVICE |
-| `src/term.rs`, `rtt_console.rs` | console output, its routing to USB and RTT | none (esp-println, RTT) |
+| `firmware/uart/src/bin/node_a.rs`, `node_b.rs` | one binary per node: its config | none |
+| `firmware/uart/src/lib.rs` | boot (`run`), the main loop (`Node::step`), watchdog | TIMG0 |
+| `firmware/uart/src/link.rs` | UART link at 5 Mbaud, interrupt-driven reception | UART1, GPIO2, GPIO3 |
+| `firmware/uart/src/button.rs` | jumper and BOOT button on GPIO interrupts | IO_MUX, GPIO4, GPIO61 |
+| `firmware/uart/src/settings.rs` | settings saved in flash | FLASH |
+| `firmware/uart/src/led.rs`, `fx.rs` | RGB LED, fade patterns | RMT, GPIO60 |
+| `firmware/uart/src/ext_leds.rs` | the two breadboard LEDs | GPIO20/21 |
+| `firmware/uart/src/trng.rs` | starts the true random number generator | LP_TRNG (raw registers) |
+| `firmware/uart/src/cli.rs` | key presses from USB and RTT into the CLI | USB_DEVICE |
+| `firmware/uart/src/term.rs`, `rtt_console.rs` | console output, its routing to USB and RTT | none (esp-println, RTT) |
 
 ## 1. From reset to `main`
 
@@ -36,14 +36,14 @@ flowchart TB
 
 A node binary is three lines of real code: its config, and one macro call.
 
-```rust title="src/bin/node_a.rs"
---8<-- "src/bin/node_a.rs"
+```rust title="firmware/uart/src/bin/node_a.rs"
+--8<-- "firmware/uart/src/bin/node_a.rs"
 ```
 
 The macro expands to everything a bare-metal Rust program needs:
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:macro"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:macro"
 ```
 
 | Line | What it does |
@@ -64,8 +64,8 @@ The macro expands to everything a bare-metal Rust program needs:
 
 ## 2. `run()`: taking the peripherals
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:run"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:run"
 ```
 
 `esp_hal::init` sets the clocks (CPU at 320 MHz with `CpuClock::max()`) and
@@ -85,8 +85,8 @@ let other = Uart::new(peripherals.UART1, …);  // error[E0382]: use of moved va
 
 The pins from the config are numbers, not fields, so they go through `pin()`:
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:pin"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:pin"
 ```
 
 `AnyPin::steal` creates a pin from its number, skipping the ownership check, hence
@@ -102,8 +102,8 @@ audio, BOOT).
 4. the **watchdog last**, as the final field of `Node`: printing the boot card can
    take a while, and the watchdog must not fire before the loop runs.
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:loop"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:loop"
 ```
 
 ## 3. The main loop
@@ -111,8 +111,8 @@ audio, BOOT).
 No operating system, no async runtime: one loop, which calls `step()` as fast as
 it can. Each part does a little work and returns; nothing waits.
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:step"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:step"
 ```
 
 ```mermaid
@@ -148,8 +148,8 @@ flowchart TB
 
 The watchdog fed at the top of `step()`:
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:watchdog"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:watchdog"
 ```
 
 TIMG0's watchdog counts down from 2 s; `feed()` restarts it. If one `step()` ever
@@ -167,8 +167,8 @@ buffer, and the loop reads that buffer whenever it gets there.
 
 ### Shared state
 
-```rust title="src/link.rs"
---8<-- "src/link.rs:statics"
+```rust title="firmware/uart/src/link.rs"
+--8<-- "firmware/uart/src/link.rs:statics"
 ```
 
 The interrupt handler is a plain function: it can't receive arguments, so what it
@@ -190,8 +190,8 @@ shares with the main loop lives in `static`s.
 
 ### The interrupt handler
 
-```rust title="src/link.rs"
---8<-- "src/link.rs:isr"
+```rust title="firmware/uart/src/link.rs"
+--8<-- "firmware/uart/src/link.rs:isr"
 ```
 
 - **When it fires**: the FIFO holds 64 bytes (`RxFifoFull`, half full: 128 µs of
@@ -210,8 +210,8 @@ shares with the main loop lives in `static`s.
 
 ### Setup and sending
 
-```rust title="src/link.rs"
---8<-- "src/link.rs:init"
+```rust title="firmware/uart/src/link.rs"
+--8<-- "firmware/uart/src/link.rs:init"
 ```
 
 `listen()` and `replace()` happen inside one critical section: the interrupt can't
@@ -219,8 +219,8 @@ fire between them and find no driver. The handler is registered with
 `set_interrupt_handler`; `#[handler]` on `on_uart1` generates the interrupt entry
 point (saving registers, priority).
 
-```rust title="src/link.rs"
---8<-- "src/link.rs:send"
+```rust title="firmware/uart/src/link.rs"
+--8<-- "firmware/uart/src/link.rs:send"
 ```
 
 A frame (< 100 bytes) fits in the 128-byte TX FIFO, so `send` doesn't wait for the
@@ -232,8 +232,8 @@ deltas share one clock.
 
 The loop side: drain the ring buffer, cut it into lines, parse.
 
-```rust title="src/lib.rs"
---8<-- "src/lib.rs:receive"
+```rust title="firmware/uart/src/lib.rs"
+--8<-- "firmware/uart/src/lib.rs:receive"
 ```
 
 `LineBuffer` and `protocol::parse` come from `workshop-core`: see
@@ -251,8 +251,8 @@ The loop side: drain the ring buffer, cut it into lines, parse.
 esp-hal has **one** interrupt handler for all GPIOs. With two buttons (the jumper
 and BOOT), the handler checks each pin's own flag:
 
-```rust title="src/button.rs"
---8<-- "src/button.rs:isr"
+```rust title="firmware/uart/src/button.rs"
+--8<-- "firmware/uart/src/button.rs:isr"
 ```
 
 Same pattern as the UART: the handler only **records** (how many edges, when the
@@ -260,8 +260,8 @@ last one was); it decides nothing. The decision (debounce, lockout) is made in t
 loop by `workshop_core::button::Debouncer`, tested on the host with simulated
 bounces ([Examples](examples.md#debouncing-a-button)).
 
-```rust title="src/button.rs"
---8<-- "src/button.rs:new"
+```rust title="firmware/uart/src/button.rs"
+--8<-- "firmware/uart/src/button.rs:new"
 ```
 
 `Gpio` owns `Io` (the IO_MUX driver) and installs the handler once; `Button::new`
@@ -270,8 +270,8 @@ starts listening. The type system enforces the order instead of a comment.
 
 ## 6. Settings in flash
 
-```rust title="src/settings.rs"
---8<-- "src/settings.rs:store"
+```rust title="firmware/uart/src/settings.rs"
+--8<-- "firmware/uart/src/settings.rs:store"
 ```
 
 - **Where**: the partition table (at 0x8000) lists the partitions; the code looks
@@ -285,8 +285,8 @@ starts listening. The type system enforces the order instead of a comment.
 
 The same file shows how an **optional feature** stays out of the call sites:
 
-```rust title="src/settings.rs"
---8<-- "src/settings.rs:stub"
+```rust title="firmware/uart/src/settings.rs"
+--8<-- "firmware/uart/src/settings.rs:stub"
 ```
 
 Without `persist`, `Store` still exists with the same methods; they just say "not
@@ -295,8 +295,8 @@ compiler optimizes the stub away. The watchdog and RTT follow the same pattern.
 
 ## 7. LEDs: RMT and plain GPIO
 
-```rust title="src/led.rs"
---8<-- "src/led.rs"
+```rust title="firmware/uart/src/led.rs"
+--8<-- "firmware/uart/src/led.rs"
 ```
 
 The RGB LED is a WS2812: one data wire, 24 bits per color, each bit a high pulse
@@ -306,13 +306,13 @@ durations by itself, at 80 MHz (12.5 ns resolution). `esp-hal-smartled` turns
 colors into those pulses. `memsize 2` gives the channel two RAM blocks, enough for
 the 24 bits of one LED without refilling.
 
-The breadboard LEDs are plain `Output` pins (`src/ext_leds.rs`); what each mode
+The breadboard LEDs are plain `Output` pins (`firmware/uart/src/ext_leds.rs`); what each mode
 shows is decided in `workshop_core::leds`.
 
 ## 8. The TRNG: raw registers
 
-```rust title="src/trng.rs"
---8<-- "src/trng.rs:trng"
+```rust title="firmware/uart/src/trng.rs"
+--8<-- "firmware/uart/src/trng.rs:trng"
 ```
 
 esp-hal 1.2.2 reads random numbers on the S31 but never starts the generator; the
@@ -329,8 +329,8 @@ These five writes mirror ESP-IDF's `trng_ll_enable()`.
 
 Output goes through one macro, routed at run time by the `console` setting:
 
-```rust title="src/rtt_console.rs"
---8<-- "src/rtt_console.rs:macro"
+```rust title="firmware/uart/src/rtt_console.rs"
+--8<-- "firmware/uart/src/rtt_console.rs:macro"
 ```
 
 - `$crate::` makes the macro work from any module (and any crate).
@@ -341,8 +341,8 @@ Output goes through one macro, routed at run time by the `console` setting:
 Input: the CLI reads bytes from USB **and** from the RTT down channel, into the same
 line editor:
 
-```rust title="src/cli.rs"
---8<-- "src/cli.rs:poll"
+```rust title="firmware/uart/src/cli.rs"
+--8<-- "firmware/uart/src/cli.rs:poll"
 ```
 
 `read_byte()` never blocks: it returns an `nb::Result`, and "no byte yet" is
@@ -354,8 +354,8 @@ The whole firmware has two `unsafe` blocks, each with its justification next to 
 
 | Where | What | Why it's sound |
 |---|---|---|
-| `src/lib.rs`, `pin()` | `AnyPin::steal(n)`: a GPIO from its number | `NodeConfig::check` proves at compile time that the configured pins are distinct, exist, and aren't used elsewhere |
-| `src/trng.rs`, `modify()` | volatile access to three MMIO registers | fixed addresses from the register map, touched nowhere else |
+| `firmware/uart/src/lib.rs`, `pin()` | `AnyPin::steal(n)`: a GPIO from its number | `NodeConfig::check` proves at compile time that the configured pins are distinct, exist, and aren't used elsewhere |
+| `firmware/uart/src/trng.rs`, `modify()` | volatile access to three MMIO registers | fixed addresses from the register map, touched nowhere else |
 
 Everything else (interrupts, shared state, flash, DMA-free drivers) goes through
 esp-hal's safe API and `critical_section`.
@@ -363,8 +363,8 @@ esp-hal's safe API and `critical_section`.
 ## Adding a peripheral: a recipe
 
 1. **Logic first**: whatever doesn't need the hardware (a parser, a state machine, a
-   conversion) goes in `crates/workshop-core`, with tests.
-2. **A driver module** in `src/`: it takes its peripheral by value in `new()`, so
+   conversion) goes in `firmware/shared/core`, with tests.
+2. **A driver module** in `firmware/uart/src/`: it takes its peripheral by value in `new()`, so
    ownership proves nobody else uses it.
 3. **Interrupt?** Share through `static Mutex<RefCell<…>>` (or atomics), keep the
    handler short and bounded, and let the loop decide.

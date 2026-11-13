@@ -7,10 +7,13 @@ hide:
 
 Everything the firmware does shows up on its console: over the **USB serial**
 port (`espflash monitor`) by default, or through the debug probe (**RTT**). Same
-text, same colors. The recordings on this page are real sessions on two
+text, same colors, for the **UART app** and the **Ethernet app**: they share the
+console, the CLI and the settings, and only what concerns the link differs
+(`baud` on UART, `link` on Ethernet). The recordings on this page are real sessions on two
 ESP32-S31-Function-CoreBoard-1 boards (node A shown, node B running alongside),
 captured with `scripts/record.py`. They are text, not videos: pause them, seek
-with the progress bar, or select and copy a line.
+with the progress bar, or select and copy a line. The README shows the Ethernet
+app in GIFs (`scripts/record_demos.py`).
 
 ## Boot
 
@@ -22,7 +25,7 @@ everything that defines this node, in one screen.
 
 | Section | What it tells you |
 |---|---|
-| **link** | what both nodes must agree on: UART, baud rate, frame format |
+| **link** | what both nodes must agree on: UART and baud rate, or Ethernet (transport, port, the PHY and its speed), and the frame format |
 | **node** | this board's config: name, pins, periods, button filter |
 | **build** | firmware version, git commit (`+dirty` if built from uncommitted changes), date, profile, rustc, crate versions |
 | **chip** | silicon revision, CPU clock, MAC, reset reason, three TRNG samples |
@@ -41,7 +44,7 @@ One line per frame, sent (`TX ▶`) or received (`RX ◀`), in fixed columns:
     12.156 RX ◀  DAT  #00003 node-B   btn ○ released  event     0  Δ  2142.844 ms ← TX
     12.513 TX ▶  DAT  #00004          btn ○ released  event     0  Δ   357.206 ms ← RX
     14.002 TX ▶  EVT  #00005          ▼ press    key 7A3F09C2E61B44D0  BOOT
-────   20s ── tx 7 · rx 7 · lost 0 · bad 0 ── ● link UP   ────
+─   20s ─ tx     7 · rx     7 · lost  0 · bad  0 ─ ● UP   5M
 ```
 
 | Column | Meaning |
@@ -106,11 +109,24 @@ like a shell:
 === "Link tests"
 
     ```text
-    baud 1M                   both nodes switch together (handshake, auto fallback)
+    baud 1M                   UART: both nodes switch together (handshake, auto fallback)
+    link                      Ethernet: cable, negotiated speed, addresses, transport, counters
     tx on-rx                  answer every frame: the peer shows the round-trip time
     burst                     asks the length and the rate, then measures
     burst 1000 max            same, in one line
     ```
+
+=== "Peer's address space"
+
+    ```text
+    browse /leds              list what the peer has: its LEDs, buttons, stats, settings
+    read /buttons/jumper      one of its variables
+    write /leds/1 blink 200   write one (checked like its own `set`)
+    watch /buttons/jumper     the peer reports it whenever it changes
+    unwatch                   stop watching
+    ```
+
+    These are requests to the other board, over the same link: [Protocols](protocols.md#the-address-space-ua-lite).
 
 === "Help"
 
@@ -118,7 +134,7 @@ like a shell:
     help                      every command, grouped
     help set                  one command: usage, details, examples
     help rgb.cycle_ms         one setting: meaning, accepted values, default
-    verbose                   raw frames, checksums, byte counters
+    verbose [0|1|2]           console detail: live line, every frame, or raw frames too
     ```
 
 Every command, with its examples (each one is checked by a unit test):
@@ -174,7 +190,7 @@ probe-rs.
 === "cargo-embed"
 
     ```sh
-    # Embed.toml: RTT console, flashing disabled (see the warning below)
+    # firmware/uart/Embed.toml: RTT console, flashing disabled (see the warning below)
     cargo embed --release --features rtt --bin node-a --probe <id>
     ```
 
@@ -185,6 +201,20 @@ probe-rs.
 
 `set console serial|rtt|both|auto` chooses where the output goes at run time:
 [Logs and console](guide-rust.md#logs-and-console).
+
+## How much the console prints: `verbose`
+
+A frame every couple of seconds scrolls fast, so the console has three levels (`verbose`, alone it goes to the
+next one; also a key of the [presets](presets.md)):
+
+| Level | `verbose` | What you see |
+|---|---|---|
+| 0 | `live` (default) | **one line**, updated in place just above the prompt: the last frame sent or received, with the `tx` / `rx` / `lost` counters. Lost or bad frames, link up / down, bursts and errors still scroll as lines, and so does everything you type |
+| 1 | `frames` | every frame on its own line, and the periodic stats line |
+| 2 | `wire` | frames plus the raw line, checksum and size of each, the time since the peer's previous frame, ignored button bounces and the link counters |
+
+The live line is only on the USB console: an RTT-only console (`set console rtt`) has no prompt to keep it
+under, so it gets every line. Old spellings still work: `verbose on` is `wire`, `verbose off` is `live`.
 
 ## Recording a session
 
@@ -204,5 +234,32 @@ types the `--type` commands one key at a time, and writes an asciicast that
 - `--start 4.5` drops the boot from the recording, `--trim REGEX` drops lines
   (the ROM and bootloader logs);
 - record from a committed tree, or the boot card shows `+dirty`. The `.cast` files
-  are kept next to the GIFs (`docs/book/assets/demo/`), to re-render them with
+  are kept next to the GIFs (`docs/book/assets/demo/`), to render them again with
   other settings.
+
+### The look of the GIFs
+
+A cast is the raw text of the session, so a GIF can be **restyled without recording again and without a board**:
+font size, line height, theme, font, speed, pauses, window size. The look is written once, with every key explained, in
+`docs/book/assets/demo/render.toml`:
+
+```toml
+[style]
+font_size = 15       # pixels: a smaller font gives a smaller picture and file
+theme = "monokai"
+speed = 1.0
+
+[eth-boot]           # one recording only: a table named like the cast
+font_size = 12       # the long boot card, smaller
+```
+
+```sh
+python3 scripts/render_demos.py --list              # the look each cast would get
+python3 scripts/render_demos.py --font-size 12      # all casts, smaller, to try it
+python3 scripts/render_demos.py eth-boot            # one cast, with what render.toml says
+python3 scripts/record.py boot.cast --render-only --theme nord   # one file, another theme
+```
+
+The same options work when recording (`record.py ... --font-size 12`, `record_demos.py --font-size 12`). At 15 px a
+100-column cast is 918 px wide, at 11 px it is 673 px; the text stays crisp. The full list of keys is in
+[Console recordings](automation.md#console-recordings-the-gifs).

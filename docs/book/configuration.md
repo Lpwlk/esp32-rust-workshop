@@ -5,19 +5,19 @@ place has a single job:
 
 | Question | Where | When it applies |
 |---|---|---|
-| **What is compiled into the firmware?** | Cargo features, in `Cargo.toml` | build |
-| **What must both nodes agree on?** | `config::shared` (`crates/workshop-core/src/config.rs`) | build |
-| **What does this node do by default?** | its `NodeConfig`, in `src/bin/node_a.rs` / `node_b.rs` | build |
+| **What is compiled into the firmware?** | Cargo features, in `firmware/uart/Cargo.toml` or `firmware/ethernet/Cargo.toml` | build |
+| **What must both nodes agree on?** | UART: `config::shared` (`firmware/shared/core/src/config.rs`); Ethernet: the `[net]` section of the preset | build |
+| **What does this node do by default?** | its preset, `presets/<app>/node-a.toml` (extends `base.toml`) | build |
 | **What did I change and keep?** | flash, written by the CLI `save` | every boot |
 | **What do I want to try right now?** | the CLI: `set`, `reset` | until reboot |
 | How do the esp-rs crates behave? | `.cargo/esp-config.toml` | build |
-| How is it built, flashed, debugged? | `rust-toolchain.toml`, `.cargo/config.toml`, `Embed.toml` | your computer |
+| How is it built, flashed, debugged? | `rust-toolchain.toml`, `.cargo/config.toml`, `firmware/uart/Embed.toml` | your computer |
 
 ## How a node gets its settings
 
 ```mermaid
 flowchart LR
-    default["NodeConfig::DEFAULT<br/>(workshop-core)"] --> node["src/bin/node_*.rs<br/>overrides"]
+    default["NodeConfig::DEFAULT / DEFAULT_NET<br/>(workshop-core)"] --> node["firmware/*/presets/*.toml<br/>overrides"]
     node -- "const check: invalid = build error" --> build["build config<br/>(in the firmware)"]
     build --> boot(("boot"))
     flash["saved in flash<br/>(CLI save)"] -- "applied on top,<br/>each value re-validated" --> boot
@@ -26,9 +26,8 @@ flowchart LR
     live -- "save" --> flash
 ```
 
-Precedence, lowest first: **build config → saved settings → `set`**. `reset`
-goes back to the build value; `forget` erases what was saved; `reboot` drops what
-wasn't.
+Precedence, lowest first: **build config → saved settings → `set`** (a `write` from the peer's address space counts as
+a `set`). `reset` goes back to the build value; `forget` erases what was saved; `reboot` drops what wasn't.
 
 The same validation runs everywhere: `NodeConfig::validate()` is a `const fn`, so
 it checks the node files at compile time, every `set` at run time, and every saved
@@ -36,6 +35,8 @@ value at boot. A value the build would refuse can't reach the hardware through t
 CLI or the flash.
 
 ## Cargo features: what is compiled in
+
+The two apps have the same three features, with the same meaning (the Ethernet app builds from `firmware/ethernet/`).
 
 ```sh
 cargo build --release                                   # default: persist + watchdog
@@ -46,13 +47,13 @@ cargo build --release --no-default-features --features rtt
 
 | Feature | Default | What it adds | Cost |
 |---|---|---|---|
-| `persist` | on | CLI `save` / `forget`; saved settings applied at boot | esp-storage; ~50 ms per `save` (one flash sector erased and written) |
+| `persist` | on | CLI `save` / `forget`; saved settings applied at boot | esp-storage (UART app) or `esp_hal::flash` (Ethernet app); ~50 ms per `save` (one flash sector erased and written) |
 | `watchdog` | on | TIMG0 watchdog: the chip resets if the main loop stalls for 2 s (`WATCHDOG_MS`) | none at run time (one register write per loop) |
 | `rtt` | off | RTT console through the debug probe; the `console` setting then chooses serial, RTT or both | rtt-target, 4 KB of RAM for the buffers |
 
 Features are **additive**: each one adds a capability and never changes what the
-others do, so any combination builds. CI builds and lints four combinations
-(default, none, all, `rtt` alone).
+others do, so any combination builds. CI builds and lints four combinations of the UART app
+(default, none, all, `rtt` alone) and three of the Ethernet app (default, none, all).
 
 The boot card shows the features a firmware was built with, under **system**:
 
@@ -74,36 +75,52 @@ The boot card shows the features a firmware was built with, under **system**:
 
 ## Shared settings: what both nodes must agree on
 
-`config::shared` holds the settings that break the link if the nodes disagree:
+**UART.** `config::shared` holds the settings that break the link if the nodes disagree:
 today, the boot baud rate (`shared::BAUD_RATE`, 5 Mbaud). They are constants of
 the core crate, compiled into both binaries, so both always get the same value.
-
 The `baud` command changes the speed at run time, but through a handshake with the
 peer, never as a local setting.
 
+**Ethernet.** The link is a `[net]` section of the preset, and the two nodes must agree on the transport and the port,
+while each one's `peer` is the other's `address`:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `net.transport` | `udp` (one frame per datagram) or `tcp` (one connection) | `udp` |
+| `net.address`, `net.prefix_len` | this node's static IPv4 address and subnet size (no DHCP) | `192.168.77.11`, 24 |
+| `net.peer` | the other node's address, same subnet | `192.168.77.12` |
+| `net.port` | port of the frames (UDP, or the TCP server's) | 7000 |
+| `net.tcp_role` | TCP only: `server` listens, `client` connects and retries | `client` |
+| `net.max_speed` | `1000` (the firmware sets the MPLL to 500 MHz) or `100` | 1000 |
+
+They are read-only at run time (the stack is configured once, at boot) and checked at build time: an address outside
+the subnet, a peer equal to the node, or a pin in the PHY's GPIO5-19 range fails the build. All of it is generated into the
+[Ethernet settings reference](reference/eth-config.md).
+
 ## Node config: what each node does by default
 
-Each binary is its configuration plus one macro call:
+Each node is a preset, a TOML file in `firmware/uart/presets/` (or `firmware/ethernet/presets/` for the
+[Ethernet app](ethernet.md)):
 
-```rust
-use esp32_rust_workshop::config::{Console, LedMode, NodeConfig};
+```toml
+extends = "base"            # every setting, documented, is in base.toml
+name    = "node-A"
+data_period_ms = 1000
+led1    = "peer"
+console = "serial"
 
-const CONFIG: NodeConfig = NodeConfig {
-    name: "node-A",
-    data_period_ms: 1000.0,
-    led1: LedMode::PeerButton,
-    console: Console::Serial,
-    ..NodeConfig::DEFAULT     // everything else: the defaults
-};
-
-esp32_rust_workshop::node_firmware!(CONFIG);
+[pins]
+button = 5                  # plain settings first, then the [sections]
 ```
 
-- `..NodeConfig::DEFAULT` takes every field you don't name from the defaults,
-  so a node file lists only what makes that node different.
-- `node_firmware!` adds `const _: () = CONFIG.check();`: a bad value is a **build
-  error** with a message (`config: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)`),
+- A preset lists only what makes the node different: `extends` and the defaults supply the rest.
+- The build script (`workshop-presets`) reads the preset with the same code as the CLI's `set`, and
+  the compiler checks the result again with `const _: () = CONFIG.check();`: a bad value is a
+  **build error** that names the file and the key
+  (`pins.led1: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)`),
   not a crash on the board.
+- `PRESET_NODE_A=my-preset cargo run --release --bin node-a` builds another preset;
+  `cargo presets list | show | check` inspects them. Format: `docs/book/presets.md`.
 - The [settings reference](reference/config.md) lists every field, its range and
   its default; it is generated from the code.
 
@@ -111,8 +128,8 @@ Two kinds of fields:
 
 | Kind | Examples | Change it |
 |---|---|---|
-| **Runtime** | periods, LED modes, RGB pattern, `tx_mode`, `console`, `verbose` | in the node file, or live with `set` |
-| **Read-only** | `name`, `pins.*` | node file only: the pins are wired to peripherals at boot, and the name identifies the node (and its saved settings) |
+| **Runtime** | periods, LED modes, RGB pattern, `tx_mode`, `console`, `verbose` (`live`, `frames`, `wire`) | in the preset, or live with `set` (or `write /config/<key>` from the peer) |
+| **Read-only** | `name`, `pins.*` (`net.*` on Ethernet) | the preset only: the pins are wired to peripherals at boot, and the name identifies the node (and its saved settings) |
 
 ## Saved settings: what you changed and keep
 
@@ -161,9 +178,10 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 | File | Holds |
 |---|---|
 | `rust-toolchain.toml` | Rust channel (stable), the RISC-V target, `rust-src`, `llvm-tools` (for `cargo size`). rustup installs them on the first `cargo` command |
-| `Cargo.toml` | workspace, shared versions (`[workspace.package]`, `[workspace.dependencies]`), features, profiles (`opt-level = "s"`, fat LTO) |
-| `.cargo/config.toml` | default target, `cargo run` = espflash, aliases `test-host` / `test-target`, frame pointers for backtraces |
-| `Embed.toml` | cargo-embed: RTT console only, flashing disabled (see the [probe-rs pitfall](guide-rust.md#flash-run-debug)) |
+| `Cargo.toml` | the workspace root: members (`firmware/uart` and the shared crates), shared versions (`[workspace.package]`, `[workspace.dependencies]`), profiles (`opt-level = "s"`, fat LTO). `firmware/uart/Cargo.toml` and `firmware/ethernet/Cargo.toml` hold each firmware's binaries, dependencies and features |
+| `.cargo/config.toml` | default target, `cargo run` = espflash, aliases `test-host` / `test-target` / `presets`, frame pointers for backtraces |
+| `firmware/*/presets/*.toml` | the nodes' settings: see [Presets](presets.md) |
+| `firmware/uart/Embed.toml` | cargo-embed: RTT console only, flashing disabled (see the [probe-rs pitfall](guide-rust.md#flash-run-debug)) |
 | `rustfmt.toml`, `.clippy.toml`, `.editorconfig` | code style, checked by CI |
 | `.boards.json` | which board (by MAC) is node A or B on your desk; written by `dev.py boards assign`, not committed |
 
@@ -173,10 +191,13 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 |---|---|
 | try another RGB pattern | `pattern ocean` (CLI) |
 | keep it after a reboot | `save` |
-| make it the default of node A, for everyone | `rgb: RgbConfig { pattern: "ocean", ..NodeConfig::DEFAULT.rgb }` in `src/bin/node_a.rs` |
-| move the button to another GPIO | `pins: Pins { button: 5, ..NodeConfig::DEFAULT.pins }` in the node file (the build checks the pin) |
-| change the link speed for good | `shared::BAUD_RATE`, then rebuild **both** nodes |
-| change the link speed now | `baud 1M` (both nodes switch together) |
+| make it the default of node A, for everyone | `[rgb] pattern = "ocean"` in `firmware/uart/presets/node-a.toml` |
+| move the button to another GPIO | `[pins] button = 5` in the preset (the build checks the pin) |
+| change the link speed for good | UART: `shared::BAUD_RATE`, then rebuild **both** nodes |
+| change the link speed now | UART: `baud 1M` (both nodes switch together) |
+| change the addresses or use TCP | Ethernet: `[net]` in the presets of **both** nodes, or `PRESET_NODE_A=node-a-tcp`... |
+| show less (or more) in the console | `verbose live`, `verbose frames`, `verbose wire` |
+| set the peer's LED or setting from here | `write /leds/1 on`, `write /config/verbose frames` |
 | read the console through the probe | build with `--features rtt`, then `set console rtt` |
 | a firmware without flash writes | `--no-default-features --features watchdog` |
 | change a setting of esp-hal | `.cargo/esp-config.toml` |

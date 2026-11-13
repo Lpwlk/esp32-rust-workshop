@@ -2,7 +2,7 @@
 
 # Configuration
 
-Build values come from `NodeConfig::DEFAULT`, overridden per node in `src/bin/node_*.rs`.
+Build values come from `NodeConfig::DEFAULT`, overridden per node by a preset (`firmware/uart/presets/*.toml`).
 Invalid values fail the build; at runtime `set` applies the same checks.
 
 ## Runtime settings (`set <key> <value>`)
@@ -20,7 +20,7 @@ Invalid values fail the build; at runtime `set` applies the same checks.
 | `rgb.brightness` | RGB LED brightness, % | 0-100 | `40` |
 | `led1` | breadboard LED mode | off on blink [period|freq] button peer link rx tx | `peer` |
 | `led2` | breadboard LED mode | off on blink [period|freq] button peer link rx tx | `rx` |
-| `verbose` | verbose console output | on off | `off` |
+| `verbose` | console detail: a live line, every frame, or the raw wire | 0 live, 1 frames, 2 wire (or next) | `live` |
 | `tx_mode` | when this node sends frames on its own | periodic [period|freq], on-rx, quiet | `periodic` |
 | `burst.count` | frames per burst (default of `burst`) | 1-100000 | `1000` |
 | `burst.rate_hz` | burst rate, frames/s (default of `burst`) | 0.1-20000 Hz, or max (= 0, back to back) | `0` |

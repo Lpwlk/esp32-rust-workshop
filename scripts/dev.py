@@ -17,13 +17,13 @@
 
   Tests and quality
     python3 scripts/dev.py test host [-u]        # core tests on this computer (-u: regen docs)
-    python3 scripts/dev.py test target [a]       # tests/hil.rs on a board, then reflash it
+    python3 scripts/dev.py test target [a]       # firmware/uart/tests/hil.rs on a board, then reflash it
     python3 scripts/dev.py check                 # what CI runs, locally
     python3 scripts/dev.py format [--check]      # cargo fmt + black
 
   Documentation
     python3 scripts/dev.py docs serve [--open]   # http://localhost:3000, live reload
-    python3 scripts/dev.py docs build [-r]       # site/ (-r: regenerate reference pages)
+    python3 scripts/dev.py docs build [-r]       # docs/site/ (-r: regenerate reference pages)
     python3 scripts/dev.py docs api [--open]     # rustdoc of the core and the firmware
 
   Tooling
@@ -140,6 +140,8 @@ def format_code(check: bool) -> None:
     from devlib import live, log, run
 
     live(["cargo", "fmt", "--all"] + (["--", "--check"] if check else []))
+    # firmware/ethernet is its own Cargo workspace: `--all` at the root doesn't reach it.
+    live(["cargo", "fmt"] + (["--", "--check"] if check else []), cwd=APP_DIRS["eth"])
     run(
         [str(VENV_BIN / "black"), "--line-length", "100"]
         + (["--check"] if check else [])
@@ -153,8 +155,26 @@ def format_code(check: bool) -> None:
 # --------------------------------------------------------------------------------------
 
 
+# Which firmware the build / flash / monitor commands work on: `--app uart` (the repository root, the
+# default) or `--app eth` (firmware/ethernet/, the Ethernet app: its own Cargo workspace). `--preset NAME`
+# builds that preset (firmware/<app>/presets/NAME.toml) instead of node-a / node-b.
+APP = "uart"
+PRESET: str | None = None
+APP_DIRS = {"uart": ROOT / "firmware" / "uart", "eth": ROOT / "firmware" / "ethernet"}
+# The UART app is a member of the root workspace (one `target/` at the root); the Ethernet app is its own.
+TARGET_DIRS = {"uart": ROOT / "target", "eth": ROOT / "firmware" / "ethernet" / "target"}
+
+
+def app_dir() -> Path:
+    return APP_DIRS[APP]
+
+
+def preset_env() -> dict[str, str] | None:
+    return {"PRESET": PRESET} if PRESET else None
+
+
 def elf(node: str, release: bool = True) -> Path:
-    return ROOT / "target" / TARGET / ("release" if release else "debug") / f"node-{node}"
+    return TARGET_DIRS[APP] / TARGET / ("release" if release else "debug") / f"node-{node}"
 
 
 def board_for(node: str | None, selector: str | None):
@@ -216,7 +236,9 @@ def cargo_build(nodes: list[str], rtt: bool, release: bool) -> None:
         ["cargo", "build"]
         + (["--release"] if release else [])
         + (["--features", "rtt"] if rtt else [])
-        + [arg for n in nodes for arg in ("--bin", f"node-{n}")]
+        + [arg for n in nodes for arg in ("--bin", f"node-{n}")],
+        cwd=app_dir(),
+        extra_env=preset_env(),
     )
     memory_usage(nodes, release)
 
@@ -289,7 +311,7 @@ def monitor(node: str | None, selector: str | None) -> None:
 
 def rtt(node: str, selector: str | None) -> None:
     """RTT console through the probe. Flashing goes through espflash (the probe-rs 0.32
-    revision trap, see the Rust guide); cargo-embed only attaches (Embed.toml)."""
+    revision trap, see the Rust guide); cargo-embed only attaches (firmware/uart/Embed.toml)."""
     from devlib import live
 
     board = board_for(node, selector)
@@ -297,6 +319,7 @@ def rtt(node: str, selector: str | None) -> None:
     live(
         ["cargo", "embed", "--release", "--features", "rtt", "--bin", f"node-{node}"]
         + ["--probe", board.probe],
+        cwd=app_dir(),
         check=False,
     )
 
@@ -356,16 +379,23 @@ def check() -> None:
                 f"example {ex.stem} (shown in the docs)",
                 f"cargo run -q -p workshop-core --target host-tuple --example {ex.stem}".split(),
             )
-            for ex in sorted((ROOT / "crates/workshop-core/examples").glob("*.rs"))
+            for ex in sorted((ROOT / "firmware/shared/core/examples").glob("*.rs"))
         ],
-        ("firmware build", ["cargo", "build", "--release"]),
-        ("clippy, firmware", "cargo clippy --release -- -D warnings".split()),
+        ("presets load and validate", ["cargo", "presets", "check"]),
+        ("firmware build (UART)", ["cargo", "build", "--release"]),
+        ("clippy, firmware (UART)", "cargo clippy --release -- -D warnings".split()),
+        ("firmware build (Ethernet)", ["cargo", "build", "--release"], APP_DIRS["eth"]),
+        (
+            "clippy, firmware (Ethernet)",
+            "cargo clippy --release -- -D warnings".split(),
+            APP_DIRS["eth"],
+        ),
     ]
-    for i, (name, cmd) in enumerate(steps, 1):
+    for i, (name, cmd, *where) in enumerate(steps, 1):
         log.info(f"[bold]{i}/{len(steps) + 1}[/] {name}")
-        live(cmd)
+        live(cmd, cwd=where[0] if where else None)
     log.info(f"[bold]{len(steps) + 1}/{len(steps) + 1}[/] docs site")
-    run([str(VENV_BIN / "zensical"), "build", "--clean"])
+    run([str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"])
     log.info("✓ all green")
 
 
@@ -420,7 +450,7 @@ def docs_serve(port: int, open_browser: bool) -> None:
     from devlib import stream
 
     stream(
-        [str(VENV_BIN / "zensical"), "serve", "-a", f"localhost:{port}"]
+        [str(VENV_BIN / "zensical"), "serve", "-f", "docs/zensical.toml", "-a", f"localhost:{port}"]
         + (["--open"] if open_browser else [])
     )
 
@@ -431,8 +461,8 @@ def docs_build(reference: bool) -> None:
     if reference:
         # The reference pages are generated from the Rust code (and checked by CI).
         live(["cargo", "test-host"], extra_env={"UPDATE_DOCS": "1"})
-    run([str(VENV_BIN / "zensical"), "build", "--clean"])
-    log.info(f"✓ site in [path]{(ROOT / 'site').relative_to(ROOT)}/[/]")
+    run([str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"])
+    log.info(f"✓ site in [path]{(ROOT / 'docs' / 'site').relative_to(ROOT)}/[/]")
 
 
 def docs_api(open_browser: bool) -> None:
@@ -509,6 +539,17 @@ def parser() -> argparse.ArgumentParser:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument(
+        "--app",
+        choices=("uart", "eth"),
+        default="uart",
+        help="firmware that build / size / flash / monitor / rtt work on: uart (default) or eth (firmware/ethernet/)",
+    )
+    p.add_argument(
+        "--preset",
+        metavar="NAME",
+        help="build firmware/<app>/presets/NAME.toml instead of node-a / node-b",
+    )
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
     def node_arg(s: argparse.ArgumentParser, optional: bool = False) -> None:
@@ -568,7 +609,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument(
         "-u", "--update-docs", action="store_true", help="regenerate the reference pages"
     )
-    s = t.add_parser("target", help="tests/hil.rs on a board (probe-rs), then reflash it")
+    s = t.add_parser(
+        "target", help="firmware/uart/tests/hil.rs on a board (probe-rs), then reflash it"
+    )
     node_arg(s, optional=True)
     s.add_argument("--keep", action="store_true", help="leave the test image on the board")
 
@@ -584,7 +627,7 @@ def parser() -> argparse.ArgumentParser:
     s = d.add_parser("serve", help="docs site with live reload")
     s.add_argument("-p", "--port", type=int, default=3000, help="default: 3000")
     s.add_argument("-o", "--open", action="store_true", help="open it in the browser")
-    s = d.add_parser("build", help="build the docs site into site/")
+    s = d.add_parser("build", help="build the docs site into docs/site/")
     s.add_argument(
         "-r", "--reference", action="store_true", help="regenerate the reference pages first"
     )
@@ -629,6 +672,8 @@ def main() -> None:
         if args.command not in ("update", "git", "docs", "format"):
             sys.exit("pyserial is missing from .venv: run `python3 scripts/dev.py update`.")
 
+    global APP, PRESET
+    APP, PRESET = args.app, args.preset
     release = not getattr(args, "debug", False)
     match args.command:
         case "doctor":

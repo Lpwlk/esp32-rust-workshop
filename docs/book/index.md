@@ -16,7 +16,8 @@ hide:
 
     Five frame types (`DAT` `EVT` `BAU` `ECH` `BST`), XOR checksum, lost-frame
     detection. Reception by interrupt into a 2 KB ring buffer, so nothing is lost
-    while the console prints.
+    while the console prints. Or the same frames over Gigabit Ethernet (UDP or TCP):
+    see the [Ethernet app](ethernet.md).
 
     [:lucide-arrow-right: Frame protocol](reference/protocol.md)
 
@@ -44,6 +45,7 @@ hide:
 
     A jumper "button" and the BOOT button, on interrupts, with debounce and lockout, five RGB fade patterns (viridis,
     sunset…), two breadboard LEDs that follow the link or the peer's button.
+    Read and write the peer's LEDs, buttons and settings as an address space ([UA-lite](protocols.md)).
 
     [:lucide-arrow-right: RGB patterns](reference/patterns.md)
 
@@ -61,7 +63,7 @@ hide:
 
     ---
 
-    The hardware-free logic lives in `workshop-core`: ~100 unit, property and doc
+    The hardware-free logic lives in `workshop-core`: ~150 unit, property and doc
     tests. The reference pages are generated from the code and checked by CI.
 
     [:lucide-arrow-right: Testing](testing.md)

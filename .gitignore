@@ -1,7 +1,7 @@
 /target
 **/.DS_Store
 **/*.rs.bk
-/site
+/docs/site
 /.cache
 
 # Python tooling (scripts/dev.py)
@@ -9,4 +9,5 @@
 __pycache__/
 /scripts/logs
 /.boards.json
-/zensical.ci.toml
+/docs/zensical.ci.toml
+/firmware/ethernet/target

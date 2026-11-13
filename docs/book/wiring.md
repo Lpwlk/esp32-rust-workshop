@@ -3,6 +3,10 @@
 All signals are on header **J2**. Its silkscreen shows **GPIO numbers**, not pin
 numbers: `2` is GPIO2 (J2 pin 7), `3` is GPIO3 (J2 pin 10).
 
+There are two ways to link the boards, and you only wire one of them: the **UART** (three wires, below) or the
+**Ethernet** cable (the RJ45 ports, [further down](#ethernet-link-between-the-boards)). The button and the LEDs are
+wired the same way for both.
+
 ```text
      Board A  (node-a)                  Board B  (node-b)
   ┌────────────────────────┐        ┌────────────────────────┐
@@ -31,6 +35,27 @@ TX of one board goes to RX of the other, and the grounds are shared:
     One bit lasts 200 ns. Keep the jumper wires short (a few cm), and always
     connect the grounds. `framing error` or `glitch on RX line` messages in the
     console point at the wiring.
+
+## Ethernet link between the boards
+
+For the Ethernet app, plug a cable from the **RJ45** port of one board to the RJ45 port of the other. There is nothing
+to wire on header J2:
+
+```text
+   Board A  192.168.77.11                    Board B  192.168.77.12
+  ┌──────────────┐        cat5e (straight)  ┌──────────────┐
+  │ RJ45 ════════╪══════════════════════════╪════════ RJ45 │      no switch, no DHCP
+  └──────────────┘                          └──────────────┘
+```
+
+- A straight cable is enough: the PHYs detect the cable type (Auto-MDIX). A cat5e or better cable, with all four
+  pairs, is needed for 1 Gbit/s; a poorer one links at 100 Mbit/s.
+- The addresses are fixed in the [presets](presets.md) of each node. A computer on the same cable (or a switch)
+  needs an address in `192.168.77.0/24` to talk to a board.
+- The on-board PHY (Motorcomm YT8531, RGMII) is wired to **GPIO5-19**: MDC 5, MDIO 6, reset 7, data and clocks
+  8-19. The configuration check refuses those pins for anything else
+  ([Ethernet pins](reference/eth-pins.md)); the usual pins of this page (button 4, LEDs 20 and 21) don't clash.
+- USB-C (USB Serial/JTAG) stays your console and flashing port, as for the UART app.
 
 ## Jumper button
 
@@ -62,4 +87,5 @@ What each LED shows is set by `led1` / `led2` (see the
 ## Pins to avoid
 
 Some GPIOs are used by the module (flash, USB) or don't exist. The configuration
-check refuses them; see the [pin reference](reference/pins.md).
+check refuses them; see the [pin reference](reference/pins.md) (and the
+[Ethernet one](reference/eth-pins.md), which adds GPIO5-19).

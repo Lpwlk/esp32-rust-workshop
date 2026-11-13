@@ -18,6 +18,10 @@ writes an asciicast v2 file; `agg` then turns it into a GIF.
 `--start S` drops what was printed before S seconds (the boot, after a Ctrl+R).
 `--trim REGEX` drops output lines matching REGEX (tool banners, local paths).
 
+The look of the GIF (font size, theme, speed...) is read from docs/book/assets/demo/render.toml;
+`--font-size 12` and the other options of its group override it for this recording. To change the
+look of a recording that exists, without a board: `--render-only`, or scripts/render_demos.py.
+
 Standard library only (pty), plus `agg` for `--gif` (brew install agg), and
 gifsicle to shrink the GIF if it's installed (brew install gifsicle).
 """
@@ -39,6 +43,16 @@ import termios
 import time
 from fcntl import ioctl
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from gifrender import (
+    StyleError,
+    add_style_arguments,
+    load_style,
+    overrides_from,
+    render,
+)  # noqa: E402
 
 TYPE_DELAY = 0.07  # seconds between typed keys
 
@@ -108,8 +122,13 @@ def record(cmd: list[str], seconds: float, cols: int, rows: int, typed, raw, tri
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("cast", type=Path, help="asciicast file to write")
+    p.add_argument(
+        "cast", type=Path, help="asciicast file to write (or, with --render-only, to read)"
+    )
     p.add_argument("--gif", action="store_true", help="also render <cast>.gif with agg")
+    p.add_argument(
+        "--render-only", action="store_true", help="don't record: render the existing cast to a GIF"
+    )
     p.add_argument("--cols", type=int, default=100)
     p.add_argument("--rows", type=int, default=30)
     p.add_argument("--seconds", type=float, default=20)
@@ -129,12 +148,21 @@ def main() -> None:
         default=0.0,
         help="drop what was printed before this time, s (e.g. the boot)",
     )
-    p.add_argument("--speed", type=float, default=1.0, help="GIF playback speed")
+    add_style_arguments(p)
     argv = sys.argv[1:]
-    if "--" not in argv:
+    if "--" in argv:
+        split = argv.index("--")
+        args, cmd = p.parse_args(argv[:split]), argv[split + 1 :]
+    elif "--render-only" in argv:
+        args, cmd = p.parse_args(argv), []
+    else:
         p.error("no command: put it after --")
-    split = argv.index("--")
-    args, cmd = p.parse_args(argv[:split]), argv[split + 1 :]
+
+    if args.render_only:
+        if not args.cast.exists():
+            p.error(f"{args.cast} doesn't exist")
+        _render(args)
+        return
 
     trim = re.compile(args.trim) if args.trim else None
     events = record(cmd, args.seconds, args.cols, args.rows, args.type, args.key, trim)
@@ -151,22 +179,17 @@ def main() -> None:
     print(f"{args.cast}: {len(events)} events")
 
     if args.gif:
-        if not shutil.which("agg"):
-            sys.exit(
-                "agg not found: brew install agg (or cargo install --git https://github.com/asciinema/agg)"
-            )
-        gif = args.cast.with_suffix(".gif")
-        subprocess.run(
-            ["agg", "--theme", "monokai", "--font-size", "15", "--line-height", "1.3",
-             "--idle-time-limit", "1.2", "--speed", str(args.speed),
-             "--last-frame-duration", "3", str(args.cast), str(gif)],
-            check=True,
-        )  # fmt: skip
-        if shutil.which("gifsicle"):
-            # Lossless: a 256-color palette is plenty for a terminal. (Lossy
-            # compression halves the size again, but smears gradients and text.)
-            subprocess.run(["gifsicle", "-O3", "--colors", "256", "-b", str(gif)], check=True)
-        print(f"{gif}: {gif.stat().st_size // 1024} KB")
+        _render(args)
+
+
+def _render(args: argparse.Namespace) -> None:
+    """Renders args.cast to a GIF, in the look of render.toml and the command line."""
+    try:
+        style = load_style(args.cast, overrides_from(args))
+    except StyleError as e:
+        sys.exit(str(e))
+    gif = render(args.cast, style)
+    print(f"{gif}: {gif.stat().st_size // 1024} KB (font {style['font_size']} px)")
 
 
 if __name__ == "__main__":

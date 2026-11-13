@@ -1,0 +1,191 @@
+# Documentation site, built with Zensical (https://zensical.org) from the Lpwlk
+# Zensical template, and published on GitHub Pages by .github/workflows/ci.yml on
+# every push to `main`.
+#
+#   zensical serve     local preview at http://localhost:8000 (rebuilds on change)
+#   zensical build     static site in docs/site/
+#
+# Layout:
+#   docs/book/              pages (docs_dir)
+#   docs/book/reference/    generated from the code: don't edit them, run
+#                           `UPDATE_DOCS=1 cargo test-host`
+#   docs/book/assets/       logos and banners from the template
+#   docs/book/styles/       template colors, banner and home hero styles
+#   docs/templates/         theme overrides (home hero, light/dark header logo)
+#
+# The PDFs in docs/ressources are vendor documents and are deliberately not part
+# of the site.
+
+# ----------------------------------------------------------------------------
+# Project
+# ----------------------------------------------------------------------------
+[project]
+site_name = "ESP32-S31 workshop"
+site_description = "Two ESP32-S31 boards talking over UART at 5 Mbaud or Gigabit Ethernet, in no_std Rust"
+site_author = "Loïc Pawlicki | @Lpwlk"
+site_url = "https://lpwlk.github.io/esp32-rust-workshop/"
+repo_url = "https://github.com/Lpwlk/esp32-rust-workshop"
+repo_name = "Lpwlk/esp32-rust-workshop"
+edit_uri = "edit/main/docs/book/"
+docs_dir = "book"
+site_dir = "site"
+copyright = """
+Copyright &copy; 2026 Lpwlk
+"""
+
+extra_css = [
+  "styles/extra.css",
+  "https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.css",
+]
+# Console recordings: asciinema-player plays docs/book/assets/demo/*.cast
+# (javascripts/casts.js mounts each player when it scrolls into view).
+extra_javascript = [
+  "https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.min.js",
+  "javascripts/casts.js",
+]
+
+# Top-level sections are rendered as tabs (navigation.tabs).
+nav = [
+  { "Home" = "index.md" },
+  { "Guide" = [
+    "getting-started.md",
+    "console.md",
+    "examples.md",
+    "firmware.md",
+    "ethernet.md",
+    "protocols.md",
+    "configuration.md",
+    "wiring.md",
+    "architecture.md",
+    "testing.md",
+    "automation.md",
+    "remote.md",
+    { "Rust & Cargo guide" = "guide-rust.md" },
+  ] },
+  { "Reference" = [
+    "reference/cli.md",
+    "reference/config.md",
+    "reference/protocol.md",
+    "reference/space.md",
+    "reference/pins.md",
+    "reference/patterns.md",
+    { "Ethernet app" = [
+      "reference/eth-cli.md",
+      "reference/eth-config.md",
+      "reference/eth-protocol.md",
+      "reference/eth-pins.md",
+    ] },
+    { "API (rustdoc)" = "api.md" },
+  ] },
+]
+
+# ----------------------------------------------------------------------------
+# Theme
+# ----------------------------------------------------------------------------
+[project.theme]
+variant = "modern"
+custom_dir = "templates"
+favicon = "assets/logo/favicon-logo-minimal-dark.png"
+language = "en"
+features = [
+  "content.action.edit",
+  "content.action.view",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.instant.progress",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+# Colors are defined in styles/extra.css ("custom").
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/monitor-cog"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+primary = "custom"
+accent = "custom"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to system preference"
+primary = "custom"
+accent = "custom"
+
+[project.theme.font]
+text = "Inter"
+code = "JetBrains Mono"
+
+# ----------------------------------------------------------------------------
+# Extra: header logo per color scheme (docs/templates/partials/logo.html)
+# ----------------------------------------------------------------------------
+[project.extra]
+logo_light_mode = "assets/logo/logo-plain-light.svg"
+logo_dark_mode = "assets/logo/logo-plain-dark.svg"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/Lpwlk"
+
+# ----------------------------------------------------------------------------
+# Markdown extensions
+# ----------------------------------------------------------------------------
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.betterem]
+smart_enable = "all"
+[project.markdown_extensions.pymdownx.caret]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.emoji]
+emoji_generator = "zensical.extensions.emoji.to_svg"
+emoji_index = "zensical.extensions.emoji.twemoji"
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.mark]
+[project.markdown_extensions.pymdownx.smartsymbols]
+# Code shown in the docs is included from real, compiled files
+# (`--8<-- "firmware/shared/core/examples/frames.rs:encode"`): it can't drift.
+[project.markdown_extensions.pymdownx.snippets]
+base_path = ["."]   # the working directory, i.e. the repository root: includes are written as firmware/uart/src/...
+check_paths = true
+dedent_subsections = true
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+[project.markdown_extensions.pymdownx.tilde]
+[project.markdown_extensions.pymdownx.blocks.caption]

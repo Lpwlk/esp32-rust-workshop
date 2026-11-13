@@ -1,0 +1,6 @@
+# node-B over TCP: the same as `node-b`, node-B listens and node-A connects to it.
+extends = "node-b"
+
+[net]
+transport = "tcp"
+tcp_role  = "server"

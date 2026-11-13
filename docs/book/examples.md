@@ -1,12 +1,12 @@
 # Examples
 
 Short programs that use the firmware's logic directly. They run **on your
-computer**: everything in `crates/workshop-core` is plain `no_std` Rust, without a
+computer**: everything in `firmware/shared/core` is plain `no_std` Rust, without a
 peripheral, so the same code runs on the ESP32-S31 and on the host.
 
 !!! success "These examples can't lie"
     The code on this page is not copied: it is **included** from
-    `crates/workshop-core/examples/*.rs` when the site is built
+    `firmware/shared/core/examples/*.rs` when the site is built
     (`pymdownx.snippets`). CI compiles and runs each example, and they are full of
     `assert!`: a change that breaks one fails the build before it can reach this
     page.
@@ -16,6 +16,7 @@ cargo run -p workshop-core --target host-tuple --example frames
 cargo run -p workshop-core --target host-tuple --example settings
 cargo run -p workshop-core --target host-tuple --example button
 cargo run -p workshop-core --target host-tuple --example cli
+cargo run -p workshop-core --target host-tuple --example space
 ```
 
 ## Frames on the wire
@@ -24,8 +25,8 @@ cargo run -p workshop-core --target host-tuple --example cli
 
 === "Code"
 
-    ```rust title="crates/workshop-core/examples/frames.rs"
-    --8<-- "crates/workshop-core/examples/frames.rs:encode"
+    ```rust title="firmware/shared/core/examples/frames.rs"
+    --8<-- "firmware/shared/core/examples/frames.rs:encode"
     ```
 
 === "Output"
@@ -47,7 +48,7 @@ terminal, and cheap to check on a microcontroller.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/frames.rs:parse"
+    --8<-- "firmware/shared/core/examples/frames.rs:parse"
     ```
 
 === "Output"
@@ -64,7 +65,7 @@ copy, no allocation.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/frames.rs:corrupt"
+    --8<-- "firmware/shared/core/examples/frames.rs:corrupt"
     ```
 
 === "Output"
@@ -85,7 +86,7 @@ copy, no allocation.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/frames.rs:stream"
+    --8<-- "firmware/shared/core/examples/frames.rs:stream"
     ```
 
 === "Output"
@@ -103,8 +104,8 @@ A property test checks that chunking never changes the lines that come out.
 
 ### A node's config, checked at compile time
 
-```rust title="crates/workshop-core/examples/settings.rs"
---8<-- "crates/workshop-core/examples/settings.rs:const"
+```rust title="firmware/shared/core/examples/settings.rs"
+--8<-- "firmware/shared/core/examples/settings.rs:const"
 ```
 
 `check()` is a `const fn`: in a `const _: () = …` it runs **during compilation**.
@@ -126,7 +127,7 @@ error[E0080]: evaluation panicked: config: a pin is reserved (flash, USB, consol
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/settings.rs:set"
+    --8<-- "firmware/shared/core/examples/settings.rs:set"
     ```
 
 === "Output"
@@ -144,7 +145,7 @@ build, the CLI and the flash.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/settings.rs:save"
+    --8<-- "firmware/shared/core/examples/settings.rs:save"
     ```
 
 === "Output"
@@ -162,8 +163,8 @@ renamed setting skips what it doesn't know instead of misreading it.
 
 === "Code"
 
-    ```rust title="crates/workshop-core/examples/button.rs"
-    --8<-- "crates/workshop-core/examples/button.rs:debounce"
+    ```rust title="firmware/shared/core/examples/button.rs"
+    --8<-- "firmware/shared/core/examples/button.rs:debounce"
     ```
 
 === "Output"
@@ -197,8 +198,8 @@ decision is plain logic, tested on the host with simulated bounces.
 
 === "Code"
 
-    ```rust title="crates/workshop-core/examples/cli.rs"
-    --8<-- "crates/workshop-core/examples/cli.rs:editor"
+    ```rust title="firmware/shared/core/examples/cli.rs"
+    --8<-- "firmware/shared/core/examples/cli.rs:editor"
     ```
 
 === "Output"
@@ -215,7 +216,7 @@ a history. It is fed the same way from the USB console and from RTT.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/cli.rs:parse"
+    --8<-- "firmware/shared/core/examples/cli.rs:parse"
     ```
 
 === "Output"
@@ -229,14 +230,86 @@ a history. It is fed the same way from the USB console and from RTT.
     frobnicate       → error: unknown command 'frobnicate' (try `help`)
     ```
 
+## The address space (UA-lite)
+
+Node B describes itself as a tree (its LEDs, buttons, statistics and settings); node A browses it, reads a button,
+writes a LED and watches the button. B's side is the real `space::serve` function, fed with the lines A sends: what is
+printed is exactly what would travel on the UART, over UDP or over TCP. The protocol is explained in
+[Protocols](protocols.md#the-address-space-ua-lite).
+
+### Browse
+
+=== "Code"
+
+    ```rust title="firmware/shared/core/examples/space.rs"
+    --8<-- "firmware/shared/core/examples/space.rs:browse"
+    ```
+
+=== "Output"
+
+    ```text
+    A> $BRW,node-A,1,1000,4,0*33
+    B> $BRR,node-B,1,1000,1,5,1,VTW,1*4C
+       found 1 (id 5)
+    A> $BRW,node-A,2,1000,4,1*31
+    B> $BRR,node-B,2,1000,2,6,2,VTW,0*4D
+       found 2 (id 6)
+    ```
+
+One child per frame, until `more` is 0. `VTW` says a **V**ariable of type **T**ext that is **W**ritable.
+
+### Read and write
+
+=== "Code"
+
+    ```rust
+    --8<-- "firmware/shared/core/examples/space.rs:read_write"
+    ```
+
+=== "Output"
+
+    ```text
+    A> $RED,node-A,3,2000,8*36
+    B> $VAL,node-B,3,2000,3,8,0,0*22
+       jumper = 0
+    A> $WRT,node-A,4,3000,5,blink 200*63
+    B> $VAL,node-B,4,3000,4,5,0,blink 200 ms*50
+       LED 1 written: Good, now blink 200 ms
+    A> $WRT,node-A,5,4000,5,disco*67
+    B> $VAL,node-B,5,4000,5,5,3,blink 200 ms*54
+       LED 1 written: BadTypeMismatch, still blink 200 ms
+    ```
+
+A write goes through the same checks as the CLI's `set`; the answer carries the value now in force, so a refused write
+(status 3, `BadTypeMismatch`) leaves the LED alone and says so.
+
+### Watch
+
+=== "Code"
+
+    ```rust
+    --8<-- "firmware/shared/core/examples/space.rs:watch"
+    ```
+
+=== "Output"
+
+    ```text
+    A> $SUB,node-A,6,5000,8,100*3E
+    B> $VAL,node-B,6,5000,6,8,0,0*25
+    B> $VAL,node-B,99,5200,6,8,0,1*10
+    ```
+
+The answer to the `SUB` is the value now; the last line is a notification, sent only because the button changed, and
+its `req` (6) is the `seq` of the `SUB`.
+
 ## Write your own
 
-1. Add `crates/workshop-core/examples/<name>.rs` with a `main()`; `assert!` what
+1. Add `firmware/shared/core/examples/<name>.rs` with a `main()`; `assert!` what
    matters.
 2. Mark the parts to show with section comments, `[start:part]` and `[end:part]`
    after the snippet marker: see the first lines of `main()` in `frames.rs`.
 3. Include a part in a page with the same marker followed by
-   `"crates/workshop-core/examples/<name>.rs:part"`, alone on its line inside a
+   `"firmware/shared/core/examples/<name>.rs:part"`, alone on its line inside a
    ` ```rust ` block.
 
 `python3 scripts/dev.py check` runs every example, as CI does. Snippets are

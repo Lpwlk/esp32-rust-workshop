@@ -17,8 +17,8 @@ Changes are applied immediately and lost on reboot.
 
 ```text
 Lists every setting of this node. Values changed at runtime are shown
-in yellow next to their build value (from src/bin/node_*.rs).
-Read-only settings (name, pins, baud rate) need a rebuild to change.
+in yellow next to their build value (from the node's preset).
+Read-only settings (name, pins, link) need a rebuild to change.
 ```
 
 Examples:
@@ -62,7 +62,7 @@ reset
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `verbose [on|off]` | `v` | verbose console (= set verbose) |
+| `verbose [0|1|2|live|frames|wire]` | `v` | how much the console prints (= set verbose) |
 | `pattern <name|1-5>` | `p` | RGB LED pattern (= set rgb.pattern) |
 | `next` | `n` | next RGB LED pattern |
 | `freq <Hz|period>` | `f` | RGB LED refresh rate (= set rgb.freq_hz) |
@@ -73,17 +73,21 @@ reset
 ### `verbose`
 
 ```text
-Adds, for each frame: the raw line on the wire and its size; for each
-received frame: time since the previous one from the peer. Also shows
-ignored button bounces, and byte counters + RX buffer peak in the
-stats line. `verbose` alone turns it on.
+0 live    one line, updated in place, with the last frame sent or received and
+          the counters. Lost frames, link events, bursts and errors still scroll.
+1 frames  every frame on its own line, and the periodic stats line
+2 wire    frames plus, for each, the raw line, its checksum and size, the time
+          since the peer's previous frame, ignored button bounces and counters
+`verbose` alone goes to the next level (wire goes back to live).
 ```
 
 Examples:
 
 ```text
 verbose
-verbose off
+verbose frames
+verbose 0
+verbose wire
 ```
 
 ### `pattern`
@@ -228,7 +232,7 @@ periodic   a DAT frame every data_period_ms (default); `tx periodic 2.5Hz`
            or `tx periodic 400ms` also sets the period
 on-rx      no DAT: an ECH reply to each frame from the peer; the peer then
            shows the round-trip time (rtt) of its frames
-quiet      nothing on its own (button events and baud answers only)
+quiet      nothing on its own (button events and link handshakes only)
 ```
 
 Examples:
@@ -253,6 +257,90 @@ Examples:
 period 1s
 period 12.5
 period 4Hz
+```
+
+## Address space (the peer)
+
+| Command | Aliases | Summary |
+|---|---|---|
+| `browse [path]` | `br` | list what the peer has: its address space |
+| `read <path>` | `rd` | read one of the peer's variables |
+| `write <path> <value>` | `wr` | write one of the peer's variables |
+| `watch <path> [interval]` |  | the peer reports a variable whenever it changes |
+| `unwatch [path]` |  | stop watching one variable, or all of them |
+
+### `browse`
+
+```text
+Asks the peer to describe itself, one node per frame: its LEDs, buttons,
+statistics and settings as a tree. `browse` alone starts at the root `/`;
+`browse /leds` lists one branch. Each line shows the path, the kind of node
+and, for a variable, its type and whether it can be written.
+```
+
+Examples:
+
+```text
+browse
+browse /leds
+browse /config
+```
+
+### `read`
+
+```text
+The answer is the value, and a status: Good, or why not (BadNodeIdUnknown,
+BadTypeMismatch for an object...). Paths come from `browse`.
+```
+
+Examples:
+
+```text
+read /buttons/jumper
+read /stats/lost
+read /node/uptime
+```
+
+### `write`
+
+```text
+The peer checks the value like its own `set` does, and answers with the value now
+in force: what you wrote, or what stayed if it was refused (BadOutOfRange,
+BadTypeMismatch, BadNotWritable for a read-only variable).
+```
+
+Examples:
+
+```text
+write /leds/1 on
+write /leds/2 blink 200
+write /rgb/brightness 80
+write /config/verbose frames
+```
+
+### `watch`
+
+```text
+The peer checks the variable every `interval` (default 250ms; 4Hz, 1s work too) and
+sends it only when it differs from the last one reported. A few variables can be
+watched at once; `unwatch` stops one, or all.
+```
+
+Examples:
+
+```text
+watch /buttons/jumper
+watch /stats/rx 1s
+watch /node/uptime 500ms
+```
+
+### `unwatch`
+
+Examples:
+
+```text
+unwatch /buttons/jumper
+unwatch
 ```
 
 ## Information

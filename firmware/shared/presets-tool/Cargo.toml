@@ -1,0 +1,28 @@
+[package]
+name         = "workshop-presets"
+description  = "Reads the TOML presets of the workshop firmwares, validates them and generates their Rust config. Host only."
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+publish.workspace      = true
+repository.workspace   = true
+
+# Runs on your computer, not on the chip: the firmwares' build scripts call it to turn
+# `presets/<app>/<name>.toml` into a `const NodeConfig`, and the `presets` command
+# (`cargo presets list`) lets you look at the presets without building anything.
+# It goes through the same `NodeConfig::set_build` / `validate` as the CLI and the
+# compile-time check, so a preset can't say anything the firmware would refuse.
+
+[lib]
+name = "workshop_presets"
+
+[[bin]]
+name = "presets"
+path = "src/main.rs"
+
+[dependencies]
+workshop-core = { path = "../core" }
+toml          = "1"
+
+[lints]
+workspace = true

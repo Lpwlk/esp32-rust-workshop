@@ -1,39 +1,59 @@
 # Architecture
 
-## Two crates
+## The crates and the two apps
 
-| Crate | Contents | Tested |
-|---|---|---|
-| `crates/workshop-core` | everything that doesn't touch a peripheral: frame protocol, line splitting, lost-frame detection, configuration and its validation, CLI editor/parser/help table, button debouncing, LED logic, RGB color math, documentation generator | on the host (`cargo test-host`): unit tests, property tests, doc examples |
-| `esp32-rust-workshop` (root) | the hardware glue: UART1 + interrupt, GPIO + interrupt, RMT (RGB LED), USB Serial/JTAG (CLI), TRNG, console output, main loop | on the board (`cargo test-target`) |
+One shared core, two firmwares, and a host tool. The firmwares only differ by their **link**.
 
-The firmware re-exports the core modules (`crate::config`, `crate::protocol`...),
-so the node configs and the rest of the code don't need to know about the split.
+| Crate | Folder | Contents | Tested |
+|---|---|---|---|
+| `workshop-core` | `firmware/shared/core` | everything that doesn't touch a peripheral: the frame protocol and the address space (UA-lite), line splitting, lost-frame detection, configuration (UART *or* Ethernet link) and its validation, CLI editor/parser/help table, button debouncing, LED logic, RGB color math, saved-settings format, documentation generator | on the host (`cargo test-host`): unit tests, property tests, doc examples |
+| `workshop-presets` | `firmware/shared/presets-tool` | host only: reads the TOML presets, applies them through the same checks as the CLI, and writes the Rust each firmware includes | on the host |
+| `esp32-rust-workshop` | `firmware/uart` | the UART app: UART1 + interrupt, GPIO + interrupt, RMT (RGB LED), USB Serial/JTAG (CLI), TRNG, console output, a blocking main loop | on the board (`cargo test-target`) |
+| `esp32-rust-workshop-eth` | `firmware/ethernet` | the Ethernet app: PHY + EMAC + embassy-net (UDP or TCP), the same glue, an async main loop, a console task | built and linted by CI, run on two boards |
+
+Each firmware re-exports the core modules (`crate::config`, `crate::protocol`, `crate::space`...), so the node
+configs and the rest of the code don't need to know about the split. The Ethernet app is its own Cargo
+workspace, because it needs an esp-hal that isn't released yet (see [Ethernet app](ethernet.md)).
 
 ```mermaid
 flowchart LR
     subgraph core [workshop-core · host-tested]
         direction TB
         protocol
+        space["space (UA-lite)"]
         line
         seq
-        config
+        config["config (Link::Uart | Link::Net)"]
         cli
         button
         leds
         fx
         docgen
     end
-    subgraph fw [firmware · hardware glue]
+    presets["presets/*.toml<br/>(workshop-presets, at build time)"] --> core
+    subgraph uart [firmware/uart · blocking loop]
+        direction TB
         link[link: UART1 + IRQ] --> main
         btn[button: GPIO IRQ] --> main
         usb[cli: USB Serial/JTAG] --> main
         main[main loop] --> rgb[led: RMT] & ext[ext_leds: GPIO] & term[term: console]
     end
-    core --> fw
+    subgraph eth [firmware/ethernet · async]
+        direction TB
+        net[net: PHY + EMAC + embassy-net] --> linkq[link: UDP / TCP tasks]
+        linkq <--> mainE[main loop]
+        btnE[button: GPIO IRQ] --> mainE
+        mainE --> consoleq[console: pipe + task]
+    end
+    core --> uart
+    core --> eth
 ```
 
 ## The main loop
+
+This is the **UART** app's loop. The Ethernet app has the same steps in the same order, but its loop shares an
+executor with the network tasks and gets frames from a queue instead of an interrupt (see
+[Ethernet app](ethernet.md#how-it-works)).
 
 The firmware is a single loop, with two interrupts feeding it:
 
@@ -42,7 +62,8 @@ The firmware is a single loop, with two interrupts feeding it:
 3. turn a debounced button edge into an `EVT` frame;
 4. send the periodic `DAT` frame;
 5. read bytes buffered by the UART interrupt, split them into lines, decode frames;
-6. print the stats line when due.
+6. print the stats line when due (from `verbose frames`; at the default `live` level the last frame and the
+   counters share one line that is redrawn in place, see [the console](console.md#how-much-the-console-prints-verbose)).
 
 ## Receiving at 5 Mbaud
 
@@ -56,7 +77,7 @@ So:
   interrupts during every print;
 - nothing is printed inside a critical section.
 
-`verbose` mode shows the ring buffer peak (`RX buffer peak 33/2048`).
+`verbose wire` shows the ring buffer peak (`RX buffer peak 33/2048`).
 
 ## Timing on the wire
 
@@ -95,12 +116,14 @@ its line moved, and when. The loop then asks one
 `EVT` keys come from the ESP32-S31 true random number generator. esp-hal 1.2.2
 reads it from the right register on this chip but never starts it, and the
 ESP-IDF bootloader turns it off before jumping to the app: every key would be the
-same. `src/trng.rs` starts it at boot, like `trng_ll_enable()` in ESP-IDF v6.1.
+same. `firmware/uart/src/trng.rs` starts it at boot, like `trng_ll_enable()` in ESP-IDF v6.1.
 
 ## Link tests
 
 Three features exercise the link; their logic is in `workshop-core` (`baud`,
-`rtt`, `burst`), tested on the host.
+`rtt`, `burst`), tested on the host. On Ethernet there is no speed to change
+(`baud` and its `BAU` frames are UART only; `link` shows what the PHY negotiated), the round-trip time and the
+bursts work the same, and a burst's share is computed against the negotiated link speed.
 
 **Speed change (`baud`).** Both nodes must use the same baud rate, so a change is a
 handshake of `BAU` frames: the requester sends `REQ` at the current speed, the
@@ -134,9 +157,10 @@ and share of the line capacity (8N1: 10 bits per byte).
 
 ## Configuration
 
-`NodeConfig` holds everything a node may choose on its own. It is validated by a
-`const fn`, so an invalid value fails the build; the CLI `set` command and the
-settings saved in flash (`save`) go through the same function at runtime. Cargo
-features (`persist`, `watchdog`, `rtt`) choose what is compiled in. The whole map
-is on the [Configuration](configuration.md) page; every key is in the
-[settings reference](reference/config.md).
+`NodeConfig` holds everything a node may choose on its own, and a `link` section says how it reaches its peer: `Link::Uart`
+(two pins, the baud rate is a shared constant) or `Link::Net` (addresses, port, transport). It is written as a
+[preset](presets.md), a TOML file the build script checks and turns into a `const NodeConfig`. That `const` is
+validated by a `const fn`, so an invalid value fails the build; the CLI `set` command, the address space's `WRT`
+frames and the settings saved in flash (`save`) go through the same function at runtime. Cargo features (`persist`,
+`watchdog`, `rtt`) choose what is compiled in. The whole map is on the [Configuration](configuration.md) page; every
+key is in the [settings reference](reference/config.md).

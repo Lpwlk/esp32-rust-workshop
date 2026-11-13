@@ -1,0 +1,11 @@
+# node-B of the UART app. Flash it with `cargo run --release --bin node-b`.
+extends = "base"
+name    = "node-B"
+
+# Examples of what a node can override (uncomment / edit):
+# data_period_ms = 1000
+# status_period_ms = 5000
+# [rgb]
+# pattern = "ocean"
+# [pins]
+# led1 = 22
