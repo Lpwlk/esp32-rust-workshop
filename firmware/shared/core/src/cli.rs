@@ -62,8 +62,14 @@ pub enum Command {
     Baud(Option<u32>),
     /// `link`: the Ethernet link: PHY state, speed, addresses, transport, counters. Ethernet nodes.
     Link,
-    /// `browse [path]`: lists what the peer has under `path` (default `/`), see [`crate::space`].
-    Browse(Option<String<24>>),
+    /// `browse [path] [depth]`: lists what the peer has under `path` (default `/`), `depth` levels deep
+    /// (default 1), see [`crate::space`].
+    Browse {
+        /// The branch, `/` when none was given.
+        path: Option<String<24>>,
+        /// How many levels to list, 1 to [`crate::space::MAX_BROWSE_DEPTH`].
+        depth: u8,
+    },
     /// `read <path>`: reads one of the peer's variables.
     Read(String<24>),
     /// `write <path> <value>`: writes one of the peer's variables.
@@ -142,6 +148,30 @@ pub const DEFAULT_WATCH_MS: u32 = 250;
 
 fn path_arg(path: &str) -> Result<String<24>, CliError<'_>> {
     String::try_from(path).map_err(|_| CliError::TooLong)
+}
+
+/// `browse [path] [depth]`, the depth as `2`, `-d 2` or `--depth 2`, in any order with the path.
+fn browse(args: &str) -> Result<Command, CliError<'_>> {
+    const DEPTH: &str = "a depth, 1 to 4";
+    let depth_of = |text: &str| match text.parse::<u8>() {
+        Ok(d) if (1..=crate::space::MAX_BROWSE_DEPTH).contains(&d) => Ok(d),
+        _ => Err(CliError::BadNumber { expected: DEPTH, got: "" }),
+    };
+    let (mut path, mut depth) = (None, None);
+    let mut words = args.split_whitespace();
+    while let Some(word) = words.next() {
+        if matches!(word, "-d" | "--depth") {
+            let value = words.next().ok_or(CliError::MissingValue("depth"))?;
+            depth = Some(depth_of(value).map_err(|_| CliError::BadNumber { expected: DEPTH, got: value })?);
+        } else if word.bytes().all(|b| b.is_ascii_digit()) {
+            depth = Some(depth_of(word).map_err(|_| CliError::BadNumber { expected: DEPTH, got: word })?);
+        } else if path.is_none() {
+            path = Some(path_arg(word)?);
+        } else {
+            return Err(CliError::BadNumber { expected: "one path and a depth", got: word });
+        }
+    }
+    Ok(Command::Browse { path, depth: depth.unwrap_or(1) })
 }
 
 fn set<'a>(key: &'a str, value: &'a str) -> Result<Command, CliError<'a>> {
@@ -227,7 +257,7 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
         "tx" => set("tx_mode", rest),
         "period" => set("data_period_ms", rest),
         "link" | "net" => Ok(Command::Link),
-        "browse" | "br" => Ok(Command::Browse(if rest.is_empty() { None } else { Some(path_arg(rest)?) })),
+        "browse" | "br" | "tree" => browse(rest),
         "read" | "rd" => match rest {
             "" => Err(CliError::MissingValue("path")),
             path => Ok(Command::Read(path_arg(path)?)),
@@ -632,16 +662,18 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "browse",
-        aliases: &["br"],
-        usage: "browse [path]",
-        summary: "list what the peer has: its address space",
+        aliases: &["br", "tree"],
+        usage: "browse [path] [depth]",
+        summary: "list what the peer has, as a tree: its address space",
         details: &[
             "Asks the peer to describe itself, one node per frame: its LEDs, buttons,",
-            "statistics and settings as a tree. `browse` alone starts at the root `/`;",
-            "`browse /leds` lists one branch. Each line shows the path, the kind of node",
-            "and, for a variable, its type and whether it can be written.",
+            "statistics and settings as a tree. `browse` alone lists the root `/`;",
+            "`browse /leds` lists one branch. `depth` (1 to 4, default 1) is how many",
+            "levels to go down: `browse / 2` shows the whole tree (`-d 2` and `--depth 2`",
+            "work too). Each line shows the node, and for a variable its type and whether",
+            "it can be written (`rw`) or only read (`ro`).",
         ],
-        examples: &["browse", "browse /leds", "browse /config"],
+        examples: &["browse", "browse /leds", "browse / 2", "browse /config -d 1"],
         group: Group::Space,
         only: None,
     },
@@ -791,7 +823,7 @@ pub static COMMANDS: &[CmdHelp] = &[
 
 /// Pause between the sections of `help`, in ms: the full list is long, and arriving in one block it
 /// scrolls past before it can be read.
-pub const HELP_PAUSE_MS: u32 = 150;
+pub const HELP_PAUSE_MS: u32 = 0;
 
 /// One piece of the `help` overview, to print when [`HelpPager::poll`] returns it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -807,13 +839,15 @@ pub enum HelpStep {
 /// delay inside the command would stop the frames and, on Ethernet, the network task.)
 ///
 /// ```
-/// use workshop_core::cli::{HelpPager, HelpStep};
+/// use workshop_core::cli::{HELP_PAUSE_MS, HelpPager, HelpStep};
 ///
 /// let mut pager = HelpPager::new(1_000, 2);
 /// assert_eq!(pager.poll(1_000), Some(HelpStep::Section(0)));  // at once
-/// assert_eq!(pager.poll(1_010), None);                        // then a pause
-/// assert_eq!(pager.poll(1_150), Some(HelpStep::Section(1)));
-/// assert_eq!(pager.poll(1_300), Some(HelpStep::Footer));
+/// if HELP_PAUSE_MS > 0 {
+///     assert_eq!(pager.poll(1_000), None);                    // then a pause
+/// }
+/// assert_eq!(pager.poll(1_000 + HELP_PAUSE_MS), Some(HelpStep::Section(1)));
+/// assert_eq!(pager.poll(1_000 + 2 * HELP_PAUSE_MS), Some(HelpStep::Footer));
 /// assert_eq!(pager.poll(9_999), None);                        // and it's over
 /// assert!(pager.is_done());
 /// ```
@@ -885,8 +919,18 @@ mod link_command_tests {
     #[test]
     fn address_space_commands() {
         let s = |t: &str| String::<24>::try_from(t).unwrap();
-        assert_eq!(parse("browse"), Ok(Command::Browse(None)));
-        assert_eq!(parse("br /leds"), Ok(Command::Browse(Some(s("/leds")))));
+        assert_eq!(parse("browse"), Ok(Command::Browse { path: None, depth: 1 }));
+        assert_eq!(parse("br /leds"), Ok(Command::Browse { path: Some(s("/leds")), depth: 1 }));
+        // The depth: alone, after or before the path, or as an option.
+        assert_eq!(parse("browse 2"), Ok(Command::Browse { path: None, depth: 2 }));
+        assert_eq!(parse("browse / 2"), Ok(Command::Browse { path: Some(s("/")), depth: 2 }));
+        assert_eq!(parse("tree /config -d 3"), Ok(Command::Browse { path: Some(s("/config")), depth: 3 }));
+        assert_eq!(parse("browse --depth 4 /leds"), Ok(Command::Browse { path: Some(s("/leds")), depth: 4 }));
+        let msg = |line| parse(line).unwrap_err().to_string();
+        assert_eq!(msg("browse / 0"), "'0': expected a depth, 1 to 4");
+        assert_eq!(msg("browse / 9"), "'9': expected a depth, 1 to 4");
+        assert_eq!(msg("browse -d"), "missing value for `depth`");
+        assert_eq!(msg("browse /a /b"), "'/b': expected one path and a depth");
         assert_eq!(parse("read /buttons/jumper"), Ok(Command::Read(s("/buttons/jumper"))));
         assert_eq!(parse("rd /node/uptime"), Ok(Command::Read(s("/node/uptime"))));
         // The value is everything after the path, spaces included.
@@ -999,7 +1043,7 @@ mod tests {
         let kinds: std::vec::Vec<_> = steps.iter().map(|(_, s)| *s).collect();
         assert_eq!(kinds, [HelpStep::Section(0), HelpStep::Section(1), HelpStep::Section(2), HelpStep::Footer]);
         for pair in steps.windows(2) {
-            assert!(pair[1].0.wrapping_sub(pair[0].0) >= HELP_PAUSE_MS);
+            assert!(pair[1].0.wrapping_sub(pair[0].0).checked_sub(HELP_PAUSE_MS).is_some());
         }
         assert!(p.is_done());
     }

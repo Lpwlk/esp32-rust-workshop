@@ -159,6 +159,7 @@ const DAT_BADGE: &str = "\x1b[30;47m";
 /// Black on magenta badge for link control frames (baud handshake, echo).
 const LNK_BADGE: &str = "\x1b[30;45m";
 const MAGENTA: &str = "\x1b[35m";
+const BLUE: &str = "\x1b[34m";
 
 /// Link counters shown in the periodic status line.
 #[derive(Default)]
@@ -1067,18 +1068,88 @@ impl core::fmt::Display for SpaceRequest<'_> {
 }
 
 /// One node of a browse, as a list line.
-pub fn space_node(path: &str, kind: &str, id: workshop_core::space::NodeId) {
-    out!("    {CYAN}{path:<28}{RST} {GRAY}{kind}  (id {id}){RST}");
+pub fn space_tree_head(path: &str, depth: u8) {
+    if depth > 1 {
+        out!("  {BOLD}{path}{RST} {GRAY}· {depth} levels{RST}");
+    } else {
+        out!("  {BOLD}{path}{RST}");
+    }
+}
+
+/// Width of the name column of a browsed tree, branches included.
+const TREE_NAME_COL: usize = 30;
+
+/// One node of a browsed tree: `├── name/` for an object, `└── name   u32  rw` for a variable.
+pub fn space_tree_entry(e: &workshop_core::space::TreeEntry) {
+    use core::fmt::Write as _;
+    let mut line: heapless::String<96> = heapless::String::new();
+    let mut used = 0;
+    let _ = line.push_str("  ");
+    for j in 0..e.level {
+        let _ = line.push_str(if e.guides >> j & 1 == 1 { "\x1b[90m│   \x1b[0m" } else { "    " });
+        used += 4;
+    }
+    let _ = write!(line, "{GRAY}{}{RST}", if e.last { "└── " } else { "├── " });
+    used += 4 + e.name.chars().count();
+    if e.is_object() {
+        let _ = write!(line, "{BOLD}{BLUE}{}/{RST}", e.name);
+        used += 1;
+    } else {
+        let _ = write!(line, "{CYAN}{}{RST}", e.name);
+    }
+    let pad = TREE_NAME_COL.saturating_sub(used);
+    if e.is_object() {
+        out!("{line}");
+    } else {
+        let ty = match e.kind[1] {
+            b'B' => "bool",
+            b'U' => "u32",
+            _ => "text",
+        };
+        let (access, color) = if e.kind[2] == b'W' { ("rw", YELLOW) } else { ("ro", GRAY) };
+        out!("{line}{:pad$} {GRAY}{ty:<5}{RST}{color}{access}{RST}", "");
+    }
+}
+
+/// The end of a browse: how many nodes it listed.
+pub fn space_tree_foot(objects: u16, variables: u16) {
+    if objects + variables > 0 {
+        let s = |n: u16| if n == 1 { "" } else { "s" };
+        out!("  {GRAY}{objects} object{}, {variables} variable{}{RST}", s(objects), s(variables));
+    }
+}
+
+/// A browsed node that has nothing under it.
+pub fn space_tree_empty(path: &str) {
+    out!("  {GRAY}{path} has no children{RST}");
+}
+
+/// Width of the path column of a value line.
+const VALUE_NAME_COL: usize = 26;
+
+/// A path in a column: the branch dimmed, the last segment lit, padded to `width` characters.
+struct PathCell<'a>(&'a str, usize);
+
+impl core::fmt::Display for PathCell<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let (branch, leaf) = self.0.rsplit_once('/').map_or(("", self.0), |(b, l)| (&self.0[..=b.len()], l));
+        write!(f, "{GRAY}{branch}{RST}{CYAN}{leaf}{RST}")?;
+        for _ in self.0.chars().count()..self.1 {
+            f.write_str(" ")?;
+        }
+        Ok(())
+    }
 }
 
 /// A value from the peer: the answer to a read, a write or a subscribe, or a notification.
 pub fn space_value(path: &str, status: workshop_core::space::Status, value: &str) {
+    let cell = PathCell(path, VALUE_NAME_COL);
     if status == workshop_core::space::Status::Good {
-        out!("    {CYAN}{path:<28}{RST} = {BOLD}{value}{RST}");
+        out!("  {cell} {GRAY}={RST} {BOLD}{value}{RST}");
     } else if value.is_empty() {
-        out!("    {CYAN}{path:<28}{RST} {RED}✗ {status}{RST}");
+        out!("  {cell} {RED}✗ {status}{RST}");
     } else {
         // A refused write: the status, and the value that stayed.
-        out!("    {CYAN}{path:<28}{RST} {RED}✗ {status}{RST} {GRAY}(still {value}){RST}");
+        out!("  {cell} {RED}✗ {status}{RST} {GRAY}(still {value}){RST}");
     }
 }

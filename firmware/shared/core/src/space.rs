@@ -710,6 +710,153 @@ pub fn serve<const N: usize>(
     })
 }
 
+// --- Browsing a branch: the client side --------------------------------------------------------------
+
+/// The deepest `browse` depth: the tree has two levels under the root, so more gains nothing.
+pub const MAX_BROWSE_DEPTH: u8 = 4;
+
+/// One node found by a [`BrowseWalk`], with what a tree drawing needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TreeEntry {
+    /// The node.
+    pub id: NodeId,
+    /// Its name (one segment of its path).
+    pub name: String<NAME_LEN>,
+    /// Its [`kind_of`].
+    pub kind: [u8; 3],
+    /// How far under the browsed node: 0 for its children.
+    pub level: u8,
+    /// Whether it is the last child of its parent (`└──` rather than `├──`).
+    pub last: bool,
+    /// Bit `j` is set when the ancestor at level `j` has later siblings: its vertical line (`│`)
+    /// goes on through this row.
+    pub guides: u8,
+}
+
+impl TreeEntry {
+    /// Whether it has children (an object).
+    pub fn is_object(&self) -> bool {
+        self.kind[0] == b'O'
+    }
+}
+
+/// What a [`BrowseWalk`] makes of one answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalkStep {
+    /// A node to show.
+    pub entry: Option<TreeEntry>,
+    /// The next request to send; `None` when the walk is over.
+    pub request: Option<Body>,
+    /// The browsed node has no children at all (said once, when the walk ends).
+    pub empty: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Level {
+    parent: NodeId,
+    /// The index to ask for next.
+    next: u16,
+    /// Whether the last child shown has later siblings, so `next` is worth asking for.
+    pending: bool,
+}
+
+/// A `browse <path> <depth>` in progress: it asks for the children of a node one at a time and, down to
+/// `depth` levels, for the children of each object it finds, depth first. It holds the walk's
+/// position only; the caller sends the requests it hands out and draws the entries.
+///
+/// ```
+/// use workshop_core::space::{self, Body, BrowseWalk};
+///
+/// let leds = space::find("/leds").unwrap();
+/// let (mut walk, mut request) = BrowseWalk::start(leds, 1);
+/// let mut names = std::vec::Vec::new();
+/// // A node answers its own `BRW`s, here with `serve`'s building block, `child`.
+/// while let Body::Browse { id, index } = request {
+///     let step = match space::child(id, index.into()) {
+///         Some((n, more)) => walk.on_result(n.id, n.name, space::kind_of(&n), more),
+///         None => walk.on_result(space::NONE, "", *b"---", false),
+///     };
+///     names.extend(step.entry.map(|e| e.name));
+///     match step.request {
+///         Some(next) => request = next,
+///         None => break,
+///     }
+/// }
+/// assert_eq!(names, ["1", "2"]);
+/// ```
+#[derive(Clone, Debug)]
+pub struct BrowseWalk {
+    levels: heapless::Vec<Level, { MAX_BROWSE_DEPTH as usize }>,
+    depth: u8,
+    /// Objects and variables shown so far.
+    pub objects: u16,
+    /// Variables shown so far.
+    pub variables: u16,
+}
+
+impl BrowseWalk {
+    /// Starts listing `root`, `depth` levels deep (1 = its children only). Returns the walk and the
+    /// first request to send.
+    pub fn start(root: NodeId, depth: u8) -> (Self, Body) {
+        let mut levels = heapless::Vec::new();
+        let _ = levels.push(Level { parent: root, next: 0, pending: true });
+        let depth = depth.clamp(1, MAX_BROWSE_DEPTH);
+        (Self { levels, depth, objects: 0, variables: 0 }, Body::Browse { id: root, index: 0 })
+    }
+
+    /// The node being listed.
+    pub fn root(&self) -> NodeId {
+        self.levels.first().map_or(NONE, |l| l.parent)
+    }
+
+    /// Takes the answer to the last request: `id` is the child found, or [`NONE`] when there is no
+    /// such child.
+    pub fn on_result(&mut self, id: NodeId, name: &str, kind: [u8; 3], more: bool) -> WalkStep {
+        let mut step = WalkStep { entry: None, request: None, empty: false };
+        let Some(top) = self.levels.last().copied() else { return step };
+        if id == NONE {
+            step.empty = self.levels.len() == 1 && top.next == 0;
+            self.levels.pop();
+            step.request = self.advance();
+            return step;
+        }
+        let level = self.levels.len() as u8 - 1;
+        if let Some(top) = self.levels.last_mut() {
+            top.next += 1;
+            top.pending = more;
+        }
+        let guides =
+            self.levels[..level as usize].iter().enumerate().fold(0u8, |g, (j, l)| g | (u8::from(l.pending) << j));
+        let entry =
+            TreeEntry { id, name: String::try_from(name).unwrap_or_default(), kind, level, last: !more, guides };
+        if entry.is_object() {
+            self.objects += 1;
+        } else {
+            self.variables += 1;
+        }
+        // An object, with levels left to show: its children come next.
+        if entry.is_object() && level + 1 < self.depth {
+            let _ = self.levels.push(Level { parent: id, next: 0, pending: true });
+            step.request = Some(Body::Browse { id, index: 0 });
+        } else {
+            step.request = self.advance();
+        }
+        step.entry = Some(entry);
+        step
+    }
+
+    /// Back up to the closest level that has a sibling left to ask for.
+    fn advance(&mut self) -> Option<Body> {
+        while let Some(top) = self.levels.last() {
+            if top.pending {
+                return Some(Body::Browse { id: top.parent, index: top.next });
+            }
+            self.levels.pop();
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -717,6 +864,73 @@ mod tests {
 
     fn space_of(cfg: &mut NodeConfig) -> NodeSpace<'_> {
         NodeSpace { cfg, uptime_ms: 12_345, jumper: false, boot: true, tx: 10, rx: 9, lost: 1 }
+    }
+
+    /// Runs a walk against the real tree, as the two nodes do over the link.
+    fn walk(root: &str, depth: u8) -> (std::vec::Vec<TreeEntry>, bool, BrowseWalk) {
+        let (mut walk, mut request) = BrowseWalk::start(find(root).unwrap(), depth);
+        let (mut entries, mut empty, mut requests) = (std::vec::Vec::new(), false, 0);
+        loop {
+            let Body::Browse { id, index } = request else { panic!("a browse request") };
+            requests += 1;
+            assert!(requests < 200, "the walk doesn't end");
+            let step = match child(id, index.into()) {
+                Some((n, more)) => walk.on_result(n.id, n.name, kind_of(&n), more),
+                None => walk.on_result(NONE, "", *b"---", false),
+            };
+            entries.extend(step.entry);
+            empty |= step.empty;
+            match step.request {
+                Some(next) => request = next,
+                None => return (entries, empty, walk),
+            }
+        }
+    }
+
+    fn names(entries: &[TreeEntry]) -> std::vec::Vec<&str> {
+        entries.iter().map(|e| e.name.as_str()).collect()
+    }
+
+    #[test]
+    fn browse_depth_1_lists_the_children_only() {
+        let (entries, empty, w) = walk("/", 1);
+        assert_eq!(names(&entries), ["node", "leds", "buttons", "rgb", "stats", "config"]);
+        assert!(!empty);
+        assert_eq!((w.objects, w.variables), (6, 0));
+        assert!(entries.iter().all(|e| e.level == 0 && e.guides == 0));
+        assert!(entries.last().unwrap().last && !entries[0].last);
+    }
+
+    #[test]
+    fn browse_depth_2_goes_down_depth_first_with_the_right_guides() {
+        let (entries, _, w) = walk("/", 2);
+        // Depth first: a node's children come right after it.
+        assert_eq!(&names(&entries)[..4], ["node", "name", "uptime", "leds"]);
+        let uptime = &entries[2];
+        assert_eq!((uptime.level, uptime.last), (1, true));
+        // `node` has later siblings: its vertical line goes on through its children.
+        assert_eq!(uptime.guides, 0b1);
+        // The last object, `config`, has none.
+        let config = entries.iter().position(|e| e.name == "config").unwrap();
+        assert!(entries[config].last);
+        assert!(entries[config + 1..].iter().all(|e| e.level == 1 && e.guides == 0));
+        // Every node of the tree, once.
+        assert_eq!(usize::from(w.objects + w.variables), NODES.len() - 1 + KEYS.len());
+    }
+
+    #[test]
+    fn browse_depth_is_capped_and_a_branch_can_be_listed() {
+        assert_eq!(walk("/", 200).0, walk("/", MAX_BROWSE_DEPTH).0);
+        assert_eq!(walk("/", 3).0, walk("/", 2).0, "the tree has two levels under the root");
+        let (entries, _, _) = walk("/leds", 1);
+        assert_eq!(names(&entries), ["1", "2"]);
+        assert!(entries.iter().all(|e| !e.is_object()));
+    }
+
+    #[test]
+    fn browsing_a_variable_finds_no_children() {
+        let (entries, empty, _) = walk("/leds/1", 2);
+        assert!(entries.is_empty() && empty);
     }
 
     #[test]

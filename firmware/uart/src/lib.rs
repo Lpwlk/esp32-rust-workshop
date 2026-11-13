@@ -306,7 +306,7 @@ struct Node {
     /// What the peer is subscribed to here (address space).
     subs: Subscriptions<4>,
     /// A `browse` in progress: the node being listed and the next child to ask for.
-    browse: Option<(space::NodeId, u16)>,
+    browse: Option<space::BrowseWalk>,
     /// The `help` overview being printed, a section at a time.
     help: Option<cli::HelpPager>,
     baud: BaudControl,
@@ -689,25 +689,22 @@ impl Node {
                 }
             }
             Body::BrowseResult { id, name, kind, more, .. } => {
-                let Some((parent, index)) = self.browse else { return };
-                if *id == space::NONE {
-                    if index == 0 {
-                        term::space_event(
-                            now_ms(),
-                            true,
-                            format_args!("{} has no children", space::path_string(parent)),
-                        );
-                    }
-                    self.browse = None;
-                    return;
+                let Some(walk) = self.browse.as_mut() else { return };
+                let root = walk.root();
+                let step = walk.on_result(*id, name, *kind, *more);
+                let found = (walk.objects, walk.variables);
+                if let Some(entry) = &step.entry {
+                    term::space_tree_entry(entry);
                 }
-                let path = space::path_string(*id);
-                term::space_node(if path == "?" { name } else { &path }, &space::describe_kind(*kind), *id);
-                if *more {
-                    self.browse = Some((parent, index + 1));
-                    self.send_space(Body::Browse { id: parent, index: index + 1 });
-                } else {
-                    self.browse = None;
+                if step.empty {
+                    term::space_tree_empty(&space::path_string(root));
+                }
+                match step.request {
+                    Some(request) => self.send_space(request),
+                    None => {
+                        self.browse = None;
+                        term::space_tree_foot(found.0, found.1);
+                    }
                 }
             }
             Body::Value { id, status, value, .. } => {
@@ -729,12 +726,13 @@ impl Node {
             id
         };
         match command {
-            Command::Browse(path) => {
+            Command::Browse { path, depth } => {
                 let path = path.as_deref().unwrap_or("/");
                 if let Some(id) = resolve(path) {
-                    self.browse = Some((id, 0));
-                    term::space_event(now_ms(), false, format_args!("browse {}", space::path_string(id)));
-                    self.send_space(Body::Browse { id, index: 0 });
+                    let (walk, request) = space::BrowseWalk::start(id, depth);
+                    self.browse = Some(walk);
+                    term::space_tree_head(&space::path_string(id), depth);
+                    self.send_space(request);
                 }
             }
             Command::Read(path) => {
@@ -972,7 +970,7 @@ impl Node {
                 Err(BaudError::Same) => term::cli_error(format_args!("the link is already at {}", term::Baud(baud))),
                 Err(BaudError::Busy) => term::cli_error(format_args!("a speed change is already in progress")),
             },
-            Command::Browse(_)
+            Command::Browse { .. }
             | Command::Read(_)
             | Command::Write { .. }
             | Command::Watch { .. }

@@ -263,7 +263,7 @@ period 4Hz
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `browse [path]` | `br` | list what the peer has: its address space |
+| `browse [path] [depth]` | `br`, `tree` | list what the peer has, as a tree: its address space |
 | `read <path>` | `rd` | read one of the peer's variables |
 | `write <path> <value>` | `wr` | write one of the peer's variables |
 | `watch <path> [interval]` |  | the peer reports a variable whenever it changes |
@@ -273,9 +273,11 @@ period 4Hz
 
 ```text
 Asks the peer to describe itself, one node per frame: its LEDs, buttons,
-statistics and settings as a tree. `browse` alone starts at the root `/`;
-`browse /leds` lists one branch. Each line shows the path, the kind of node
-and, for a variable, its type and whether it can be written.
+statistics and settings as a tree. `browse` alone lists the root `/`;
+`browse /leds` lists one branch. `depth` (1 to 4, default 1) is how many
+levels to go down: `browse / 2` shows the whole tree (`-d 2` and `--depth 2`
+work too). Each line shows the node, and for a variable its type and whether
+it can be written (`rw`) or only read (`ro`).
 ```
 
 Examples:
@@ -283,7 +285,8 @@ Examples:
 ```text
 browse
 browse /leds
-browse /config
+browse / 2
+browse /config -d 1
 ```
 
 ### `read`

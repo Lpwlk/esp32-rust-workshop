@@ -171,20 +171,55 @@ The commands are requests to the **peer**; its answers print as they arrive.
 
 ```text
 cli › browse /leds
-  12.001 TX ▶ UA   browse /leds
-    /leds/1                      variable text read-write  (id 5)
-    /leds/2                      variable text read-write  (id 6)
+  /leds
+  ├── 1                           text rw
+  └── 2                           text rw
+  0 objects, 2 variables
 cli › read /buttons/jumper
-    /buttons/jumper              = 0
+  /buttons/jumper            = 0
 cli › write /leds/1 blink 200
-    /leds/1                      = blink 200 ms
+  /leds/1                    = blink 200 ms
 cli › write /leds/1 disco
-    /leds/1                      ✗ BadTypeMismatch (still blink 200 ms)
+  /leds/1                    ✗ BadTypeMismatch (still blink 200 ms)
 cli › watch /buttons/jumper
-    /buttons/jumper              = 0
-    /buttons/jumper              = 1          <- node-B's button was pressed
+  /buttons/jumper            = 0
+  /buttons/jumper            = 1          <- node-B's button was pressed
 cli › unwatch
 ```
+
+`browse [path] [depth]` lists a branch as a tree: `depth` is how many levels to go down (1 to 4, default 1; `-d 2` and
+`--depth 2` work too; `tree` is an alias). Objects are in bold blue with a trailing `/`, variables show their type and
+whether they can be written (`rw`) or only read (`ro`). `browse / 2` is the whole address space:
+
+```text
+cli › browse / 2
+  / · 2 levels
+  ├── node/
+  │   ├── name                   text ro
+  │   └── uptime                 u32  ro
+  ├── leds/
+  │   ├── 1                      text rw
+  │   └── 2                      text rw
+  ├── buttons/
+  │   ├── jumper                 bool ro
+  │   └── boot                   bool ro
+  ├── rgb/
+  │   ├── pattern                text rw
+  │   └── brightness             u32  rw
+  ├── stats/
+  │   ├── tx                     u32  ro
+  │   ├── rx                     u32  ro
+  │   └── lost                   u32  ro
+  └── config/
+      ├── data_period_ms         text rw
+      └── …                      text rw
+  6 objects, 27 variables
+```
+
+(`/config` has 16 variables, one per runtime setting; only two are shown here.)
+
+The depth is the client's business: the node being browsed still answers one child per `BRW`; the asking node walks down
+(depth first) by sending one more `BRW` for each object it finds, which is what `workshop_core::space::BrowseWalk` does.
 
 On the other board, a write or a subscription is always shown (`node-A writes /leds/1 = blink 200`); browsing and reading
 only from `verbose frames`.
