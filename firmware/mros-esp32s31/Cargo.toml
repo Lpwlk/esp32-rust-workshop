@@ -1,0 +1,47 @@
+# mros for the ESP32-S31: the part of the RTOS that is hardware (see firmware/shared/mros for the kernel).
+#
+# Its own Cargo workspace, like firmware/ethernet/: it builds on esp-hal `main`, pinned to the same
+# commit (the S31 support is not in an esp-hal release yet), and two esp-hal versions can't share a
+# workspace. firmware/ethernet/ can depend on it by path.
+[workspace]
+
+[package]
+name         = "mros-esp32s31"
+description  = "mros port for the ESP32-S31: context switch, SYSTIMER/TIMG tick, critical section, blocking synchronization objects."
+edition      = "2024"
+rust-version = "1.95"
+version      = "0.1.0"
+publish      = false
+
+[lib]
+test  = false
+bench = false
+
+[features]
+default = ["fpu"]
+# Saves and restores the floating-point registers (f0-f31, fcsr) at each context switch. The S31 core
+# has the F extension; without this, two tasks that use floats would corrupt each other's values.
+# (`cfg(target_feature = "f")` can't be tested on stable Rust: the feature is unstable there.)
+fpu = []
+
+[dependencies]
+mros             = { path = "../shared/mros" }
+esp-hal          = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "unstable"] }
+critical-section = "1.2.0"
+
+[dev-dependencies]
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31"] }
+esp-backtrace          = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "panic-handler", "println"] }
+esp-println            = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", default-features = false, features = ["esp32s31", "auto", "colors"] }
+
+[[example]]
+name = "demo"
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug         = 2
+lto           = 'fat'
+opt-level     = 's'

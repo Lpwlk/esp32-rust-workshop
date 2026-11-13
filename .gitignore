@@ -11,3 +11,4 @@ __pycache__/
 /.boards.json
 /docs/zensical.ci.toml
 /firmware/ethernet/target
+/firmware/mros-esp32s31/target
