@@ -217,6 +217,7 @@ impl core::fmt::Display for Baud {
 /// The boot card: shared link settings, this node's config, build, chip, LEDs and CLI.
 pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo, sys: &SystemInfo) {
     let p = cfg.pins;
+    let u = cfg.uart();
     out!();
     card_top("link · shared, must match on both nodes");
     card_row("uart", format_args!("UART1 · {} · 8N1 · RX by interrupt", Baud(shared::BAUD_RATE)));
@@ -226,7 +227,7 @@ pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo, sys: &SystemInfo) {
     card_split("node · this board's config");
     card_row("name", format_args!("{}", cfg.name));
     card_row("board", format_args!("ESP32-S31-Function-CoreBoard-1"));
-    card_row("uart io", format_args!("TX GPIO{} · RX GPIO{}", p.uart_tx, p.uart_rx));
+    card_row("uart io", format_args!("TX GPIO{} · RX GPIO{}", u.tx, u.rx));
     card_row(
         "DAT",
         format_args!(
@@ -667,7 +668,7 @@ pub fn cli_help(topic: Option<&str>, cfg: &NodeConfig, defaults: &NodeConfig) {
                 help_command(c);
             } else if let Some(k) = config::Key::from_name(t) {
                 help_key(t, k, cfg, defaults);
-            } else if config::READ_ONLY.contains(&t) {
+            } else if cfg.read_only().contains(&t) {
                 out!(
                     "  {BOLD}{t}{RST} {GRAY}—{RST} read-only: set in src/bin/node_*.rs or config::shared, then rebuild"
                 );
@@ -688,10 +689,16 @@ const HELP_GROUPS: [(cli::Group, &str); 5] = [
 
 fn help_overview() {
     // Usage column as wide as the longest usage, so summaries always line up.
-    let usage_w = cli::COMMANDS.iter().map(|c| c.usage.chars().count()).max().unwrap_or(0) + 2;
+    let usage_w = cli::COMMANDS
+        .iter()
+        .filter(|c| c.on(config::LinkKind::Uart))
+        .map(|c| c.usage.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 2;
     for (group, title) in HELP_GROUPS {
         out!("  {BOLD}{title}{RST}");
-        for c in cli::COMMANDS.iter().filter(|c| c.group == group) {
+        for c in cli::COMMANDS.iter().filter(|c| c.group == group && c.on(config::LinkKind::Uart)) {
             out!("    {CYAN}{:<usage_w$}{RST}{GRAY}{}{RST}", c.usage, c.summary);
         }
     }
@@ -777,11 +784,12 @@ pub fn link_counters(c: &crate::link::Counters, peer_period_us: Option<u32>) {
 /// `config`: every setting, read-only ones first, changed ones marked.
 pub fn cli_config(cfg: &NodeConfig, defaults: &NodeConfig) {
     let p = cfg.pins;
+    let u = cfg.uart();
     out!("  {BOLD}{:<22}{:<16}{RST}{GRAY}build value{RST}", "key", "value");
     let fixed: [(&str, u32); 7] = [
         ("name", 0),
-        ("pins.uart_tx", p.uart_tx.into()),
-        ("pins.uart_rx", p.uart_rx.into()),
+        ("pins.uart_tx", u.tx.into()),
+        ("pins.uart_rx", u.rx.into()),
         ("pins.button", p.button.into()),
         ("pins.led1", p.led1.into()),
         ("pins.led2", p.led2.into()),

@@ -81,6 +81,8 @@ macro_rules! node_firmware {
         use esp_backtrace as _;
 
         const _: () = $config.check();
+        // This firmware is the UART one: an Ethernet config can't be built into it.
+        const _: $crate::config::UartLink = $config.uart();
 
         // App descriptor required by the ESP-IDF second-stage bootloader.
         esp_bootloader_esp_idf::esp_app_desc!();
@@ -214,8 +216,9 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
     let boot_load = store.load(&mut cfg);
     rtt_console::set_route(cfg.console);
     let p = cfg.pins;
+    let uart = cfg.uart();
 
-    let link = Link::new(peripherals.UART1, pin(p.uart_tx), pin(p.uart_rx), shared::BAUD_RATE);
+    let link = Link::new(peripherals.UART1, pin(uart.tx), pin(uart.rx), shared::BAUD_RATE);
     // One GPIO interrupt handler for both buttons (src/button.rs).
     let gpio = button::Gpio::new(peripherals.IO_MUX);
     let button = Button::new(&gpio, Source::Jumper, pin(p.button), ms(cfg.debounce_ms), ms(cfg.lockout_ms));
@@ -707,7 +710,7 @@ impl Node {
                     self.sync();
                     term::cli_ok(format_args!("{} = {}  (build value)", k.name(), self.cfg.value(k)));
                 }
-                None if config::READ_ONLY.contains(&key.as_str()) => {
+                None if self.cfg.read_only().contains(&key.as_str()) => {
                     term::cli_error(format_args!("`{key}` is read-only, it always has its build value"))
                 }
                 None => term::cli_error(format_args!("unknown key `{key}` (see `config`)")),
@@ -733,6 +736,9 @@ impl Node {
                 while t.elapsed() < Duration::from_millis(50) {}
                 esp_hal::system::software_reset();
             }
+            Command::Link => term::cli_error(format_args!(
+                "`link` is for the Ethernet app: this firmware has a UART link (see `baud`)"
+            )),
             Command::Baud(None) => term::baud_info(self.baud.current(), self.baud.boot()),
             Command::Baud(Some(baud)) => match self.baud.request(baud, now_us()) {
                 Ok(()) => {

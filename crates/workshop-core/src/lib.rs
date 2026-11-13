@@ -1,4 +1,5 @@
-//! Hardware-independent logic of the UART workshop firmware.
+//! Hardware-independent logic of the workshop firmwares: the UART one (`esp32-rust-workshop`)
+//! and the Ethernet one (`eth-lab`), which share everything but their link.
 //!
 //! Everything in this crate is plain `no_std` Rust that never touches a
 //! peripheral, so it builds:
@@ -24,7 +25,8 @@
 //! | [`button`] | jumper-button debouncing state machine |
 //! | [`leds`] | what a breadboard LED shows in each mode |
 //! | [`fx`] | RGB LED color patterns and fade math |
-//! | [`baud`] | link speed change handshake (CLI `baud`) |
+//! | [`baud`] | UART only: link speed change handshake (CLI `baud`) |
+//! | [`net`] | Ethernet only: addresses, transport and port of the link, their validation |
 //! | [`rtt`] | round-trip time from `ECH` replies (`tx_mode on-rx`) |
 //! | [`burst`] | burst scheduling and statistics (CLI `burst`) |
 //! | [`units`] | periods and frequencies typed in the CLI (decimals, units) |
@@ -44,6 +46,7 @@ pub mod editor;
 pub mod fx;
 pub mod leds;
 pub mod line;
+pub mod net;
 pub mod persist;
 pub mod protocol;
 pub mod rtt;

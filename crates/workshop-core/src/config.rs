@@ -1,10 +1,12 @@
-//! Firmware configuration, in two parts:
+//! Firmware configuration, in three parts:
 //!
-//! - [`shared`]: settings both nodes must agree on, because they define what goes
-//!   on the wire. Change one and reflash **both** boards.
-//! - [`NodeConfig`]: settings each node chooses freely (timings, pins, LEDs...).
-//!   Each binary (`src/bin/node_*.rs`) starts from [`NodeConfig::DEFAULT`]
-//!   and overrides only what it needs.
+//! - [`Link`]: how the two nodes are connected, **UART** ([`UartLink`], with the baud rate
+//!   in [`shared`]) or **Ethernet** ([`NetLink`], addresses and transport). Both nodes must agree on
+//!   it. Change one and reflash **both** boards.
+//! - [`NodeConfig`]: the settings each node chooses freely (timings, pins, LEDs...), the
+//!   same for both links. Each binary starts from [`NodeConfig::DEFAULT`] (UART) or
+//!   [`NodeConfig::DEFAULT_NET`] (Ethernet) and overrides only what it needs, in Rust or,
+//!   better, in a TOML preset (see the `presets/` folders).
 //!
 //! Invalid values are rejected **at compile time** by [`NodeConfig::check`]
 //! (called by the firmware's `node_firmware!` macro), with a message saying what
@@ -25,6 +27,7 @@
 use core::fmt;
 
 use crate::fx;
+pub use crate::net::{NetLink, TcpRole, Transport};
 use crate::units::{Num, parse_freq_hz, parse_period_ms};
 
 /// `ensure!(cond, "msg")`: return `Err("msg")` unless `cond` (usable in `const fn`).
@@ -47,21 +50,64 @@ pub mod shared {
     pub const BAUD_RANGE: (u32, u32) = (1200, 5_000_000);
 }
 
-/// GPIO numbers used by a node. All must be different, exist on the chip
-/// (see [`MISSING_PINS`]) and not be reserved (see [`RESERVED_PINS`]).
+/// GPIO numbers used by a node, besides the link's own (see [`Link`]). All must be different,
+/// exist on the chip (see [`MISSING_PINS`]) and not be reserved (see [`RESERVED_PINS`]).
 /// The RGB LED is fixed on the board (GPIO60).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pins {
-    /// UART1 TX, wired to the peer's RX.
-    pub uart_tx: u8,
-    /// UART1 RX, wired to the peer's TX.
-    pub uart_rx: u8,
     /// Jumper "button" to GND (internal pull-up).
     pub button: u8,
     /// Breadboard LEDs, active high: GPIO -> 330 Ω -> LED anode, cathode -> GND.
     pub led1: u8,
     /// Second breadboard LED, same wiring as `led1`.
     pub led2: u8,
+}
+
+/// The pins of the UART link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UartLink {
+    /// UART1 TX, wired to the peer's RX.
+    pub tx: u8,
+    /// UART1 RX, wired to the peer's TX.
+    pub rx: u8,
+}
+
+/// How the two nodes are connected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// UART1, 8N1 at [`shared::BAUD_RATE`], two wires and a ground.
+    Uart(UartLink),
+    /// The board's RJ45 (Gigabit Ethernet, RGMII): UDP or TCP over a direct cable or a switch.
+    Net(NetLink),
+}
+
+/// Which kind of [`Link`], for the CLI help and the generated docs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    /// [`Link::Uart`].
+    Uart,
+    /// [`Link::Net`].
+    Net,
+}
+
+impl LinkKind {
+    /// `uart` or `ethernet`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            LinkKind::Uart => "uart",
+            LinkKind::Net => "ethernet",
+        }
+    }
+}
+
+impl Link {
+    /// Which kind of link this is.
+    pub const fn kind(&self) -> LinkKind {
+        match self {
+            Link::Uart(_) => LinkKind::Uart,
+            Link::Net(_) => LinkKind::Net,
+        }
+    }
 }
 
 /// Pins the firmware must not touch on the ESP32-S31-WROOM-3 / CoreBoard-1
@@ -220,6 +266,8 @@ pub struct NodeConfig {
     pub name: &'static str,
     /// GPIO numbers, fixed at build time.
     pub pins: Pins,
+    /// How the node reaches its peer: UART or Ethernet, fixed at build time.
+    pub link: Link,
     /// Period of the DAT frame, ms. Sent in the frame, so the peer adapts to it.
     pub data_period_ms: f32,
     /// Period of the stats line in the console, ms.
@@ -247,10 +295,11 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
-    /// Starting point of every node config: binaries override only what they need.
+    /// Starting point of every **UART** node config: binaries override only what they need.
     pub const DEFAULT: NodeConfig = NodeConfig {
         name: "node",
-        pins: Pins { uart_tx: 2, uart_rx: 3, button: 4, led1: 20, led2: 21 },
+        pins: Pins { button: 4, led1: 20, led2: 21 },
+        link: Link::Uart(UartLink { tx: 2, rx: 3 }),
         data_period_ms: 2500.0,
         status_period_ms: 10_000.0,
         link_timeout_periods: 3,
@@ -264,6 +313,10 @@ impl NodeConfig {
         burst: BurstConfig { count: 1000, rate_hz: 0.0 },
         console: Console::Auto,
     };
+
+    /// Starting point of every **Ethernet** node config: the same settings, the link is
+    /// [`NetLink::DEFAULT`] (192.168.77.11, UDP). The second board needs its own addresses.
+    pub const DEFAULT_NET: NodeConfig = NodeConfig { link: Link::Net(NetLink::DEFAULT), ..NodeConfig::DEFAULT };
 
     /// Compile-time validation. Use it as `const _: () = CONFIG.check();`
     /// (`esp32_rust_workshop::node_firmware!` does it for you).
@@ -326,9 +379,32 @@ impl NodeConfig {
         }
 
         let p = self.pins;
-        let pins = [p.uart_tx, p.uart_rx, p.button, p.led1, p.led2];
+        // The pins of this node: the three of `Pins`, then the link's own.
+        let mut pins = [p.button, p.led1, p.led2, p.led1, p.led1];
+        let mut count = 3;
+        match self.link {
+            Link::Uart(u) => {
+                pins[3] = u.tx;
+                pins[4] = u.rx;
+                count = 5;
+            }
+            Link::Net(n) => {
+                if let Err(e) = n.validate() {
+                    return Err(e);
+                }
+                // The PHY owns GPIO5-19: none of ours may be there.
+                let mut i = 0;
+                while i < 3 {
+                    ensure!(
+                        pins[i] < crate::net::PHY_FIRST_PIN || pins[i] > crate::net::PHY_LAST_PIN,
+                        "config: GPIO5-19 are used by the Ethernet PHY (MDC, MDIO, reset, RGMII)"
+                    );
+                    i += 1;
+                }
+            }
+        }
         let mut a = 0;
-        while a < pins.len() {
+        while a < count {
             ensure!(pins[a] <= MAX_GPIO, "config: GPIO number too high (ESP32-S31 has GPIO0-61)");
             ensure!(
                 pins[a] != MISSING_PINS[0] && pins[a] != MISSING_PINS[1],
@@ -343,7 +419,7 @@ impl NodeConfig {
                 r += 1;
             }
             let mut b = a + 1;
-            while b < pins.len() {
+            while b < count {
                 ensure!(pins[a] != pins[b], "config: the same GPIO is used twice in `pins`");
                 b += 1;
             }
@@ -417,17 +493,32 @@ pub const KEYS: [(&str, Key); 16] = [
     ("console", Key::Console),
 ];
 
-/// Settings that exist but are fixed at build time: pins are already wired to
-/// peripherals, the name identifies the node, the baud rate must match the peer.
-pub const READ_ONLY: [&str; 7] =
+/// Settings that exist but are fixed at build time on a **UART** node: pins are already wired
+/// to peripherals, the name identifies the node, the baud rate must match the peer.
+pub const READ_ONLY_UART: [&str; 7] =
     ["name", "pins.uart_tx", "pins.uart_rx", "pins.button", "pins.led1", "pins.led2", "shared.baud_rate"];
+
+/// The same for an **Ethernet** node: the network settings must match the peer.
+pub const READ_ONLY_NET: [&str; 11] = [
+    "name",
+    "pins.button",
+    "pins.led1",
+    "pins.led2",
+    "net.transport",
+    "net.address",
+    "net.prefix_len",
+    "net.peer",
+    "net.port",
+    "net.tcp_role",
+    "net.max_speed",
+];
 
 /// Why [`NodeConfig::set`] refused a change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetError {
     /// Not a setting at all.
     UnknownKey,
-    /// A setting, but fixed at build time (see [`READ_ONLY`]).
+    /// A setting, but fixed at build time (see [`NodeConfig::read_only`]).
     ReadOnly,
     /// The value couldn't be parsed; the message says what was expected.
     BadValue(&'static str),
@@ -502,7 +593,13 @@ impl NodeConfig {
     /// Sets `key` from text. The whole config is re-validated before the change
     /// is kept, so an invalid value leaves the config untouched.
     pub fn set(&mut self, key: &str, value: &str) -> Result<Key, SetError> {
-        if READ_ONLY.contains(&key) {
+        self.set_impl(key, value, true)
+    }
+
+    /// [`Self::set`], with the whole-config validation optional (presets apply many settings
+    /// in a row, then validate once: the in-between states needn't be valid).
+    fn set_impl(&mut self, key: &str, value: &str, check: bool) -> Result<Key, SetError> {
+        if self.read_only().contains(&key) {
             return Err(SetError::ReadOnly);
         }
         let key = Key::from_name(key).ok_or(SetError::UnknownKey)?;
@@ -575,9 +672,154 @@ impl NodeConfig {
             }
             Key::Verbose => new.verbose = on_off(value)?,
         }
-        new.validate().map_err(SetError::Invalid)?;
+        if check {
+            new.validate().map_err(SetError::Invalid)?;
+        }
         *self = new;
         Ok(key)
+    }
+
+    /// The UART pins of a UART node. The UART firmware checks it at compile time
+    /// (`node_firmware!`), so a config for the wrong link can't be built.
+    pub const fn uart(&self) -> UartLink {
+        match self.link {
+            Link::Uart(u) => u,
+            Link::Net(_) => panic!("this firmware needs a UART link: use `NodeConfig::DEFAULT`, not `DEFAULT_NET`"),
+        }
+    }
+
+    /// The network settings of an Ethernet node (see [`Self::uart`]).
+    pub const fn net(&self) -> NetLink {
+        match self.link {
+            Link::Net(n) => n,
+            Link::Uart(_) => panic!("this firmware needs an Ethernet link: use `NodeConfig::DEFAULT_NET`"),
+        }
+    }
+
+    /// The build-time settings of this node's link kind (see [`READ_ONLY_UART`], [`READ_ONLY_NET`]).
+    pub fn read_only(&self) -> &'static [&'static str] {
+        match self.link {
+            Link::Uart(_) => &READ_ONLY_UART,
+            Link::Net(_) => &READ_ONLY_NET,
+        }
+    }
+
+    /// Sets a **build-time** setting (what presets contain): the read-only ones (`pins.*`,
+    /// `net.*`, `pins.uart_*`), or any runtime one, parsed like [`Self::set`]. It does **not**
+    /// validate the whole config, so a preset can apply its settings in any order: call
+    /// [`Self::validate`] once they are all in. `name` is a `&'static str`: use [`Self::set_name`].
+    pub fn set_build(&mut self, key: &str, value: &str) -> Result<(), SetError> {
+        let number = || value.trim().parse::<u8>().map_err(|_| SetError::BadValue("a GPIO number (0-61)"));
+        let mut new = *self;
+        match key {
+            "pins.button" => new.pins.button = number()?,
+            "pins.led1" => new.pins.led1 = number()?,
+            "pins.led2" => new.pins.led2 = number()?,
+            "pins.uart_tx" | "pins.uart_rx" => match &mut new.link {
+                Link::Uart(u) => {
+                    let pin = number()?;
+                    if key == "pins.uart_tx" { u.tx = pin } else { u.rx = pin }
+                }
+                Link::Net(_) => return Err(SetError::Invalid("`pins.uart_*` only exist on a UART node")),
+            },
+            k if k.starts_with("net.") => match &mut new.link {
+                Link::Net(n) => n.set(k, value).map_err(SetError::Invalid)?,
+                Link::Uart(_) => return Err(SetError::Invalid("`net.*` only exists on an Ethernet node")),
+            },
+            "name" => return Err(SetError::Invalid("`name` is set with `set_name`")),
+            _ => return self.set_impl(key, value, false).map(|_| ()),
+        }
+        *self = new;
+        Ok(())
+    }
+
+    /// Sets the node name (not validated, see [`Self::set_build`]).
+    pub fn set_name(&mut self, name: &'static str) {
+        self.name = name;
+    }
+
+    /// Writes this config as the Rust expression that builds it, for the preset generator
+    /// (`presets/*.toml` become a `const NodeConfig`). The output compiles as-is and
+    /// [`Self::check`]s the same.
+    pub fn write_rust(&self, out: &mut impl fmt::Write) -> fmt::Result {
+        use fmt::Write as _;
+        let led = |m: LedMode| -> heapless::String<64> {
+            let mut s = heapless::String::new();
+            let _ = match m {
+                LedMode::Off => write!(s, "LedMode::Off"),
+                LedMode::On => write!(s, "LedMode::On"),
+                LedMode::Blink { period_ms } => write!(s, "LedMode::Blink {{ period_ms: {period_ms:?} }}"),
+                LedMode::Button => write!(s, "LedMode::Button"),
+                LedMode::PeerButton => write!(s, "LedMode::PeerButton"),
+                LedMode::Link => write!(s, "LedMode::Link"),
+                LedMode::RxFlash => write!(s, "LedMode::RxFlash"),
+                LedMode::TxFlash => write!(s, "LedMode::TxFlash"),
+            };
+            s
+        };
+        writeln!(out, "NodeConfig {{")?;
+        writeln!(out, "    name: {:?},", self.name)?;
+        writeln!(
+            out,
+            "    pins: Pins {{ button: {}, led1: {}, led2: {} }},",
+            self.pins.button, self.pins.led1, self.pins.led2
+        )?;
+        match self.link {
+            Link::Uart(u) => writeln!(out, "    link: Link::Uart(UartLink {{ tx: {}, rx: {} }}),", u.tx, u.rx)?,
+            Link::Net(n) => {
+                writeln!(out, "    link: Link::Net(NetLink {{")?;
+                writeln!(
+                    out,
+                    "        transport: Transport::{},",
+                    if n.transport == Transport::Udp { "Udp" } else { "Tcp" }
+                )?;
+                writeln!(out, "        address: {:?},", n.address)?;
+                writeln!(out, "        prefix_len: {},", n.prefix_len)?;
+                writeln!(out, "        peer: {:?},", n.peer)?;
+                writeln!(out, "        port: {},", n.port)?;
+                writeln!(
+                    out,
+                    "        tcp_role: TcpRole::{},",
+                    if n.tcp_role == TcpRole::Server { "Server" } else { "Client" }
+                )?;
+                writeln!(out, "        max_speed: {},", n.max_speed)?;
+                writeln!(out, "    }}),")?;
+            }
+        }
+        writeln!(out, "    data_period_ms: {:?},", self.data_period_ms)?;
+        writeln!(out, "    status_period_ms: {:?},", self.status_period_ms)?;
+        writeln!(out, "    link_timeout_periods: {},", self.link_timeout_periods)?;
+        writeln!(out, "    debounce_ms: {},", self.debounce_ms)?;
+        writeln!(out, "    lockout_ms: {},", self.lockout_ms)?;
+        writeln!(
+            out,
+            "    rgb: RgbConfig {{ pattern: {:?}, freq_hz: {:?}, cycle_ms: {:?}, brightness: {} }},",
+            self.rgb.pattern, self.rgb.freq_hz, self.rgb.cycle_ms, self.rgb.brightness
+        )?;
+        writeln!(out, "    led1: {},", led(self.led1))?;
+        writeln!(out, "    led2: {},", led(self.led2))?;
+        writeln!(out, "    verbose: {},", self.verbose)?;
+        writeln!(
+            out,
+            "    tx_mode: TxMode::{},",
+            match self.tx_mode {
+                TxMode::Periodic => "Periodic",
+                TxMode::OnRx => "OnRx",
+                TxMode::Quiet => "Quiet",
+            }
+        )?;
+        writeln!(out, "    burst: BurstConfig {{ count: {}, rate_hz: {:?} }},", self.burst.count, self.burst.rate_hz)?;
+        writeln!(
+            out,
+            "    console: Console::{},",
+            match self.console {
+                Console::Auto => "Auto",
+                Console::Serial => "Serial",
+                Console::Rtt => "Rtt",
+                Console::Both => "Both",
+            }
+        )?;
+        write!(out, "}}")
     }
 
     /// Writes the current value of `key`, in a form [`Self::set`] accepts back.
@@ -628,6 +870,13 @@ mod tests {
         cfg.validate()
     }
 
+    fn with_uart(f: impl FnOnce(&mut UartLink)) -> Result<(), &'static str> {
+        let mut cfg = D;
+        let Link::Uart(u) = &mut cfg.link else { unreachable!() };
+        f(u);
+        cfg.validate()
+    }
+
     #[test]
     fn default_is_valid() {
         assert_eq!(D.validate(), Ok(()));
@@ -674,7 +923,8 @@ mod tests {
     #[test]
     fn pins_must_be_distinct() {
         assert!(with_pins(|p| p.led2 = p.led1).is_err());
-        assert!(with_pins(|p| p.uart_rx = p.uart_tx).is_err());
+        assert!(with_uart(|u| u.rx = u.tx).is_err());
+        assert!(with_uart(|u| u.tx = 4).is_err(), "same as the button");
     }
 
     #[test]
@@ -715,9 +965,12 @@ mod tests {
     fn unknown_and_read_only_keys() {
         let mut cfg = D;
         assert_eq!(cfg.set("nope", "1"), Err(SetError::UnknownKey));
-        for key in READ_ONLY {
-            assert_eq!(cfg.set(key, "1"), Err(SetError::ReadOnly), "{key}");
-            assert_eq!(Key::from_name(key), None, "{key} is both read-only and settable");
+        for node in [D, NodeConfig::DEFAULT_NET] {
+            let mut cfg = node;
+            for key in node.read_only() {
+                assert_eq!(cfg.set(key, "1"), Err(SetError::ReadOnly), "{key}");
+                assert_eq!(Key::from_name(key), None, "{key} is both read-only and settable");
+            }
         }
     }
 
@@ -870,5 +1123,77 @@ mod tests {
             worst.write_value(key, &mut s).unwrap();
             assert_eq!(worst.value(key).as_str(), s, "{key:?} truncated");
         }
+    }
+
+    // --- Ethernet link, build-time settings and generated source ---------------------------
+
+    const N: NodeConfig = NodeConfig::DEFAULT_NET;
+
+    #[test]
+    fn ethernet_default_is_valid_and_has_no_uart() {
+        assert_eq!(N.validate(), Ok(()));
+        assert_eq!(N.link.kind(), LinkKind::Net);
+        assert_eq!(D.link.kind(), LinkKind::Uart);
+        assert!(!N.read_only().iter().any(|k| k.contains("uart") || k.contains("baud")));
+        assert!(!D.read_only().iter().any(|k| k.starts_with("net.")));
+    }
+
+    #[test]
+    fn ethernet_nodes_keep_off_the_phy_pins() {
+        for n in crate::net::PHY_FIRST_PIN..=crate::net::PHY_LAST_PIN {
+            let mut cfg = N;
+            cfg.set_build("pins.led1", &n.to_string()).unwrap();
+            assert!(cfg.validate().is_err(), "GPIO{n} accepted");
+        }
+        // The same pins are fine for a UART node.
+        let mut cfg = D;
+        cfg.set_build("pins.led1", "9").unwrap();
+        assert_eq!(cfg.validate(), Ok(()));
+    }
+
+    #[test]
+    fn set_build_reaches_read_only_settings() {
+        let mut cfg = N;
+        // In any order: only the end result is validated.
+        cfg.set_build("net.address", "192.168.77.12").unwrap();
+        assert!(cfg.validate().is_err(), "peer = address, until the peer is changed too");
+        cfg.set_build("net.peer", "192.168.77.11").unwrap();
+        cfg.set_build("pins.button", "22").unwrap();
+        cfg.set_build("rgb.pattern", "ocean").unwrap(); // runtime keys work too
+        assert_eq!((cfg.pins.button, cfg.rgb.pattern), (22, "ocean"));
+        assert_eq!(cfg.validate(), Ok(()));
+        assert!(matches!(cfg.set_build("net.nope", "1"), Err(SetError::Invalid(_))));
+        assert!(matches!(cfg.set_build("pins.uart_tx", "5"), Err(SetError::Invalid(_))));
+        assert!(matches!(D.clone().set_build("net.port", "7001"), Err(SetError::Invalid(_))));
+        cfg.set_name("node-B");
+        assert_eq!((cfg.name, cfg.validate()), ("node-B", Ok(())));
+        cfg.set_name("bad name");
+        assert!(cfg.validate().is_err());
+    }
+
+    /// `write_rust` must produce exactly the config it was given (checked by comparing the
+    /// text of two configs: the generated code itself is compiled by the firmware builds).
+    #[test]
+    fn write_rust_mentions_every_setting() {
+        let mut cfg = N;
+        cfg.set_build("net.transport", "tcp").unwrap();
+        cfg.set("led2", "blink 2.5Hz").unwrap();
+        cfg.set("tx_mode", "on-rx").unwrap();
+        let mut text = std::string::String::new();
+        cfg.write_rust(&mut text).unwrap();
+        for needle in [
+            "name: \"node\"",
+            "Link::Net(NetLink",
+            "transport: Transport::Tcp",
+            "address: [192, 168, 77, 11]",
+            "led2: LedMode::Blink { period_ms: 400.0 }",
+            "tx_mode: TxMode::OnRx",
+            "console: Console::Auto",
+        ] {
+            assert!(text.contains(needle), "{needle} missing from:\n{text}");
+        }
+        let mut uart = std::string::String::new();
+        D.write_rust(&mut uart).unwrap();
+        assert!(uart.contains("link: Link::Uart(UartLink { tx: 2, rx: 3 })"));
     }
 }

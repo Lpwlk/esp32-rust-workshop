@@ -42,8 +42,14 @@ impl Throughput {
 
     /// Share of the line capacity used, in tenths of a percent (8N1: 10 bits per byte).
     pub fn line_permille(&self, baud: u32) -> u64 {
-        let capacity = u64::from(baud) / 10;
-        (self.bytes_per_s() * 1000).checked_div(capacity).unwrap_or(0)
+        self.capacity_permille(u64::from(baud) / 10)
+    }
+
+    /// Share of a link able to carry `capacity_bytes_per_s`, in tenths of a percent. For
+    /// Ethernet, `speed_mbit * 125_000` (the frames' own headers, about 66 bytes per UDP
+    /// datagram, are not counted in [`Self::bytes`]).
+    pub fn capacity_permille(&self, capacity_bytes_per_s: u64) -> u64 {
+        (self.bytes_per_s() * 1000).checked_div(capacity_bytes_per_s).unwrap_or(0)
     }
 }
 

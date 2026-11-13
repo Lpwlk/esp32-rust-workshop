@@ -22,7 +22,7 @@ use core::fmt;
 
 use heapless::String;
 
-use crate::config::{BURST_COUNT_RANGE, BURST_RATE_RANGE, BurstConfig, shared};
+use crate::config::{BURST_COUNT_RANGE, BURST_RATE_RANGE, BurstConfig, LinkKind, shared};
 use crate::units::{Num, parse_freq_hz};
 
 /// Longest command line, in characters.
@@ -58,8 +58,10 @@ pub enum Command {
     Forget,
     /// `reboot`: software reset.
     Reboot,
-    /// `baud`: show the link speed; `baud <rate>`: switch both nodes to `rate`.
+    /// `baud`: show the link speed; `baud <rate>`: switch both nodes to `rate`. UART nodes.
     Baud(Option<u32>),
+    /// `link`: the Ethernet link: PHY state, speed, addresses, transport, counters. Ethernet nodes.
+    Link,
     /// `burst [count [rate]]`. Missing values: ask them ([`BurstWizard`]).
     Burst {
         /// Frames in the burst.
@@ -197,6 +199,7 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
         "verbose" | "v" => set("verbose", if rest.is_empty() { "on" } else { rest }),
         "tx" => set("tx_mode", rest),
         "period" => set("data_period_ms", rest),
+        "link" | "net" => Ok(Command::Link),
         "baud" => match rest {
             "" => Ok(Command::Baud(None)),
             rate => Ok(Command::Baud(Some(in_range(
@@ -348,6 +351,16 @@ pub struct CmdHelp {
     pub examples: &'static [&'static str],
     /// Where `help` lists it.
     pub group: Group,
+    /// The link this command exists on (`None` = every node): `baud` is UART only, `link` is
+    /// Ethernet only.
+    pub only: Option<LinkKind>,
+}
+
+impl CmdHelp {
+    /// Whether this command is available on a node with this kind of link.
+    pub fn on(&self, kind: LinkKind) -> bool {
+        self.only.is_none_or(|only| only == kind)
+    }
 }
 
 /// Every command, in `help` order. Single source for `help` and the docs.
@@ -360,10 +373,11 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &[
             "Lists every setting of this node. Values changed at runtime are shown",
             "in yellow next to their build value (from src/bin/node_*.rs).",
-            "Read-only settings (name, pins, baud rate) need a rebuild to change.",
+            "Read-only settings (name, pins, link) need a rebuild to change.",
         ],
         examples: &["config"],
         group: Group::Settings,
+        only: None,
     },
     CmdHelp {
         name: "set",
@@ -383,6 +397,7 @@ pub static COMMANDS: &[CmdHelp] = &[
             "set led1 blink 200",
         ],
         group: Group::Settings,
+        only: None,
     },
     CmdHelp {
         name: "reset",
@@ -392,6 +407,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["Without a key, restores every setting changed with `set`."],
         examples: &["reset rgb.brightness", "reset"],
         group: Group::Settings,
+        only: None,
     },
     CmdHelp {
         name: "save",
@@ -406,6 +422,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["save"],
         group: Group::System,
+        only: None,
     },
     CmdHelp {
         name: "forget",
@@ -417,6 +434,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["forget"],
         group: Group::System,
+        only: None,
     },
     CmdHelp {
         name: "reboot",
@@ -426,6 +444,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["Settings not saved with `save` are lost. The boot card then shows a software reset (`CoreSw`)."],
         examples: &["reboot"],
         group: Group::System,
+        only: None,
     },
     CmdHelp {
         name: "verbose",
@@ -440,6 +459,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["verbose", "verbose off"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "pattern",
@@ -449,6 +469,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["Name or number from `list`, which shows a color preview of each."],
         examples: &["pattern viridis", "p 3"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "next",
@@ -458,6 +479,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["Cycles through the patterns in `list` order."],
         examples: &["next"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "freq",
@@ -471,6 +493,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["freq 100", "freq 37.5", "freq 20ms"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "cycle",
@@ -483,6 +506,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["cycle 2000", "cycle 2.5s", "cycle 0.5Hz"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "bright",
@@ -492,6 +516,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["Gamma-corrected: 50 % looks about half as bright as 100 %."],
         examples: &["bright 70"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "led",
@@ -508,6 +533,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["led 1 peer", "led 2 blink 200", "led 2 blink 2.5Hz"],
         group: Group::Shortcuts,
+        only: None,
     },
     CmdHelp {
         name: "baud",
@@ -523,6 +549,21 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["baud", "baud 1M", "baud 115200", "baud 5M"],
         group: Group::Link,
+        only: Some(LinkKind::Uart),
+    },
+    CmdHelp {
+        name: "link",
+        aliases: &["net"],
+        usage: "link",
+        summary: "the Ethernet link: cable, speed, addresses, transport, counters",
+        details: &[
+            "Shows what the PHY negotiated (speed, duplex), this node's address and the",
+            "peer's, UDP or TCP and the port, and the frame counters. The speed and the",
+            "addresses are fixed at build time (presets/*.toml); `baud` is the UART equivalent.",
+        ],
+        examples: &["link"],
+        group: Group::Link,
+        only: Some(LinkKind::Net),
     },
     CmdHelp {
         name: "burst",
@@ -539,6 +580,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["burst", "burst 1000 max", "burst 200 50", "burst 100 2.5Hz"],
         group: Group::Link,
+        only: None,
     },
     CmdHelp {
         name: "tx",
@@ -550,10 +592,11 @@ pub static COMMANDS: &[CmdHelp] = &[
             "           or `tx periodic 400ms` also sets the period",
             "on-rx      no DAT: an ECH reply to each frame from the peer; the peer then",
             "           shows the round-trip time (rtt) of its frames",
-            "quiet      nothing on its own (button events and baud answers only)",
+            "quiet      nothing on its own (button events and link handshakes only)",
         ],
         examples: &["tx on-rx", "tx periodic", "tx periodic 2.5Hz", "tx periodic 12.5ms"],
         group: Group::Link,
+        only: None,
     },
     CmdHelp {
         name: "period",
@@ -566,6 +609,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         ],
         examples: &["period 1s", "period 12.5", "period 4Hz"],
         group: Group::Link,
+        only: None,
     },
     CmdHelp {
         name: "info",
@@ -575,6 +619,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["Shows the current settings (those changed with `set` included)."],
         examples: &["info"],
         group: Group::Info,
+        only: None,
     },
     CmdHelp {
         name: "list",
@@ -584,6 +629,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &["The current pattern is marked with ▶."],
         examples: &["list"],
         group: Group::Info,
+        only: None,
     },
     CmdHelp {
         name: "status",
@@ -593,6 +639,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &[],
         examples: &["status"],
         group: Group::Info,
+        only: None,
     },
     CmdHelp {
         name: "help",
@@ -602,6 +649,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         details: &[],
         examples: &["help set", "help data_period_ms"],
         group: Group::Info,
+        only: None,
     },
 ];
 
@@ -668,7 +716,7 @@ mod link_command_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Key, NodeConfig, READ_ONLY};
+    use crate::config::{Key, NodeConfig, READ_ONLY_NET, READ_ONLY_UART};
 
     fn set_cmd(key: &str, value: &str) -> Command {
         Command::Set { key: key.try_into().unwrap(), value: value.try_into().unwrap() }
@@ -744,7 +792,7 @@ mod tests {
                 assert!(core::ptr::eq(find_help(name).unwrap(), c));
                 // `help <topic>` looks commands up first: a name may only shadow a
                 // setting it is the shortcut of (`verbose`).
-                if Key::from_name(name).is_some() || READ_ONLY.contains(name) {
+                if Key::from_name(name).is_some() || READ_ONLY_UART.contains(name) || READ_ONLY_NET.contains(name) {
                     assert_eq!(parse(name), Ok(set_cmd(name, "on")), "`{name}` shadows a setting");
                 }
             }

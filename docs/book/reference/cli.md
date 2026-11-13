@@ -18,7 +18,7 @@ Changes are applied immediately and lost on reboot.
 ```text
 Lists every setting of this node. Values changed at runtime are shown
 in yellow next to their build value (from src/bin/node_*.rs).
-Read-only settings (name, pins, baud rate) need a rebuild to change.
+Read-only settings (name, pins, link) need a rebuild to change.
 ```
 
 Examples:
@@ -228,7 +228,7 @@ periodic   a DAT frame every data_period_ms (default); `tx periodic 2.5Hz`
            or `tx periodic 400ms` also sets the period
 on-rx      no DAT: an ECH reply to each frame from the peer; the peer then
            shows the round-trip time (rtt) of its frames
-quiet      nothing on its own (button events and baud answers only)
+quiet      nothing on its own (button events and link handshakes only)
 ```
 
 Examples:
