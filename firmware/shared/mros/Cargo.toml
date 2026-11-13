@@ -1,0 +1,16 @@
+[package]
+description            = "mros: a small preemptive RTOS kernel for embedded Rust. The scheduler and the synchronization objects are hardware-independent and tested on the host; ports (context switch, tick) live next to them."
+name                   = "mros"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+publish.workspace      = true
+repository.workspace   = true
+
+# Plain `no_std` Rust with no dependency: it builds for the ESP32-S31 and for the host, where
+# `cargo test-host` runs its tests and doc examples.
+
+[dependencies]
+
+[lints]
+workspace = true

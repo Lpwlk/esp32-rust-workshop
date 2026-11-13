@@ -1,5 +1,5 @@
 [workspace]
-members         = ["firmware/uart", "firmware/shared/core", "firmware/shared/presets-tool"]
+members         = ["firmware/uart", "firmware/shared/core", "firmware/shared/mros", "firmware/shared/presets-tool"]
 # Plain `cargo build` / `cargo run` = the UART firmware (firmware/uart). The Ethernet firmware
 # (firmware/ethernet) is its own workspace: see its README. Tests: `cargo test-host`, `cargo test-target`.
 default-members = ["firmware/uart"]
