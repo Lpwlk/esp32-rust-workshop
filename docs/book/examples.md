@@ -1,12 +1,12 @@
 # Examples
 
 Short programs that use the firmware's logic directly. They run **on your
-computer**: everything in `crates/workshop-core` is plain `no_std` Rust, without a
+computer**: everything in `firmware/shared/core` is plain `no_std` Rust, without a
 peripheral, so the same code runs on the ESP32-S31 and on the host.
 
 !!! success "These examples can't lie"
     The code on this page is not copied: it is **included** from
-    `crates/workshop-core/examples/*.rs` when the site is built
+    `firmware/shared/core/examples/*.rs` when the site is built
     (`pymdownx.snippets`). CI compiles and runs each example, and they are full of
     `assert!`: a change that breaks one fails the build before it can reach this
     page.
@@ -24,8 +24,8 @@ cargo run -p workshop-core --target host-tuple --example cli
 
 === "Code"
 
-    ```rust title="crates/workshop-core/examples/frames.rs"
-    --8<-- "crates/workshop-core/examples/frames.rs:encode"
+    ```rust title="firmware/shared/core/examples/frames.rs"
+    --8<-- "firmware/shared/core/examples/frames.rs:encode"
     ```
 
 === "Output"
@@ -47,7 +47,7 @@ terminal, and cheap to check on a microcontroller.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/frames.rs:parse"
+    --8<-- "firmware/shared/core/examples/frames.rs:parse"
     ```
 
 === "Output"
@@ -64,7 +64,7 @@ copy, no allocation.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/frames.rs:corrupt"
+    --8<-- "firmware/shared/core/examples/frames.rs:corrupt"
     ```
 
 === "Output"
@@ -85,7 +85,7 @@ copy, no allocation.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/frames.rs:stream"
+    --8<-- "firmware/shared/core/examples/frames.rs:stream"
     ```
 
 === "Output"
@@ -103,8 +103,8 @@ A property test checks that chunking never changes the lines that come out.
 
 ### A node's config, checked at compile time
 
-```rust title="crates/workshop-core/examples/settings.rs"
---8<-- "crates/workshop-core/examples/settings.rs:const"
+```rust title="firmware/shared/core/examples/settings.rs"
+--8<-- "firmware/shared/core/examples/settings.rs:const"
 ```
 
 `check()` is a `const fn`: in a `const _: () = …` it runs **during compilation**.
@@ -126,7 +126,7 @@ error[E0080]: evaluation panicked: config: a pin is reserved (flash, USB, consol
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/settings.rs:set"
+    --8<-- "firmware/shared/core/examples/settings.rs:set"
     ```
 
 === "Output"
@@ -144,7 +144,7 @@ build, the CLI and the flash.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/settings.rs:save"
+    --8<-- "firmware/shared/core/examples/settings.rs:save"
     ```
 
 === "Output"
@@ -162,8 +162,8 @@ renamed setting skips what it doesn't know instead of misreading it.
 
 === "Code"
 
-    ```rust title="crates/workshop-core/examples/button.rs"
-    --8<-- "crates/workshop-core/examples/button.rs:debounce"
+    ```rust title="firmware/shared/core/examples/button.rs"
+    --8<-- "firmware/shared/core/examples/button.rs:debounce"
     ```
 
 === "Output"
@@ -197,8 +197,8 @@ decision is plain logic, tested on the host with simulated bounces.
 
 === "Code"
 
-    ```rust title="crates/workshop-core/examples/cli.rs"
-    --8<-- "crates/workshop-core/examples/cli.rs:editor"
+    ```rust title="firmware/shared/core/examples/cli.rs"
+    --8<-- "firmware/shared/core/examples/cli.rs:editor"
     ```
 
 === "Output"
@@ -215,7 +215,7 @@ a history. It is fed the same way from the USB console and from RTT.
 === "Code"
 
     ```rust
-    --8<-- "crates/workshop-core/examples/cli.rs:parse"
+    --8<-- "firmware/shared/core/examples/cli.rs:parse"
     ```
 
 === "Output"
@@ -231,12 +231,12 @@ a history. It is fed the same way from the USB console and from RTT.
 
 ## Write your own
 
-1. Add `crates/workshop-core/examples/<name>.rs` with a `main()`; `assert!` what
+1. Add `firmware/shared/core/examples/<name>.rs` with a `main()`; `assert!` what
    matters.
 2. Mark the parts to show with section comments, `[start:part]` and `[end:part]`
    after the snippet marker: see the first lines of `main()` in `frames.rs`.
 3. Include a part in a page with the same marker followed by
-   `"crates/workshop-core/examples/<name>.rs:part"`, alone on its line inside a
+   `"firmware/shared/core/examples/<name>.rs:part"`, alone on its line inside a
    ` ```rust ` block.
 
 `python3 scripts/dev.py check` runs every example, as CI does. Snippets are

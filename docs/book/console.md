@@ -174,7 +174,7 @@ probe-rs.
 === "cargo-embed"
 
     ```sh
-    # Embed.toml: RTT console, flashing disabled (see the warning below)
+    # firmware/uart/Embed.toml: RTT console, flashing disabled (see the warning below)
     cargo embed --release --features rtt --bin node-a --probe <id>
     ```
 

@@ -1,5 +1,5 @@
 // Console recordings: plays the asciicast files of docs/book/assets/demo/ with
-// asciinema-player (loaded in zensical.toml). Real text, smooth and sharp at any
+// asciinema-player (loaded in docs/zensical.toml). Real text, smooth and sharp at any
 // size, pausable and seekable; a GIF of the same session is 10-50 times bigger.
 //
 // Markup, in a page:

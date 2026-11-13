@@ -6,12 +6,12 @@ place has a single job:
 | Question | Where | When it applies |
 |---|---|---|
 | **What is compiled into the firmware?** | Cargo features, in `Cargo.toml` | build |
-| **What must both nodes agree on?** | `config::shared` (`crates/workshop-core/src/config.rs`) | build |
+| **What must both nodes agree on?** | `config::shared` (`firmware/shared/core/src/config.rs`) | build |
 | **What does this node do by default?** | its preset, `presets/<app>/node-a.toml` (extends `base.toml`) | build |
 | **What did I change and keep?** | flash, written by the CLI `save` | every boot |
 | **What do I want to try right now?** | the CLI: `set`, `reset` | until reboot |
 | How do the esp-rs crates behave? | `.cargo/esp-config.toml` | build |
-| How is it built, flashed, debugged? | `rust-toolchain.toml`, `.cargo/config.toml`, `Embed.toml` | your computer |
+| How is it built, flashed, debugged? | `rust-toolchain.toml`, `.cargo/config.toml`, `firmware/uart/Embed.toml` | your computer |
 
 ## How a node gets its settings
 
@@ -83,7 +83,7 @@ peer, never as a local setting.
 
 ## Node config: what each node does by default
 
-Each node is a preset, a TOML file in `presets/uart/` (or `presets/eth/` for the
+Each node is a preset, a TOML file in `firmware/uart/presets/` (or `firmware/ethernet/presets/` for the
 [Ethernet app](ethernet.md)):
 
 ```toml
@@ -104,7 +104,7 @@ button = 5                  # plain settings first, then the [sections]
   (`pins.led1: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)`),
   not a crash on the board.
 - `PRESET_NODE_A=my-preset cargo run --release --bin node-a` builds another preset;
-  `cargo presets list | show | check` inspects them. Format: `presets/README.md`.
+  `cargo presets list | show | check` inspects them. Format: `docs/book/presets.md`.
 - The [settings reference](reference/config.md) lists every field, its range and
   its default; it is generated from the code.
 
@@ -164,7 +164,7 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 | `rust-toolchain.toml` | Rust channel (stable), the RISC-V target, `rust-src`, `llvm-tools` (for `cargo size`). rustup installs them on the first `cargo` command |
 | `Cargo.toml` | workspace, shared versions (`[workspace.package]`, `[workspace.dependencies]`), features, profiles (`opt-level = "s"`, fat LTO) |
 | `.cargo/config.toml` | default target, `cargo run` = espflash, aliases `test-host` / `test-target`, frame pointers for backtraces |
-| `Embed.toml` | cargo-embed: RTT console only, flashing disabled (see the [probe-rs pitfall](guide-rust.md#flash-run-debug)) |
+| `firmware/uart/Embed.toml` | cargo-embed: RTT console only, flashing disabled (see the [probe-rs pitfall](guide-rust.md#flash-run-debug)) |
 | `rustfmt.toml`, `.clippy.toml`, `.editorconfig` | code style, checked by CI |
 | `.boards.json` | which board (by MAC) is node A or B on your desk; written by `dev.py boards assign`, not committed |
 
@@ -174,7 +174,7 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 |---|---|
 | try another RGB pattern | `pattern ocean` (CLI) |
 | keep it after a reboot | `save` |
-| make it the default of node A, for everyone | `[rgb] pattern = "ocean"` in `presets/uart/node-a.toml` |
+| make it the default of node A, for everyone | `[rgb] pattern = "ocean"` in `firmware/uart/presets/node-a.toml` |
 | move the button to another GPIO | `[pins] button = 5` in the preset (the build checks the pin) |
 | change the link speed for good | `shared::BAUD_RATE`, then rebuild **both** nodes |
 | change the link speed now | `baud 1M` (both nodes switch together) |

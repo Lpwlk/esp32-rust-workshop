@@ -142,7 +142,7 @@ command.
 
 Each node is a **preset**, a small TOML file that lists what makes it different:
 
-```toml title="presets/uart/node-a.toml"
+```toml title="firmware/uart/presets/node-a.toml"
 extends = "base"                # (1)!
 name    = "node-A"              # (2)!
 
@@ -150,7 +150,7 @@ data_period_ms = 1000           # (3)!
 led1           = "peer"         # (4)!
 ```
 
-1. Everything not written here comes from `presets/uart/base.toml`, which spells out every
+1. Everything not written here comes from `firmware/uart/presets/base.toml`, which spells out every
    setting with its meaning, its range and its default.
 2. Sent in every frame; 1 to 12 printable characters, no `,` `*` `$`.
 3. Periods are milliseconds: `400`, `12.5`… Units work too (`"2.5Hz"`, `"250ms"`).
@@ -159,7 +159,7 @@ led1           = "peer"         # (4)!
 `cargo run --release --bin node-a` turns the preset into the node's `NodeConfig` and **checks it
 at compile time** (an invalid value is a build error naming the file and the key). Another preset:
 `PRESET_NODE_A=my-preset cargo run --release --bin node-a`. The format is described in
-[`presets/README.md`](https://github.com/Lpwlk/esp32-rust-workshop/blob/main/presets/README.md);
+[`docs/book/presets.md`](https://github.com/Lpwlk/esp32-rust-workshop/blob/main/docs/book/presets.md);
 the Ethernet app uses the same files: [Ethernet app](ethernet.md).
 
 Settings both nodes must share (the baud rate) are in `config::shared`. Cargo

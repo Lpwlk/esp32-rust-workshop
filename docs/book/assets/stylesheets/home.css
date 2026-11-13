@@ -1,6 +1,6 @@
 /* ---------------------------------------------------------------------------
    Palette: Rust / Espressif orange-red, for both color schemes
-   (zensical.toml: primary = "custom", accent = "custom").
+   (docs/zensical.toml: primary = "custom", accent = "custom").
    --------------------------------------------------------------------------- */
 :root,
 [data-md-color-scheme="default"] {

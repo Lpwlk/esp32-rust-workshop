@@ -2,7 +2,7 @@
 
 # Configuration
 
-Build values come from `NodeConfig::DEFAULT`, overridden per node by a preset (`presets/uart/*.toml`).
+Build values come from `NodeConfig::DEFAULT`, overridden per node by a preset (`firmware/uart/presets/*.toml`).
 Invalid values fail the build; at runtime `set` applies the same checks.
 
 ## Runtime settings (`set <key> <value>`)

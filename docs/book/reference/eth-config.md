@@ -2,7 +2,7 @@
 
 # Configuration (Ethernet app)
 
-Build values come from `NodeConfig::DEFAULT_NET`, overridden per node by a preset (`eth-lab/presets/*.toml`).
+Build values come from `NodeConfig::DEFAULT_NET`, overridden per node by a preset (`firmware/ethernet/presets/*.toml`).
 Invalid values fail the build; at runtime `set` applies the same checks.
 
 ## Runtime settings (`set <key> <value>`)

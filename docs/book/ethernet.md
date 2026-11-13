@@ -2,7 +2,7 @@
 
 The same two nodes as the [UART firmware](firmware.md), talking over the board's **RJ45** instead of
 three wires: Gigabit Ethernet through the on-board YT8531 PHY, static IP addresses, and frames in
-**UDP datagrams** or in one **TCP connection**. It lives in `eth-lab/`.
+**UDP datagrams** or in one **TCP connection**. It lives in `firmware/ethernet/`.
 
 Everything that isn't the link is the same code, shared through `workshop-core`: the frame
 protocol (`DAT`, `EVT`, `ECH`, `BST`), lost-frame detection, round-trip times, bursts, the CLI, the
@@ -13,19 +13,21 @@ patterns.
 
 ```text
 esp32-rust-workshop/
-├── Cargo.toml              workspace: esp32-rust-workshop (UART app), workshop-core, workshop-presets
-├── crates/
-│   ├── workshop-core/      no_std, host-tested: protocol, config (Link::Uart | Link::Net), CLI, ...
-│   └── workshop-presets/   host only: reads and validates the TOML presets (`cargo presets`)
-├── presets/{uart,eth}/     the nodes' settings in TOML; base.toml documents every setting
-└── eth-lab/                its own Cargo workspace: the Ethernet app (esp-hal main, embassy)
+├── Cargo.toml                   workspace root: uart + the two shared crates (no package of its own)
+└── firmware/
+    ├── uart/                    the UART app            presets/ = its nodes' settings (TOML)
+    ├── ethernet/                the Ethernet app: its own Cargo workspace (esp-hal main, embassy)
+    │                            presets/ = its nodes' settings (TOML)
+    └── shared/
+        ├── core/                no_std, host-tested: protocol, config (Link::Uart | Link::Net), CLI, ...
+        └── presets-tool/        host only: reads and validates the TOML presets (`cargo presets`)
 ```
 
 | | UART app | Ethernet app |
 |---|---|---|
-| directory | repository root | `eth-lab/` |
-| run | `cargo run --release --bin node-a` | `cd eth-lab && cargo run --release --bin node-a` |
-| presets | `presets/uart/` | `presets/eth/` |
+| directory | `firmware/uart/` (workspace root) | `firmware/ethernet/` (own workspace) |
+| run | `cargo run --release --bin node-a` (from the root or `firmware/uart/`) | `cd firmware/ethernet && cargo run --release --bin node-a` |
+| presets | `firmware/uart/presets/` | `firmware/ethernet/presets/` |
 | esp-hal | 1.2.2 (crates.io) | `main`, pinned to a commit |
 | main loop | blocking | async (esp-rtos + embassy-net) |
 | helper script | `dev.py flash a` | `dev.py --app eth flash a` |
@@ -53,7 +55,7 @@ the [Ethernet pins](reference/eth-pins.md).
 ## Running it
 
 ```sh
-cd eth-lab
+cd firmware/ethernet
 cargo run --release --bin node-a      # then, on the other board: --bin node-b
 ```
 

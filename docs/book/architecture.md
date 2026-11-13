@@ -4,7 +4,7 @@
 
 | Crate | Contents | Tested |
 |---|---|---|
-| `crates/workshop-core` | everything that doesn't touch a peripheral: frame protocol, line splitting, lost-frame detection, configuration and its validation, CLI editor/parser/help table, button debouncing, LED logic, RGB color math, documentation generator | on the host (`cargo test-host`): unit tests, property tests, doc examples |
+| `firmware/shared/core` | everything that doesn't touch a peripheral: frame protocol, line splitting, lost-frame detection, configuration and its validation, CLI editor/parser/help table, button debouncing, LED logic, RGB color math, documentation generator | on the host (`cargo test-host`): unit tests, property tests, doc examples |
 | `esp32-rust-workshop` (root) | the hardware glue: UART1 + interrupt, GPIO + interrupt, RMT (RGB LED), USB Serial/JTAG (CLI), TRNG, console output, main loop | on the board (`cargo test-target`) |
 
 The firmware re-exports the core modules (`crate::config`, `crate::protocol`...),
@@ -95,7 +95,7 @@ its line moved, and when. The loop then asks one
 `EVT` keys come from the ESP32-S31 true random number generator. esp-hal 1.2.2
 reads it from the right register on this chip but never starts it, and the
 ESP-IDF bootloader turns it off before jumping to the app: every key would be the
-same. `src/trng.rs` starts it at boot, like `trng_ll_enable()` in ESP-IDF v6.1.
+same. `firmware/uart/src/trng.rs` starts it at boot, like `trng_ll_enable()` in ESP-IDF v6.1.
 
 ## Link tests
 

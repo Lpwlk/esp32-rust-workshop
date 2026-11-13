@@ -28,9 +28,9 @@ In this project, `rust-toolchain.toml` holds `channel = "stable"`,
 ```text
 Cargo.toml        manifest: metadata, dependencies, features, profiles
 Cargo.lock        exact resolved versions (commit it for an application)
-src/lib.rs        the package's library
-src/main.rs       the default binary
-src/bin/*.rs      extra binaries (discovered automatically)
+firmware/uart/src/lib.rs        the package's library
+firmware/uart/src/main.rs       the default binary
+firmware/uart/src/bin/*.rs      extra binaries (discovered automatically)
 tests/*.rs        integration tests (each file is a separate crate)
 examples/*.rs     examples (cargo run --example x)
 benches/*.rs      benchmarks
@@ -56,7 +56,7 @@ test = false
 
 [[bin]]                   # an explicitly declared binary
 name = "node-a"           # binary name: cargo run --bin node-a
-path = "src/bin/node_a.rs"  # convention: dash in the name, underscore in the file
+path = "firmware/uart/src/bin/node_a.rs"  # convention: dash in the name, underscore in the file
 
 [[test]]
 name = "hil"
@@ -156,7 +156,7 @@ opt-level = 3
 
 ```toml
 [workspace]
-members = [".", "crates/workshop-core"]
+members = [".", "firmware/shared/core"]
 default-members = ["."]     # what a `cargo build` without -p builds
 resolver = "3"
 
@@ -337,7 +337,7 @@ PC.
 |---|---|---|
 | **espflash** | flashes over serial or USB-JTAG, ESP-IDF image (bootloader + partition table + app), monitor | ✅ the reference |
 | **probe-rs** | `run`, `download`, `attach`, `reset`, `erase`, RTT, GDB server, VS Code debugging | ⚠️ see below |
-| **cargo-embed** | probe-rs driven by `Embed.toml`: flash, reset, RTT UI, GDB | ⚠️ only with flashing disabled |
+| **cargo-embed** | probe-rs driven by `firmware/uart/Embed.toml`: flash, reset, RTT UI, GDB | ⚠️ only with flashing disabled |
 
 !!! warning "ESP32-S31 pitfall (probe-rs 0.32)"
     Before building the image, probe-rs reads the chip revision and writes it as
@@ -382,7 +382,7 @@ Two things decide where the console output (frames, stats, CLI replies) goes:
 | `rtt` | ✗, prompt included (but ✅ in a build without `rtt`: the output never disappears) | ✅ |
 | `both` | ✅ | ✅ if built with `rtt` |
 
-Set it per node in `src/bin/node_*.rs`:
+Set it per node in `firmware/uart/src/bin/node_*.rs`:
 
 ```rust
 use esp32_rust_workshop::config::{Console, NodeConfig};
@@ -406,7 +406,7 @@ Which to use when:
 ### Testing a firmware
 
 1. **Isolate the pure logic** (protocol, config, state machines) in a crate without
-   a HAL, tested on the PC: that's `crates/workshop-core`.
+   a HAL, tested on the PC: that's `firmware/shared/core`.
 2. **Share test vectors** to check that the MCU gives the same results as the PC,
    especially for float math.
 3. **On-target tests** (HIL) with `embedded-test`: `harness = false`, the
@@ -419,7 +419,7 @@ Which to use when:
 | Method | When |
 |---|---|
 | **Typed constants validated at compile time**: `const CONFIG: NodeConfig = …` + `const _: () = CONFIG.check();` | application settings; an error fails the build, no runtime cost (this project) |
-| **One binary per variant** (`src/bin/x.rs` pointing at its constant) | board or node variants, rather than exclusive features |
+| **One binary per variant** (`firmware/uart/src/bin/x.rs` pointing at its constant) | board or node variants, rather than exclusive features |
 | **`esp-config`**: `ESP_HAL_…` variables in `[env]` of `.cargo/esp-config.toml` | settings of the esp-rs crates themselves |
 | **A `build.rs` generating code from a TOML file** | powerful, but you lose type checking in the editor |
 
@@ -548,7 +548,7 @@ Attach over RTT with probe-rs, without flashing; type commands at its `cli>` pro
 probe-rs attach --chip esp32s31 --probe <id> --no-timestamps target/riscv32imafc-unknown-none-elf/release/node-b
 ```
 
-cargo-embed UI (Embed.toml: flashing disabled; not tested on these boards):
+cargo-embed UI (firmware/uart/Embed.toml: flashing disabled; not tested on these boards):
 
 ```sh
 cargo embed --release --features rtt --bin node-b --probe <id>

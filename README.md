@@ -70,11 +70,11 @@ Two apps, one shared core, the same documented presets:
 
 | App | Link | Run | Presets |
 |---|---|---|---|
-| UART (repository root) | 5 Mbaud UART, 3 wires | `cargo run --release --bin node-a` | [`presets/uart/`](presets/uart) |
-| Ethernet ([`eth-lab/`](eth-lab)) | Gigabit Ethernet, UDP or TCP, static IPs | `cd eth-lab && cargo run --release --bin node-a` | [`presets/eth/`](presets/eth) |
+| UART (repository root) | 5 Mbaud UART, 3 wires | `cargo run --release --bin node-a` | [`firmware/uart/presets/`](firmware/uart/presets) |
+| Ethernet ([`firmware/ethernet/`](eth-lab)) | Gigabit Ethernet, UDP or TCP, static IPs | `cd firmware/ethernet && cargo run --release --bin node-a` | [`firmware/ethernet/presets/`](firmware/ethernet/presets) |
 
 ```toml
-# presets/eth/node-a.toml: everything else comes from base.toml, where every setting is documented
+# firmware/ethernet/presets/node-a.toml: everything else comes from base.toml, where every setting is documented
 extends = "base"
 name    = "node-A"
 data_period_ms = 1000
@@ -86,7 +86,7 @@ peer    = "192.168.77.12"
 ```
 
 The build turns the preset into a `const NodeConfig` and **checks it at compile time**: a bad value
-stops the build with the file and the key. [`presets/README.md`](presets/README.md) explains the format;
+stops the build with the file and the key. [`docs/book/presets.md`](docs/book/presets.md) explains the format;
 `cargo presets list|show|check` inspects them.
 
 A reserved pin or an out-of-range period is a **build error**, not a crash on the
@@ -127,12 +127,12 @@ cargo run -p workshop-core --target host-tuple --example frames
 ```text
 src/                     firmware: hardware glue (UART, GPIO, RMT, flash, watchdog)
 src/bin/node_{a,b}.rs    one binary per node = its preset, included by the build
-eth-lab/                 the Ethernet app: its own Cargo workspace (esp-hal main), same nodes over RJ45
+firmware/ethernet/                 the Ethernet app: its own Cargo workspace (esp-hal main), same nodes over RJ45
 presets/{uart,eth}/      the nodes' settings in TOML, base.toml documents every one
-crates/workshop-core/    hardware-free logic shared by both apps, no_std, tested on the host
+firmware/shared/core/    hardware-free logic shared by both apps, no_std, tested on the host
   examples/              runnable examples, included in the docs
-crates/workshop-presets/ host-only: reads and validates the TOML presets (`cargo presets`)
-tests/hil.rs             on-target tests (embedded-test)
+firmware/shared/presets-tool/ host-only: reads and validates the TOML presets (`cargo presets`)
+firmware/uart/tests/hil.rs             on-target tests (embedded-test)
 docs/book/               documentation site (Zensical); reference/ is generated
 scripts/                 dev.py (boards, flash, tests, docs), memsize.py, record.py
 ```

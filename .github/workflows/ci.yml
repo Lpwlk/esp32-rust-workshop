@@ -3,7 +3,7 @@
 # - Every push and pull request: formatting, host tests (including the check that
 #   the generated reference pages match the code, and the TOML presets), firmware
 #   build + clippy for each Cargo feature combination, for the UART app (repository
-#   root) and the Ethernet app (eth-lab/, its own Cargo workspace), site build.
+#   root) and the Ethernet app (firmware/ethernet/, its own Cargo workspace), site build.
 # - Every build: a Flash / RAM table in the job summary (scripts/memsize.py); on
 #   pull requests, compared with the same firmware built from the target branch.
 # - Push to `main`: the site (Zensical pages + rustdoc API) is published on GitHub
@@ -36,9 +36,9 @@ jobs:
       - run: rustup component add rustfmt
       - name: rustfmt (rustfmt.toml)
         run: cargo fmt --all -- --check
-      # eth-lab/ is its own Cargo workspace: `--all` above doesn't reach it.
+      # firmware/ethernet/ is its own Cargo workspace: `--all` above doesn't reach it.
       - name: rustfmt (Ethernet app)
-        run: cd eth-lab && cargo fmt -- --check
+        run: cd firmware/ethernet && cargo fmt -- --check
 
   host-tests:
     name: Host tests (workshop-core)
@@ -50,9 +50,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Unit, property and doc tests + generated pages up to date
         run: cargo test-host --locked
-      - name: Examples (crates/workshop-core/examples, included in the docs)
+      - name: Examples (firmware/shared/core/examples, included in the docs)
         run: |
-          for ex in crates/workshop-core/examples/*.rs; do
+          for ex in firmware/shared/core/examples/*.rs; do
             echo "::group::$(basename "$ex")"
             cargo run -q --locked -p workshop-core --target host-tuple --example "$(basename "$ex" .rs)"
             echo "::endgroup::"
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: eth-lab
+        working-directory: firmware/ethernet
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +80,7 @@ jobs:
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: eth-lab
+          workspaces: firmware/ethernet
           key: eth-${{ matrix.features.name }}
       - name: Build both nodes (UDP presets)
         run: cargo build --release --locked ${{ matrix.features.flags }}
@@ -162,24 +162,24 @@ jobs:
       - run: pip install zensical
       - name: Pages (with the commit in the footer)
         run: |
-          # A copy of zensical.toml with the build info, read by
+          # A copy of docs/zensical.toml with the build info, read by
           # docs/templates/partials/copyright.html.
           sed '/^\[project.extra\]$/a\
           build_commit = "'"${GITHUB_SHA::7}"'"\
           build_sha = "'"$GITHUB_SHA"'"\
           build_date = "'"$(date -u '+%Y-%m-%d %H:%M UTC')"'"
-          ' zensical.toml > zensical.ci.toml
-          zensical build --clean -f zensical.ci.toml
+          ' docs/zensical.toml > docs/zensical.ci.toml
+          zensical build --clean -f docs/zensical.ci.toml
       - name: API documentation (rustdoc)
         run: |
           cargo doc -p workshop-core --target host-tuple --no-deps
           cargo doc -p esp32-rust-workshop --no-deps
-          mkdir -p site/api/core site/api/firmware
-          cp -r target/"$(rustc --print host-tuple)"/doc/. site/api/core/
-          cp -r target/riscv32imafc-unknown-none-elf/doc/. site/api/firmware/
+          mkdir -p docs/site/api/core docs/site/api/firmware
+          cp -r target/"$(rustc --print host-tuple)"/doc/. docs/site/api/core/
+          cp -r target/riscv32imafc-unknown-none-elf/doc/. docs/site/api/firmware/
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: site
+          path: docs/site
 
   deploy:
     name: Publish on GitHub Pages

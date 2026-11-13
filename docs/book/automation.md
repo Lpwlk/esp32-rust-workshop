@@ -36,7 +36,7 @@ The site has three kinds of pages:
 |---|---|---|---|
 | Guides | `docs/book/*.md` | hand | review |
 | Reference | `docs/book/reference/*.md` | `workshop_core::docgen` | a test that fails when they're stale |
-| API | `site/api/` (not committed) | `cargo doc` from the `///` comments | rebuilt by CI on every push |
+| API | `docs/site/api/` (not committed) | `cargo doc` from the `///` comments | rebuilt by CI on every push |
 
 ```mermaid
 flowchart LR
@@ -46,8 +46,8 @@ flowchart LR
     ref --> zensical["zensical build"]
     guides["docs/book/*.md"] --> zensical
     comments["/// comments"] --> rustdoc["cargo doc"]
-    zensical --> site["site/"]
-    rustdoc --> api["site/api/"]
+    zensical --> site["docs/site/"]
+    rustdoc --> api["docs/site/api/"]
 ```
 
 ### The reference pages
@@ -69,7 +69,7 @@ hand**: change the code, then regenerate.
 
 ### The freshness check
 
-`crates/workshop-core/tests/docs.rs` regenerates every page in memory and compares
+`firmware/shared/core/tests/docs.rs` regenerates every page in memory and compares
 it with the committed file. It runs with the host tests, so in CI too: adding a
 command, a setting or a pin rule without updating the docs **fails the build**.
 
@@ -87,8 +87,8 @@ misleading a reader.
 
 ### The site
 
-[Zensical](https://zensical.org) builds `docs/book/` into `site/`, with the
-settings of `zensical.toml` and the theme overrides of `docs/templates/`.
+[Zensical](https://zensical.org) builds `docs/book/` into `docs/site/`, with the
+settings of `docs/zensical.toml` and the theme overrides of `docs/templates/`.
 
 ```sh
 python3 scripts/dev.py docs serve --open    # http://localhost:3000, rebuilt on each change
@@ -102,7 +102,7 @@ python3 scripts/dev.py docs api --open      # rustdoc of the core and the firmwa
 
 1. **format**: `cargo fmt --all -- --check`;
 2. **host-tests**: `cargo test-host` (including the freshness check), every
-   example of `crates/workshop-core/examples/` (the code shown on the
+   example of `firmware/shared/core/examples/` (the code shown on the
    [Examples](examples.md) page), and clippy on the core;
 3. **firmware**: release build of both nodes and clippy, for four Cargo feature
    combinations (default, none, all, `rtt` alone). The default build also:
@@ -114,12 +114,12 @@ python3 scripts/dev.py docs api --open      # rustdoc of the core and the firmwa
       (`gh run download`, then `espflash flash --chip esp32s31 node-a`);
 4. **site** (once 1 and 2 pass, without waiting for the firmware matrix):
    `zensical build --clean`, then `cargo doc` for both crates, copied into
-   `site/api/core/` and `site/api/firmware/` (separate folders: two rustdoc outputs
+   `docs/site/api/core/` and `docs/site/api/firmware/` (separate folders: two rustdoc outputs
    in one folder would overwrite each other's search index). The footer of every
    page says which commit it was built from, with a link: CI adds `build_commit`,
-   `build_sha` and `build_date` to a copy of `zensical.toml`, read by
+   `build_sha` and `build_date` to a copy of `docs/zensical.toml`, read by
    `docs/templates/partials/copyright.html`;
-5. **deploy** (pushes to `main` only): publishes `site/` on GitHub Pages, about
+5. **deploy** (pushes to `main` only): publishes `docs/site/` on GitHub Pages, about
    two minutes after the push.
 
 So the published documentation always matches the last commit of `main`, and

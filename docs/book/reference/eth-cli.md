@@ -2,7 +2,7 @@
 
 # CLI commands (Ethernet app)
 
-Type these in the USB console (`cd eth-lab && cargo run --release --bin node-a`).
+Type these in the USB console (`cd firmware/ethernet && cargo run --release --bin node-a`).
 Changes are applied immediately and lost on reboot.
 
 ## Settings

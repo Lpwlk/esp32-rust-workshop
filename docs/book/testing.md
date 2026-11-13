@@ -10,7 +10,7 @@ Four levels, from the fastest to the closest to the hardware:
 | System test | `python3 scripts/dev.py flash all` | two boards | the whole thing: link, CLI, LEDs, bursts | by hand |
 
 The split follows the code: everything that doesn't touch a peripheral lives in
-`crates/workshop-core` and is tested on the host; only the hardware glue (UART,
+`firmware/shared/core` and is tested on the host; only the hardware glue (UART,
 GPIO, RMT, USB, interrupts) is left for the boards. See
 [Architecture](architecture.md).
 
@@ -64,7 +64,7 @@ inputs, and shrinks a failure to the smallest input that still fails:
 | a restart from 0 is detected | `seq` |
 
 When a property fails, proptest saves the failing case in
-`crates/workshop-core/proptest-regressions/` and replays it first on every run:
+`firmware/shared/core/proptest-regressions/` and replays it first on every run:
 **commit that file**. It already holds one real find: a corrupted byte that only
 changed the case of a checksum letter (`*6A` → `*6a`) used to be accepted.
 
@@ -98,7 +98,7 @@ cargo test-host --test docs             # the docs freshness check only
   module's `proptest!` block.
 - An example worth showing in the API docs: write it as a doctest (`///` with a
   code block); it's then documentation *and* test.
-- Hardware behavior: `tests/hil.rs` (below).
+- Hardware behavior: `firmware/uart/tests/hil.rs` (below).
 
 ## On-target tests
 
@@ -106,7 +106,7 @@ cargo test-host --test docs             # the docs freshness check only
 python3 scripts/dev.py test target a      # tests on node A's board, then reflash it
 ```
 
-`tests/hil.rs` uses [embedded-test](https://docs.rs/embedded-test): each `#[test]`
+`firmware/uart/tests/hil.rs` uses [embedded-test](https://docs.rs/embedded-test): each `#[test]`
 runs on the board, which is reset between tests, and results come back through
 probe-rs (semihosting). No wiring is needed.
 
