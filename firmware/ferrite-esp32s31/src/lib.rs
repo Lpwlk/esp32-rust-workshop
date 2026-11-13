@@ -1,6 +1,6 @@
-//! # mros on the ESP32-S31
+//! # Ferrite on the ESP32-S31
 //!
-//! The hardware half of [mros](mros): it keeps the saved registers and the stack of each task,
+//! The hardware half of [Ferrite](ferrite): it keeps the saved registers and the stack of each task,
 //! switches between them, drives the kernel's clock from a timer interrupt, and offers the kernel's
 //! synchronization objects as blocking calls ([`sync`]).
 //!
@@ -8,8 +8,8 @@
 //! #[esp_hal::main]
 //! fn main() -> ! {
 //!     let p = esp_hal::init(esp_hal::Config::default());
-//!     mros_esp32s31::spawn("blink", Priority::new(5).unwrap(), BLINK_STACK.take(), blink, core::ptr::null_mut()).unwrap();
-//!     mros_esp32s31::start(TimerGroup::new(p.TIMG1).timer0) // never returns
+//!     ferrite_esp32s31::spawn("blink", Priority::new(5).unwrap(), BLINK_STACK.take(), blink, core::ptr::null_mut()).unwrap();
+//!     ferrite_esp32s31::start(TimerGroup::new(p.TIMG1).timer0) // never returns
 //! }
 //! ```
 //!
@@ -43,8 +43,8 @@ use esp_hal::{
     time::Duration,
     timer::{AnyTimer, PeriodicTimer, Timer},
 };
-pub use mros::{Error, Priority, TaskId, Tick, Timeout, WakeReason};
-use mros::{Kernel, State};
+pub use ferrite::{Error, Priority, TaskId, Tick, Timeout, WakeReason};
+use ferrite::{Kernel, State};
 
 use crate::context::Context;
 

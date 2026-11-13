@@ -54,7 +54,7 @@ nav = [
     "examples.md",
     "firmware.md",
     "ethernet.md",
-    "mros.md",
+    "ferrite.md",
     "protocols.md",
     "configuration.md",
     "wiring.md",

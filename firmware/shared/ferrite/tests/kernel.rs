@@ -1,6 +1,6 @@
 //! The kernel as a port drives it: the tests play the part of the tasks and of the tick interrupt.
 
-use mros::{Error, Kernel, Mutex, Priority, Queue, Semaphore, State, TaskId, Timeout, WakeReason, deadline_reached};
+use ferrite::{Error, Kernel, Mutex, Priority, Queue, Semaphore, State, TaskId, Timeout, WakeReason, deadline_reached};
 
 fn p(level: u8) -> Priority {
     Priority::new(level).unwrap()

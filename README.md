@@ -216,10 +216,10 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 ├── firmware/
 │   ├── uart/                    the UART app: src/ (hardware glue), tests/ (on-target), presets/, Embed.toml
 │   ├── ethernet/                the Ethernet app (own Cargo workspace): src/, presets/
-│   ├── mros-esp32s31/           the mros RTOS port for the S31 (own Cargo workspace): context switch, tick, demo
+│   ├── ferrite-esp32s31/        the Ferrite RTOS port for the S31 (own Cargo workspace): context switch, tick, demo
 │   └── shared/
 │       ├── core/                hardware-free logic, no_std, tested on the host; examples/ run on your computer
-│       ├── mros/                the RTOS kernel: tasks, scheduler, semaphore/mutex/queue, tested on the host
+│       ├── ferrite/             the RTOS kernel: tasks, scheduler, semaphore/mutex/queue, tested on the host
 │       └── presets-tool/        host-only: reads and validates the TOML presets (`cargo presets`)
 ├── docs/                        the documentation site: book/ (pages; book/reference/ is generated), zensical.toml
 ├── scripts/                     dev.py (boards, flash, tests, docs), record.py, record_demos.py, render_demos.py, gifrender.py, memsize.py
@@ -235,7 +235,7 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 | [Getting started](https://lpwlk.github.io/esp32-rust-workshop/getting-started/) | tools, wiring, flashing, first commands |
 | [The console](https://lpwlk.github.io/esp32-rust-workshop/console/) | every part of the output, the CLI, link tests, RTT |
 | [Ethernet app](https://lpwlk.github.io/esp32-rust-workshop/ethernet/) | the RJ45 link: design, measurements, what is still open |
-| [mros](https://lpwlk.github.io/esp32-rust-workshop/mros/) | the project's own RTOS in Rust: kernel (host-tested), ESP32-S31 port (21-minute demo and a self-checking test pass on a board) |
+| [Ferrite](https://lpwlk.github.io/esp32-rust-workshop/ferrite/) | the project's own RTOS in Rust: kernel (host-tested), ESP32-S31 port (21-minute demo and a self-checking test pass on a board) |
 | [Protocols](https://lpwlk.github.io/esp32-rust-workshop/protocols/) | the frames, the three links, and UA-lite: an OPC UA-style address space of LEDs and buttons |
 | [Presets](https://lpwlk.github.io/esp32-rust-workshop/presets/) | the TOML format of a node's settings |
 | [Examples](https://lpwlk.github.io/esp32-rust-workshop/examples/) | runnable code: frames, settings, debouncing, CLI |

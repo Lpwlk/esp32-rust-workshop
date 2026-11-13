@@ -1,13 +1,13 @@
-//! # mros: a small preemptive RTOS kernel
+//! # Ferrite: a small preemptive RTOS kernel
 //!
-//! mros is a fixed-priority, preemptive kernel with round-robin time slicing between tasks of the
+//! Ferrite is a fixed-priority, preemptive kernel with round-robin time slicing between tasks of the
 //! same priority, written in plain `no_std` Rust. It is split in two on purpose:
 //!
 //! - **this crate** is the *kernel*: tasks, the scheduler, time, and the synchronization objects
 //!   ([`Semaphore`], [`Mutex`] with priority inheritance, [`Queue`]). It is pure logic over indices
 //!   and counters, with no `unsafe`, no allocation and no hardware, so it is tested on the host
 //!   (`cargo test-host`);
-//! - a **port** (for the ESP32-S31: `firmware/mros-esp32s31`) owns what is hardware: the saved CPU
+//! - a **port** (for the ESP32-S31: `firmware/ferrite-esp32s31`) owns what is hardware: the saved CPU
 //!   context of each task, the context switch, the tick timer and the critical section. It calls
 //!   into the kernel and acts on what the kernel decides.
 //!
@@ -23,7 +23,7 @@
 //! with a [`Switch`] (from which task to which) or `None`.
 //!
 //! ```
-//! use mros::{Kernel, Priority};
+//! use ferrite::{Kernel, Priority};
 //!
 //! let mut k: Kernel<4> = Kernel::new(10); // up to 4 tasks, 10 ticks of time slice
 //! let idle = k.create("idle", Priority::IDLE).unwrap(); // every system needs an idle task

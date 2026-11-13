@@ -1,5 +1,5 @@
-//! Blocking synchronization objects: the kernel's [`Semaphore`](mros::Semaphore), [`Mutex`](mros::Mutex) and
-//! [`Queue`](mros::Queue) behind calls that wait.
+//! Blocking synchronization objects: the kernel's [`Semaphore`](ferrite::Semaphore), [`Mutex`](ferrite::Mutex) and
+//! [`Queue`](ferrite::Queue) behind calls that wait.
 //!
 //! Each is a `static`-friendly value (`const fn new`). A call that has to wait blocks the running task on the
 //! object, asks for a context switch, and tries again when it runs again: a task woken by `give`
@@ -8,7 +8,7 @@
 use core::cell::RefCell;
 
 use critical_section::Mutex as CsMutex;
-use mros::{Tick, Timeout, deadline_reached};
+use ferrite::{Tick, Timeout, deadline_reached};
 
 use crate::{request_switch, with_kernel};
 
@@ -33,17 +33,17 @@ fn blocking<T>(timeout: Timeout, mut try_once: impl FnMut(Option<Tick>) -> Attem
     }
 }
 
-fn expired(k: &mros::Kernel<{ crate::MAX_TASKS }>, deadline: Option<Tick>) -> bool {
+fn expired(k: &ferrite::Kernel<{ crate::MAX_TASKS }>, deadline: Option<Tick>) -> bool {
     deadline.is_some_and(|d| deadline_reached(k.now(), d))
 }
 
 /// A counting semaphore.
-pub struct Semaphore(CsMutex<RefCell<mros::Semaphore>>);
+pub struct Semaphore(CsMutex<RefCell<ferrite::Semaphore>>);
 
 impl Semaphore {
     /// A semaphore with `initial` tokens, at most `max`. `id` must be unique among the objects of the system.
-    pub const fn new(id: mros::ObjId, initial: u32, max: u32) -> Self {
-        Self(CsMutex::new(RefCell::new(mros::Semaphore::new(id, initial, max))))
+    pub const fn new(id: ferrite::ObjId, initial: u32, max: u32) -> Self {
+        Self(CsMutex::new(RefCell::new(ferrite::Semaphore::new(id, initial, max))))
     }
 
     /// Adds a token (from a task or an interrupt). `false` if it was full.
@@ -82,15 +82,15 @@ impl Semaphore {
 }
 
 /// A mutex with priority inheritance, locked through a guard.
-pub struct Mutex(CsMutex<RefCell<mros::Mutex>>);
+pub struct Mutex(CsMutex<RefCell<ferrite::Mutex>>);
 
 /// A locked [`Mutex`]: unlocks when dropped.
 pub struct Guard<'a>(&'a Mutex);
 
 impl Mutex {
     /// An unlocked mutex. `id` must be unique among the objects of the system.
-    pub const fn new(id: mros::ObjId) -> Self {
-        Self(CsMutex::new(RefCell::new(mros::Mutex::new(id))))
+    pub const fn new(id: ferrite::ObjId) -> Self {
+        Self(CsMutex::new(RefCell::new(ferrite::Mutex::new(id))))
     }
 
     /// Locks it, waiting up to `timeout`.
@@ -126,12 +126,12 @@ impl Drop for Guard<'_> {
 }
 
 /// A bounded queue of `CAP` messages.
-pub struct Queue<T: Copy, const CAP: usize>(CsMutex<RefCell<mros::Queue<T, CAP>>>);
+pub struct Queue<T: Copy, const CAP: usize>(CsMutex<RefCell<ferrite::Queue<T, CAP>>>);
 
 impl<T: Copy, const CAP: usize> Queue<T, CAP> {
     /// An empty queue. `id` (below 0x8000) must be unique among the objects of the system.
-    pub const fn new(id: mros::ObjId) -> Self {
-        Self(CsMutex::new(RefCell::new(mros::Queue::new(id))))
+    pub const fn new(id: ferrite::ObjId) -> Self {
+        Self(CsMutex::new(RefCell::new(ferrite::Queue::new(id))))
     }
 
     /// Adds a message, waiting up to `timeout` for room. Gives it back if there was none.

@@ -1,7 +1,7 @@
-//! mros on a board: five tasks that show what the kernel does, printed on the USB console.
+//! ferrite on a board: five tasks that show what the kernel does, printed on the USB console.
 //!
 //! ```sh
-//! cd firmware/mros-esp32s31
+//! cd firmware/ferrite-esp32s31
 //! cargo run --release --example demo
 //! ```
 //!
@@ -21,7 +21,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use mros_esp32s31::{Priority, Stack, Timeout, delay_ms, now, spawn, start, sync::Queue};
+use ferrite_esp32s31::{Priority, Stack, Timeout, delay_ms, now, spawn, start, sync::Queue};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -46,7 +46,7 @@ extern "C" fn ticker(_: *mut ()) -> ! {
                 now(),
                 SPIN_A.load(Ordering::Relaxed),
                 SPIN_B.load(Ordering::Relaxed),
-                mros_esp32s31::switches()
+                ferrite_esp32s31::switches()
             );
         }
     }
@@ -80,7 +80,7 @@ extern "C" fn spinner(counter: *mut ()) -> ! {
 #[esp_hal::main]
 fn main() -> ! {
     let p = esp_hal::init(esp_hal::Config::default());
-    println!("mros demo: starting the kernel");
+    println!("ferrite demo: starting the kernel");
 
     let prio = |level| Priority::new(level).unwrap();
     let null = core::ptr::null_mut();

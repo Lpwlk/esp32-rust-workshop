@@ -1,12 +1,12 @@
-# mros: an RTOS in Rust
+# Ferrite: an RTOS in Rust
 
-mros is a small **preemptive real-time kernel** written for this project, in `no_std` Rust, with a port for the
+Ferrite is a small **preemptive real-time kernel** written for this project, in `no_std` Rust, with a port for the
 ESP32-S31. It is the start of replacing the two ways the apps schedule their work today (the UART app's blocking
 loop, the Ethernet app's `esp-rtos` + Embassy) with a scheduler the project owns and can test.
 
 !!! info "Status: the kernel is tested, the port ran its demo for 21 minutes"
-    - **Kernel** (`firmware/shared/mros`): finished for a first version, **13 tests + 1 doc test on the host**.
-    - **ESP32-S31 port** (`firmware/mros-esp32s31`): the demo ran on a board for **over 21 minutes (1.27 million
+    - **Kernel** (`firmware/shared/ferrite`): finished for a first version, **13 tests + 1 doc test on the host**.
+    - **ESP32-S31 port** (`firmware/ferrite-esp32s31`): the demo ran on a board for **over 21 minutes (1.27 million
       ticks)** with no fault. What that showed: tick, context switch, preemption, `delay`, the queue's blocking
       `send`/`recv`, and round robin (the two spinners' counters stayed within 0.1 %, at about 104 switches
       a second, as 10 ms slices plus the periodic tasks predict).
@@ -15,20 +15,20 @@ loop, the Ethernet app's `esp-rtos` + Embassy) with a scheduler the project owns
       also checked to be able to fail (see there).
     - **Not exercised on hardware yet:** the wrap of the tick counter (after 49 days), a `give` from an interrupt
       handler, stack overflow, many tasks at once (12 is the table size).
-    - **The apps do not use it yet.** See [Moving the apps onto mros](#moving-the-apps-onto-mros) for why and how.
+    - **The apps do not use it yet.** See [Moving the apps onto ferrite](#moving-the-apps-onto-ferrite) for why and how.
 
 ## Design
 
 ```mermaid
 flowchart LR
-    subgraph kernel["mros (firmware/shared/mros): no hardware, tested on the host"]
+    subgraph kernel["ferrite (firmware/shared/ferrite): no hardware, tested on the host"]
         tasks["task table<br/>state, priority, deadline"]
         sched["scheduler<br/>fixed priority + round robin"]
         sync["Semaphore · Mutex (inheritance) · Queue"]
         tasks --- sched
         sync --> tasks
     end
-    subgraph port["mros-esp32s31: the hardware"]
+    subgraph port["ferrite-esp32s31: the hardware"]
         ctx["saved registers + stacks<br/>one context per task"]
         sw["context switch<br/>(lowest-priority interrupt)"]
         tick["1 kHz tick<br/>(TIMG timer)"]
@@ -86,15 +86,15 @@ The approach follows what `esp-rtos` does, which is the documented way to plug a
 The kernel, anywhere:
 
 ```sh
-cargo test-host                      # includes mros: scheduling, preemption, time slices, wrap-around,
+cargo test-host                      # includes Ferrite: scheduling, preemption, time slices, wrap-around,
                                      #   semaphore, priority inheritance, queue
-cargo test -p mros --target host-tuple
+cargo test -p ferrite --target host-tuple
 ```
 
 The demo, on a board (its own Cargo workspace, like the Ethernet app: it builds on `esp-hal` `main`):
 
 ```sh
-cd firmware/mros-esp32s31
+cd firmware/ferrite-esp32s31
 cargo run --release --example demo
 ```
 
@@ -114,7 +114,7 @@ the `ticker` prints on the exact millisecond every time.
 
 ## The self-checking test
 
-`cargo run --release --example stress` (in `firmware/mros-esp32s31`) runs eight tasks and prints a PASS or FAIL line
+`cargo run --release --example stress` (in `firmware/ferrite-esp32s31`) runs eight tasks and prints a PASS or FAIL line
 every 5 s:
 
 | What | How | Passes when |
@@ -132,19 +132,19 @@ A test is only worth something if it can fail, so it was run twice with the feat
 | priority inheritance off (`boost` does nothing) | `high waited 650..650 ms`, every cycle bad: the 650 ms the scenario predicts without inheritance |
 | float registers not saved (`--no-default-features`) | `floats 325 bad` out of 30000: corrupted sums |
 
-## Moving the apps onto mros
+## Moving the apps onto ferrite
 
-Neither app uses mros yet, on purpose: a context switch that has never run on the chip is not something to put
+Neither app uses ferrite yet, on purpose: a context switch that has never run on the chip is not something to put
 under firmware that works. What each move needs:
 
 | App | Today | To move it |
 |---|---|---|
-| **Ethernet** | `esp-rtos` + Embassy: one executor runs the main loop and the network tasks | mros has no Embassy integration yet. Two ways: run the Embassy executor *as one mros task* (it needs a time driver on the mros tick and a "pender" that readies that task), or give the network stack its own mros task and keep the main loop in another. The first keeps the code. |
+| **Ethernet** | `esp-rtos` + Embassy: one executor runs the main loop and the network tasks | Ferrite has no Embassy integration yet. Two ways: run the Embassy executor *as one ferrite task* (it needs a time driver on the ferrite tick and a "pender" that readies that task), or give the network stack its own ferrite task and keep the main loop in another. The first keeps the code. |
 | **UART** | a blocking loop on `esp-hal` 1.2.2 (crates.io) | the port builds on `esp-hal` `main` (it needs the S31 RTOS hooks), so the UART app stays on its loop until a release has them, or moves to the Ethernet workspace's `esp-hal`. |
 | **Tests** | host tests of `workshop-core`; on-target tests (`cargo test-target`) on the UART app | the kernel's tests are already in `cargo test-host`. Once the demo runs, the demo's expectations (a periodic task's jitter, the round robin's fairness) become on-target tests. |
 
 Suggested order: add a stack-usage and task-list command to the CLI (`tasks`) using the
-kernel's `state`/`priority`; move the Ethernet app's console task (already a separate task) onto mros as the
+kernel's `state`/`priority`; move the Ethernet app's console task (already a separate task) onto ferrite as the
 first real user; then the executor.
 
 ## What is missing

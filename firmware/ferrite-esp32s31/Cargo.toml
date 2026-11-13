@@ -1,4 +1,4 @@
-# mros for the ESP32-S31: the part of the RTOS that is hardware (see firmware/shared/mros for the kernel).
+# Ferrite for the ESP32-S31: the part of the RTOS that is hardware (see firmware/shared/ferrite for the kernel).
 #
 # Its own Cargo workspace, like firmware/ethernet/: it builds on esp-hal `main`, pinned to the same
 # commit (the S31 support is not in an esp-hal release yet), and two esp-hal versions can't share a
@@ -6,8 +6,8 @@
 [workspace]
 
 [package]
-name         = "mros-esp32s31"
-description  = "mros port for the ESP32-S31: context switch, SYSTIMER/TIMG tick, critical section, blocking synchronization objects."
+name         = "ferrite-esp32s31"
+description  = "Ferrite port for the ESP32-S31: context switch, SYSTIMER/TIMG tick, critical section, blocking synchronization objects."
 edition      = "2024"
 rust-version = "1.95"
 version      = "0.1.0"
@@ -25,7 +25,7 @@ default = ["fpu"]
 fpu = []
 
 [dependencies]
-mros             = { path = "../shared/mros" }
+ferrite             = { path = "../shared/ferrite" }
 esp-hal          = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "unstable"] }
 critical-section = "1.2.0"
 

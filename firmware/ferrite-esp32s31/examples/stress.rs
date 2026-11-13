@@ -1,7 +1,7 @@
-//! mros on a board, second demo: checks what `demo` doesn't. It tests itself and prints PASS or FAIL.
+//! ferrite on a board, second demo: checks what `demo` doesn't. It tests itself and prints PASS or FAIL.
 //!
 //! ```sh
-//! cd firmware/mros-esp32s31
+//! cd firmware/ferrite-esp32s31
 //! cargo run --release --example stress
 //! ```
 //!
@@ -23,7 +23,7 @@ use core::{
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
-use mros_esp32s31::{
+use ferrite_esp32s31::{
     Priority, Stack, Tick, Timeout, delay, delay_ms, ms, now, spawn, start,
     sync::{Mutex, Semaphore},
 };
@@ -182,7 +182,7 @@ extern "C" fn reporter(_: *mut ()) -> ! {
 #[esp_hal::main]
 fn main() -> ! {
     let p = esp_hal::init(esp_hal::Config::default());
-    println!("mros stress: floats, priority inheritance, semaphore timeouts (first report in 5 s)");
+    println!("ferrite stress: floats, priority inheritance, semaphore timeouts (first report in 5 s)");
 
     let prio = |level| Priority::new(level).unwrap();
     let null = core::ptr::null_mut();

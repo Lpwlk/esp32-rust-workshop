@@ -4,8 +4,8 @@
 #   the generated reference pages match the code, and the TOML presets), firmware
 #   build + clippy for each Cargo feature combination, for the UART app (repository
 #   root) and the Ethernet app (firmware/ethernet/, its own Cargo workspace), site build.
-#   The mros RTOS: its kernel is tested with the host tests; its ESP32-S31 port
-#   (firmware/mros-esp32s31/, own Cargo workspace) is built, with its demo.
+#   The Ferrite RTOS: its kernel is tested with the host tests; its ESP32-S31 port
+#   (firmware/ferrite-esp32s31/, own Cargo workspace) is built, with its demo.
 # - Every build: a Flash / RAM table in the job summary (scripts/memsize.py); on
 #   pull requests, compared with the same firmware built from the target branch.
 # - Push to `main`: the site (Zensical pages + rustdoc API) is published on GitHub
@@ -41,9 +41,9 @@ jobs:
       # firmware/ethernet/ is its own Cargo workspace: `--all` above doesn't reach it.
       - name: rustfmt (Ethernet app)
         run: cd firmware/ethernet && cargo fmt -- --check
-      # Same for the mros port for the S31 (firmware/mros-esp32s31/).
-      - name: rustfmt (mros port)
-        run: cd firmware/mros-esp32s31 && cargo fmt -- --check
+      # Same for the Ferrite port for the S31 (firmware/ferrite-esp32s31/).
+      - name: rustfmt (Ferrite port)
+        run: cd firmware/ferrite-esp32s31 && cargo fmt -- --check
 
   host-tests:
     name: Host tests (workshop-core)
@@ -62,23 +62,23 @@ jobs:
             cargo run -q --locked -p workshop-core --target host-tuple --example "$(basename "$ex" .rs)"
             echo "::endgroup::"
           done
-      - name: Clippy (core, mros and presets, host)
-        run: cargo clippy -p workshop-core -p mros -p workshop-presets --target host-tuple --all-targets -- -D warnings
+      - name: Clippy (core, Ferrite and presets, host)
+        run: cargo clippy -p workshop-core -p ferrite -p workshop-presets --target host-tuple --all-targets -- -D warnings
       - name: Every preset loads and validates
         run: cargo presets check
 
-  mros-port:
-    name: mros port for the ESP32-S31
+  ferrite-port:
+    name: Ferrite port for the ESP32-S31
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: firmware/mros-esp32s31
+        working-directory: firmware/ferrite-esp32s31
     steps:
       - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: firmware/mros-esp32s31
+          workspaces: firmware/ferrite-esp32s31
       - name: Build the port and the demo
         run: cargo build --release --locked --examples
       - name: Clippy

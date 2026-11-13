@@ -1,6 +1,6 @@
 [package]
-description            = "mros: a small preemptive RTOS kernel for embedded Rust. The scheduler and the synchronization objects are hardware-independent and tested on the host; ports (context switch, tick) live next to them."
-name                   = "mros"
+description            = "ferrite: a small preemptive RTOS kernel for embedded Rust. The scheduler and the synchronization objects are hardware-independent and tested on the host; ports (context switch, tick) live next to them."
+name                   = "ferrite"
 edition.workspace      = true
 rust-version.workspace = true
 version.workspace      = true

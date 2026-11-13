@@ -124,7 +124,7 @@ def rows(u: Usage, before: dict[str, int] | None) -> list[tuple[str, str, str, s
     return [
         row("FLASH", u.flash, FLASH_WINDOW, "flash"),
         row("RAM", u.ram, u.ram_size, "ram"),
-        row("  stack", u.stack, u.ram_size, "stack"),
+        row("STACK", u.stack, u.ram_size, "stack"),
         row("RTC_FAST", u.rtc, RTC_FAST_SIZE, "rtc"),
     ]
 

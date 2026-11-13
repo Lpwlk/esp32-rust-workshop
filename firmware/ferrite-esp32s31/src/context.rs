@@ -19,7 +19,7 @@
 //!
 //! The approach (a handler in the HAL's lowest-priority interrupt, `mscratch` holding `t0`) follows
 //! what `esp-rtos` does, which is the documented way to plug an RTOS into `esp-hal`; the code is
-//! written for mros (one context per task, the idle task has a stack like any other).
+//! written for Ferrite (one context per task, the idle task has a stack like any other).
 
 use core::ptr::addr_of_mut;
 
@@ -71,7 +71,7 @@ extern "C" fn task_start(entry: extern "C" fn(*mut ()) -> !, arg: *mut ()) -> ! 
 
 /// The context of the task that is running (the one the next switch saves into).
 #[unsafe(no_mangle)]
-static mut MROS_CURRENT_CONTEXT: *mut Context = core::ptr::null_mut();
+static mut FERRITE_CURRENT_CONTEXT: *mut Context = core::ptr::null_mut();
 
 /// Where the registers of the code that calls `start` go (it never runs again).
 static mut BOOT_CONTEXT: Context = Context::EMPTY;
@@ -79,7 +79,7 @@ static mut BOOT_CONTEXT: Context = Context::EMPTY;
 /// Points the next switch at the boot context: it saves into it, and the kernel's first choice runs.
 pub(crate) fn point_at_boot_context() {
     // SAFETY: called once, before the first switch, with interrupts masked.
-    unsafe { MROS_CURRENT_CONTEXT = addr_of_mut!(BOOT_CONTEXT) };
+    unsafe { FERRITE_CURRENT_CONTEXT = addr_of_mut!(BOOT_CONTEXT) };
 }
 
 /// Makes `context` the one the next switch restores.
@@ -89,7 +89,7 @@ pub(crate) fn point_at_boot_context() {
 /// `context` must stay valid and unmoved for as long as its task exists, and the call must be made
 /// inside the switch (the kernel's decision and this pointer must change together).
 pub(crate) unsafe fn set_current(context: *mut Context) {
-    unsafe { MROS_CURRENT_CONTEXT = context };
+    unsafe { FERRITE_CURRENT_CONTEXT = context };
 }
 
 #[cfg(feature = "fpu")]
@@ -305,7 +305,7 @@ pub(crate) unsafe extern "C" fn switch_trampoline() {
         lw t1,   5*4(t1)
         mret
         "),
-        current = sym MROS_CURRENT_CONTEXT,
+        current = sym FERRITE_CURRENT_CONTEXT,
         switch = sym crate::switch,
     }
 }
