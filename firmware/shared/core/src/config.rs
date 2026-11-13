@@ -205,6 +205,54 @@ impl fmt::Display for TxMode {
     }
 }
 
+/// How much the console prints. `verbose` in the CLI, presets and saved settings.
+///
+/// Levels are ordered: each one shows everything the previous one does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Verbosity {
+    /// `0`: one **live line**, updated in place, with the last frame event (sent or received) and the
+    /// counters. Only what needs attention scrolls: lost or bad frames, link events, burst results,
+    /// CLI replies and errors.
+    Live,
+    /// `1`: every frame on its own line, and the periodic stats line.
+    Frames,
+    /// `2`: frames plus the raw line on the wire, its checksum and size, ignored button bounces and
+    /// the link counters.
+    Wire,
+}
+
+impl Verbosity {
+    /// The next level, `Wire` going back to `Live`: what `verbose` alone does.
+    pub const fn next(self) -> Verbosity {
+        match self {
+            Verbosity::Live => Verbosity::Frames,
+            Verbosity::Frames => Verbosity::Wire,
+            Verbosity::Wire => Verbosity::Live,
+        }
+    }
+
+    /// Parses `0`/`live`, `1`/`frames`, `2`/`wire`, and the old spellings: `on`, `true`, `yes`
+    /// (= `wire`) and `off`, `false`, `no` (= `live`).
+    pub fn parse(text: &str) -> Result<Verbosity, SetError> {
+        match text {
+            "0" | "live" | "quiet" | "off" | "false" | "no" => Ok(Verbosity::Live),
+            "1" | "frames" => Ok(Verbosity::Frames),
+            "2" | "wire" | "raw" | "on" | "true" | "yes" => Ok(Verbosity::Wire),
+            _ => Err(SetError::BadValue("0 live, 1 frames or 2 wire (or `next`)")),
+        }
+    }
+}
+
+impl fmt::Display for Verbosity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(match self {
+            Verbosity::Live => "live",
+            Verbosity::Frames => "frames",
+            Verbosity::Wire => "wire",
+        })
+    }
+}
+
 /// Where the console output (frames, stats, CLI replies) goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Console {
@@ -284,8 +332,8 @@ pub struct NodeConfig {
     pub led1: LedMode,
     /// Mode of breadboard LED 2.
     pub led2: LedMode,
-    /// Verbose console: raw frames on the wire, byte counters, ignored bounces.
-    pub verbose: bool,
+    /// How much the console prints: a live line, every frame, or the raw wire too.
+    pub verbose: Verbosity,
     /// When this node sends frames on its own.
     pub tx_mode: TxMode,
     /// Defaults of the `burst` command.
@@ -308,7 +356,7 @@ impl NodeConfig {
         rgb: RgbConfig { pattern: "viridis", freq_hz: 50.0, cycle_ms: 6000.0, brightness: 40 },
         led1: LedMode::PeerButton,
         led2: LedMode::RxFlash,
-        verbose: false,
+        verbose: Verbosity::Live,
         tx_mode: TxMode::Periodic,
         burst: BurstConfig { count: 1000, rate_hz: 0.0 },
         console: Console::Auto,
@@ -316,7 +364,12 @@ impl NodeConfig {
 
     /// Starting point of every **Ethernet** node config: the same settings, the link is
     /// [`NetLink::DEFAULT`] (192.168.77.11, UDP). The second board needs its own addresses.
-    pub const DEFAULT_NET: NodeConfig = NodeConfig { link: Link::Net(NetLink::DEFAULT), ..NodeConfig::DEFAULT };
+    pub const DEFAULT_NET: NodeConfig = NodeConfig {
+        link: Link::Net(NetLink::DEFAULT),
+        // A longer lockout than UART's: a jumper wire pushed into the breadboard bounces for a while.
+        lockout_ms: 500,
+        ..NodeConfig::DEFAULT
+    };
 
     /// Compile-time validation. Use it as `const _: () = CONFIG.check();`
     /// (`esp32_rust_workshop::node_firmware!` does it for you).
@@ -426,15 +479,6 @@ impl NodeConfig {
             a += 1;
         }
         Ok(())
-    }
-}
-
-/// `on`/`off` (and `1`/`0`, `true`/`false`, `yes`/`no`).
-fn on_off(value: &str) -> Result<bool, SetError> {
-    match value {
-        "on" | "1" | "true" | "yes" => Ok(true),
-        "off" | "0" | "false" | "no" => Ok(false),
-        _ => Err(SetError::BadValue("on or off")),
     }
 }
 
@@ -552,7 +596,9 @@ impl Key {
             Key::RgbCycle => ("duration of one fade loop (lower = faster)", "200-60000 ms, or a frequency"),
             Key::RgbBrightness => ("RGB LED brightness, %", "0-100"),
             Key::Led1 | Key::Led2 => ("breadboard LED mode", "off on blink [period|freq] button peer link rx tx"),
-            Key::Verbose => ("verbose console output", "on off"),
+            Key::Verbose => {
+                ("console detail: a live line, every frame, or the raw wire", "0 live, 1 frames, 2 wire (or next)")
+            }
             Key::TxMode => ("when this node sends frames on its own", "periodic [period|freq], on-rx, quiet"),
             Key::BurstCount => ("frames per burst (default of `burst`)", "1-100000"),
             Key::BurstRate => ("burst rate, frames/s (default of `burst`)", "0.1-20000 Hz, or max (= 0, back to back)"),
@@ -670,7 +716,7 @@ impl NodeConfig {
                     _ => return Err(SetError::BadValue("auto, serial, rtt or both")),
                 }
             }
-            Key::Verbose => new.verbose = on_off(value)?,
+            Key::Verbose => new.verbose = if value == "next" { self.verbose.next() } else { Verbosity::parse(value)? },
         }
         if check {
             new.validate().map_err(SetError::Invalid)?;
@@ -798,7 +844,15 @@ impl NodeConfig {
         )?;
         writeln!(out, "    led1: {},", led(self.led1))?;
         writeln!(out, "    led2: {},", led(self.led2))?;
-        writeln!(out, "    verbose: {},", self.verbose)?;
+        writeln!(
+            out,
+            "    verbose: Verbosity::{},",
+            match self.verbose {
+                Verbosity::Live => "Live",
+                Verbosity::Frames => "Frames",
+                Verbosity::Wire => "Wire",
+            }
+        )?;
         writeln!(
             out,
             "    tx_mode: TxMode::{},",
@@ -836,7 +890,7 @@ impl NodeConfig {
             Key::RgbBrightness => write!(out, "{}", self.rgb.brightness),
             Key::Led1 => write!(out, "{}", self.led1),
             Key::Led2 => write!(out, "{}", self.led2),
-            Key::Verbose => write!(out, "{}", if self.verbose { "on" } else { "off" }),
+            Key::Verbose => write!(out, "{}", self.verbose),
             Key::TxMode => write!(out, "{}", self.tx_mode),
             Key::BurstCount => write!(out, "{}", self.burst.count),
             Key::BurstRate => write!(out, "{}", Num(self.burst.rate_hz)),
@@ -1027,18 +1081,42 @@ mod tests {
     #[test]
     fn verbose_accepts_common_spellings() {
         let mut cfg = D;
-        for (text, value) in [("on", true), ("0", false), ("true", true), ("no", false), ("yes", true), ("off", false)]
-        {
-            assert!(cfg.set("verbose", text).is_ok());
-            assert_eq!(cfg.verbose, value, "{text}");
+        for (text, level) in [
+            ("0", Verbosity::Live),
+            ("live", Verbosity::Live),
+            ("off", Verbosity::Live),
+            ("false", Verbosity::Live),
+            ("1", Verbosity::Frames),
+            ("frames", Verbosity::Frames),
+            ("2", Verbosity::Wire),
+            ("wire", Verbosity::Wire),
+            ("on", Verbosity::Wire),
+            ("yes", Verbosity::Wire),
+        ] {
+            assert!(cfg.set("verbose", text).is_ok(), "{text}");
+            assert_eq!(cfg.verbose, level, "{text}");
         }
+        assert!(cfg.set("verbose", "3").is_err());
         assert!(cfg.set("verbose", "maybe").is_err());
+    }
+
+    #[test]
+    fn verbose_next_cycles_through_the_levels() {
+        let mut cfg = D;
+        assert_eq!(cfg.verbose, Verbosity::Live, "the default is the quiet live line");
+        let mut seen = std::vec::Vec::new();
+        for _ in 0..4 {
+            assert!(cfg.set("verbose", "next").is_ok());
+            seen.push(cfg.verbose);
+        }
+        assert_eq!(seen, [Verbosity::Frames, Verbosity::Wire, Verbosity::Live, Verbosity::Frames]);
+        assert!(Verbosity::Live < Verbosity::Frames && Verbosity::Frames < Verbosity::Wire);
     }
 
     /// `config` prints `value(k)`; `set k <that>` must give the same config back.
     #[test]
     fn every_value_round_trips_through_set() {
-        let mut cfg = NodeConfig { led1: LedMode::Blink { period_ms: 60_000.0 }, verbose: true, ..D };
+        let mut cfg = NodeConfig { led1: LedMode::Blink { period_ms: 60_000.0 }, verbose: Verbosity::Wire, ..D };
         for (name, key) in KEYS {
             let before = cfg;
             let text = cfg.value(key);
@@ -1086,7 +1164,7 @@ mod tests {
                 link_timeout_periods: 9,
                 debounce_ms: 9,
                 lockout_ms: 9,
-                verbose: true,
+                verbose: Verbosity::Wire,
                 led1: LedMode::On,
                 led2: LedMode::Off,
                 rgb: RgbConfig { pattern: "sakura", freq_hz: 37.5, cycle_ms: 999.9, brightness: 9 },

@@ -39,7 +39,7 @@ link_timeout_periods = 3
 # Range: 1-1000 ms.
 debounce_ms = 30
 # Range: 0-5000 ms.
-lockout_ms = 150
+lockout_ms = 500
 
 # ---------------------------------------------------------------------------------------------
 # What the two breadboard LEDs show. One of:
@@ -64,8 +64,12 @@ led2 = "rx"
 #   "quiet"             nothing on its own (button events only)
 tx_mode = "periodic"
 
-# Verbose console: raw frames, counters, ignored bounces.
-verbose = false
+# How much the console prints (and `verbose` in the CLI: `verbose` alone goes to the next level):
+#   "live" (0)    ONE line, updated in place, with the last frame sent or received and the counters.
+#                 Lost frames, link events, bursts and errors still scroll as lines.
+#   "frames" (1)  every frame on its own line, and the periodic stats line
+#   "wire" (2)    frames plus the raw line, checksum and size of each, ignored button bounces, counters
+verbose = "live"
 
 # Where the console goes: "auto" (USB serial, plus RTT in a build with --features rtt),
 # "serial", "rtt" or "both" (the last two need the `rtt` feature).

@@ -97,7 +97,7 @@ The back-to-back burst reaches about 365 kB/s (0.3 % of the link): the node's fr
 wire, is the limit. The **round-trip time is an open problem**: it is about 20 times the UART link's
 and the raw network path measured on its own was 0.4 ms. The main loop runs about 50 000 times a second
 and printing no longer blocks, yet received frames wait about 0.4 ms for the loop and a sent frame about
-1 ms for the network task (`verbose` shows both); the cause isn't found yet.
+1 ms for the network task (`verbose wire` shows both); the cause isn't found yet.
 
 ## Reference
 

@@ -62,7 +62,7 @@ reset
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `verbose [on|off]` | `v` | verbose console (= set verbose) |
+| `verbose [0|1|2|live|frames|wire]` | `v` | how much the console prints (= set verbose) |
 | `pattern <name|1-5>` | `p` | RGB LED pattern (= set rgb.pattern) |
 | `next` | `n` | next RGB LED pattern |
 | `freq <Hz|period>` | `f` | RGB LED refresh rate (= set rgb.freq_hz) |
@@ -73,17 +73,21 @@ reset
 ### `verbose`
 
 ```text
-Adds, for each frame: the raw line on the wire and its size; for each
-received frame: time since the previous one from the peer. Also shows
-ignored button bounces, and byte counters + RX buffer peak in the
-stats line. `verbose` alone turns it on.
+0 live    one line, updated in place, with the last frame sent or received and
+          the counters. Lost frames, link events, bursts and errors still scroll.
+1 frames  every frame on its own line, and the periodic stats line
+2 wire    frames plus, for each, the raw line, its checksum and size, the time
+          since the peer's previous frame, ignored button bounces and counters
+`verbose` alone goes to the next level (wire goes back to live).
 ```
 
 Examples:
 
 ```text
 verbose
-verbose off
+verbose frames
+verbose 0
+verbose wire
 ```
 
 ### `pattern`

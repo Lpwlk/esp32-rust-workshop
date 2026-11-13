@@ -83,7 +83,10 @@ address = "192.168.77.11"
 peer    = "192.168.77.12"
 ```
 
-![Boot card, "cable connected: 1 Gbit/s · full duplex", then DAT frames in both directions](docs/book/assets/demo/eth-boot.gif)
+The console starts on a **live line**: one line, updated in place, with the last frame and the counters, instead of a
+scrolling wall of TX/RX. `verbose 1` shows every frame, `verbose` goes on to the raw wire.
+
+![Boot card, "cable connected: 1 Gbit/s · full duplex", the live line, then verbose 1 and verbose](docs/book/assets/demo/eth-boot.gif)
 
 ### The CLI: `link`, `config`, `led`, `pattern`
 

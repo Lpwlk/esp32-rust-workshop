@@ -118,7 +118,7 @@ like a shell:
     help                      every command, grouped
     help set                  one command: usage, details, examples
     help rgb.cycle_ms         one setting: meaning, accepted values, default
-    verbose                   raw frames, checksums, byte counters
+    verbose [0|1|2]           console detail: live line, every frame, or raw frames too
     ```
 
 Every command, with its examples (each one is checked by a unit test):
@@ -185,6 +185,20 @@ probe-rs.
 
 `set console serial|rtt|both|auto` chooses where the output goes at run time:
 [Logs and console](guide-rust.md#logs-and-console).
+
+## How much the console prints: `verbose`
+
+A frame every couple of seconds scrolls fast, so the console has three levels (`verbose`, alone it goes to the
+next one; also a key of the [presets](presets.md)):
+
+| Level | `verbose` | What you see |
+|---|---|---|
+| 0 | `live` (default) | **one line**, updated in place just above the prompt: the last frame sent or received, with the `tx` / `rx` / `lost` counters. Lost or bad frames, link up / down, bursts and errors still scroll as lines, and so does everything you type |
+| 1 | `frames` | every frame on its own line, and the periodic stats line |
+| 2 | `wire` | frames plus the raw line, checksum and size of each, the time since the peer's previous frame, ignored button bounces and the link counters |
+
+The live line is only on the USB console: an RTT-only console (`set console rtt`) has no prompt to keep it
+under, so it gets every line. Old spellings still work: `verbose on` is `wire`, `verbose off` is `live`.
 
 ## Recording a session
 

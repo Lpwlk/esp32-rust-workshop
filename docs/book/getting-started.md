@@ -119,7 +119,7 @@ You should see the boot card, then one line per frame and, every few seconds:
     - TX and RX crossed? GPIO2 of one board goes to GPIO3 of the other.
     - Grounds connected?
     - Both nodes flashed with the same `shared::BAUD_RATE`?
-    - `verbose` shows every byte received: `bad` frames point to wiring, nothing at
+    - `verbose wire` shows every byte received: `bad` frames point to wiring, nothing at
       all to a disconnected wire.
 
 ## 4. Use the CLI
@@ -130,7 +130,7 @@ Type in the console; the prompt `cli ›` stays on the last line.
 help                  every command
 pattern ocean         RGB LED pattern
 period 1Hz            one DAT frame per second
-verbose               raw frames on the wire
+verbose [0|1|2]       live line, every frame, raw frames on the wire
 save                  keep the changes after a reboot
 ```
 

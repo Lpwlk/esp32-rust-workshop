@@ -60,7 +60,7 @@ use workshop_core::config::Transport;
 use crate::{
     burst::{BurstRx, BurstTx},
     button::{Button, ButtonUpdate, Source},
-    config::{NodeConfig, TxMode},
+    config::{NodeConfig, TxMode, Verbosity},
     ext_leds::{ExtLeds, LedInputs},
     link::{Link, SendError},
     protocol::{Edge, Frame, MAX_FRAME, Payload},
@@ -267,6 +267,7 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
     let rgb_led = led::Led::new(p.RMT, p.GPIO60);
     let fx = fx::Animator::new(fx_settings(&cfg.rgb));
 
+    term::set_verbosity(cfg.verbose);
     term::boot_card(&cfg, &chip_info(&rng), &system_info(&cfg, defaults, boot_load));
     let cli = cli::Cli::new(usb_rx);
 
@@ -287,6 +288,7 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
         last_data: Instant::now(),
         dat_clock: DatClock::new(),
         last_status: Instant::now(),
+        seen_peer_up: None,
         rtt: RttTracker::new(),
         burst_id: 0,
         burst_tx: None,
@@ -338,6 +340,8 @@ struct Node {
     /// Time between consecutive DAT frames, sent or received (timing).
     dat_clock: DatClock,
     last_status: Instant,
+    /// Whether the peer was answering at the last check, to print a line when that changes.
+    seen_peer_up: Option<bool>,
     rtt: RttTracker,
     burst_id: u32,
     burst_tx: Option<BurstTx>,
@@ -386,7 +390,7 @@ impl Node {
                     self.send(Payload::Event { edge: ev.edge, key }, Some((source.name(), ev.raw_edges)));
                     self.events_sent += 1;
                 }
-                Some(ButtonUpdate::Ignored { raw_edges }) if self.cfg.verbose => {
+                Some(ButtonUpdate::Ignored { raw_edges }) if self.cfg.verbose >= Verbosity::Wire => {
                     term::bounce_ignored(now_ms(), source.name(), raw_edges)
                 }
                 _ => {}
@@ -406,13 +410,16 @@ impl Node {
         self.burst_tx_step();
         self.receive();
         self.timers();
+        self.watch_peer();
         self.watch_network();
 
         // --- Status line ----------------------------------------------------------
         if self.last_status.elapsed() >= ms_f(self.cfg.status_period_ms) {
             self.last_status = Instant::now();
-            term::status(now_ms(), &self.stats, self.peer.link_up(&self.cfg), net::link_state(), self.rtt.stats());
-            if self.cfg.verbose {
+            if self.cfg.verbose >= Verbosity::Frames {
+                term::status(now_ms(), &self.stats, self.peer.link_up(&self.cfg), net::link_state(), self.rtt.stats());
+            }
+            if self.cfg.verbose >= Verbosity::Wire {
                 let per_s = u64::from(self.loops) * 1000 / self.cfg.status_period_ms.max(1.0) as u64;
                 self.loops = 0;
                 term::link_counters(&self.link.counters(), net::link_state(), self.peer.period_us, per_s);
@@ -499,8 +506,8 @@ impl Node {
     fn report(&mut self, q: &Queued, button: Option<(&'static str, u32)>) {
         let frame = Frame { node: self.cfg.name, seq: q.seq, t_ms: q.t_ms, payload: q.payload };
         let delta = self.dat_mark(&q.payload, Dir::Tx, q.sent_us);
-        term::sent(now_ms(), &frame, button, delta);
-        if self.cfg.verbose {
+        term::sent(now_ms(), &frame, button, delta, &self.stats);
+        if self.cfg.verbose >= Verbosity::Wire {
             term::wire(q.line.as_bytes(), None, None);
         }
     }
@@ -581,12 +588,26 @@ impl Node {
         let echo =
             (reply && self.cfg.tx_mode == TxMode::OnRx).then(|| self.queue(Payload::Echo { echo_seq: frame.seq }));
 
-        term::received(now_ms(), &frame, rtt, delta);
-        if self.cfg.verbose {
+        term::received(now_ms(), &frame, rtt, delta, &self.stats);
+        if self.cfg.verbose >= Verbosity::Wire {
             term::wire(line, since_previous, Some(now.saturating_sub(arrived_us)));
         }
         if let Some(Some(queued)) = echo {
             self.report(&queued, None);
+        }
+    }
+
+    /// Prints a line when the peer starts or stops answering: the live console has no periodic
+    /// stats line to show it.
+    fn watch_peer(&mut self) {
+        let up = self.peer.link_up(&self.cfg);
+        if self.seen_peer_up != Some(up) {
+            // Not "down" before the first frame ever arrived: it never was up.
+            if up || self.seen_peer_up.is_some() {
+                let what = if up { "the peer is answering: link UP" } else { "no frame from the peer: link DOWN" };
+                term::link_event(now_ms(), format_args!("{what}"));
+            }
+            self.seen_peer_up = Some(up);
         }
     }
 
@@ -673,6 +694,7 @@ impl Node {
         self.button.set_timing(ms(self.cfg.debounce_ms), ms(self.cfg.lockout_ms));
         self.boot.set_timing(ms(self.cfg.debounce_ms), ms(self.cfg.lockout_ms));
         rtt_console::set_route(self.cfg.console);
+        term::set_verbosity(self.cfg.verbose);
     }
 
     /// `set <key> <value>`: validates, applies, and reports the result.

@@ -56,7 +56,7 @@ So:
   interrupts during every print;
 - nothing is printed inside a critical section.
 
-`verbose` mode shows the ring buffer peak (`RX buffer peak 33/2048`).
+`verbose wire` shows the ring buffer peak (`RX buffer peak 33/2048`).
 
 ## Timing on the wire
 

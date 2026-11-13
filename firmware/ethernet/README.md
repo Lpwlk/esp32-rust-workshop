@@ -88,7 +88,7 @@ Two boards cabled directly, UDP, the default presets:
   wire, is the limit (receive queue and DMA ring are bounded).
 - **Round-trip time** (`tx on-rx`): about **4.4 ms**, against about 0.2 ms on the UART link. Not understood
   yet: the main loop runs about 50 000 times a second and printing no longer blocks, yet received frames
-  wait about 0.4 ms for the loop and a sent frame about 1 ms for the network task (`verbose` shows
+  wait about 0.4 ms for the loop and a sent frame about 1 ms for the network task (`verbose wire` shows
   both). The raw network round trip measured earlier, without the node's loop, was 0.4 ms.
 - **TCP** (`node-a-tcp` / `node-b-tcp`): builds and passes the same checks, **not yet run on two boards**.
 - Not covered by tests: this crate has no host tests of its own (the shared logic is tested in

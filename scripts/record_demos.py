@@ -5,7 +5,7 @@ Each scene flashes both boards with the preset it shows, then records node A's c
 `scripts/record.py` (a pseudo-terminal, so the colors are kept; commands are typed one key at a
 time) and renders a GIF with agg:
 
-    boot    the boot card, the cable coming up at 1 Gbit/s, the first frames (UDP presets)
+    boot    the boot card, the cable coming up at 1 Gbit/s, the live line, then `verbose 1` and `verbose`
     cli     `link`, `config`, `led 2 blink 300`, `pattern ocean` (UDP presets)
     burst   back-to-back and 1 kHz bursts, then round-trip times (`tx on-rx` on node B)
     tcp     the TCP presets: the client connects, `link`, a burst
@@ -47,7 +47,17 @@ RESET = r"0.8:\x12"  # Ctrl+R: `espflash monitor` doesn't reset the chip by itse
 
 #                preset A       preset B      seconds, --start, extra record.py arguments
 SCENES = {
-    "boot": ("node-a", "node-b", 17, 0.7, ["--key", RESET]),
+    "boot": (
+        "node-a",
+        "node-b",
+        20,
+        0.7,
+        [
+            "--key", RESET,
+            "--type", "7:verbose 1",  # from the live line to every frame...
+            "--type", "13:verbose",  # ...and the next level: raw frames too
+        ],
+    ),  # fmt: skip
     "cli": (
         "node-a",
         "node-b",

@@ -2,7 +2,7 @@
 //! firmware's; only what concerns the link differs (Ethernet instead of baud rate).
 
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
 use critical_section::Mutex;
 
@@ -37,6 +37,50 @@ static PROMPT: Mutex<RefCell<heapless::String<{ crate::cli::MAX_INPUT }>>> =
 /// Question shown instead of `cli` while the `burst` wizard runs.
 static PROMPT_LABEL: Mutex<RefCell<Option<heapless::String<48>>>> = Mutex::new(RefCell::new(None));
 
+/// The current `verbose` level (`workshop_core::config::Verbosity` as a number).
+static VERBOSITY: AtomicU8 = AtomicU8::new(0);
+/// The live line: the last frame event, redrawn in place just above the prompt (verbosity 0).
+static LIVE: Mutex<RefCell<Option<heapless::String<512>>>> = Mutex::new(RefCell::new(None));
+
+/// Prints formatted text on the serial console (the prompt and the live line are serial only).
+fn raw(args: core::fmt::Arguments<'_>) {
+    crate::console::print(args)
+}
+
+/// Sets how much the console prints. Leaving the live level removes the live line.
+pub fn set_verbosity(level: workshop_core::config::Verbosity) {
+    VERBOSITY.store(level as u8, Ordering::Relaxed);
+    if level != workshop_core::config::Verbosity::Live {
+        live_clear();
+    }
+}
+
+/// Frames go to the live line: verbosity 0, and the serial console is on (an RTT viewer has no
+/// editable prompt to keep the line under, so it gets every line).
+fn live_mode() -> bool {
+    VERBOSITY.load(Ordering::Relaxed) == 0 && crate::rtt_console::serial_on()
+}
+
+/// Shows `text` as the live line, replacing the previous one: the prompt block (live line, then
+/// prompt) is erased, then drawn again with the new text.
+fn live_set(text: &str) {
+    prompt_clear();
+    critical_section::with(|cs| {
+        let mut live = LIVE.borrow_ref_mut(cs);
+        let mut line = heapless::String::new();
+        let _ = line.push_str(text);
+        *live = Some(line);
+    });
+    prompt_draw();
+}
+
+/// Removes the live line.
+pub fn live_clear() {
+    prompt_clear();
+    critical_section::with(|cs| *LIVE.borrow_ref_mut(cs) = None);
+    prompt_draw();
+}
+
 pub fn prompt_enable() {
     PROMPT_ON.store(true, Ordering::Relaxed);
     prompt_draw();
@@ -45,7 +89,9 @@ pub fn prompt_enable() {
 #[doc(hidden)]
 pub fn prompt_clear() {
     if PROMPT_ON.load(Ordering::Relaxed) && crate::rtt_console::serial_on() {
-        crate::console::write_str("\r\x1b[2K");
+        // The prompt line; then, if there is a live line above it, that one too (up one row, erase).
+        let live = critical_section::with(|cs| LIVE.borrow_ref(cs).is_some());
+        raw(format_args!("\r\x1b[2K{}", if live { "\x1b[1A\r\x1b[2K" } else { "" }));
     }
 }
 
@@ -56,6 +102,11 @@ pub fn prompt_draw() {
         // and interrupts (buttons, the network) must keep running meanwhile.
         let (text, label) =
             critical_section::with(|cs| (PROMPT.borrow_ref(cs).clone(), PROMPT_LABEL.borrow_ref(cs).clone()));
+        // The live line first, above the prompt; no auto-wrap, so a long line is cut, not wrapped
+        // onto a second row (which the erase above wouldn't know about).
+        if let Some(live) = critical_section::with(|cs| LIVE.borrow_ref(cs).clone()) {
+            raw(format_args!("\x1b[?7l{live}\x1b[?7h\n"));
+        }
         match label {
             Some(q) => crate::console::print(format_args!("\x1b[1;33m{q} ›\x1b[0m {text}")),
             None => crate::console::print(format_args!("\x1b[1;35mcli ›\x1b[0m {text}")),
@@ -364,7 +415,7 @@ fn pad_visible<const N: usize>(s: &mut heapless::String<N>, width: usize) {
 ///    14.810 RX ◀  ECH  #00005 node-B   echo of #00004            rtt 182 µs
 ///    15.002 TX ▶  EVT  #00005          ▼ press    key 0123456789ABCDEF  3 edges
 /// ```
-fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str) {
+fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str, stats: &Stats) {
     use core::fmt::Write;
     let (s, ms) = stamp(now_ms);
     let dir = if tx { "\x1b[36mTX ▶\x1b[0m" } else { "\x1b[32mRX ◀\x1b[0m" };
@@ -404,13 +455,28 @@ fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str) {
             "BST"
         }
     };
-    if !extra.is_empty() {
+    let live = live_mode();
+    if !extra.is_empty() && !live {
         pad_visible(&mut body, BODY_W);
     }
-    out!(
+    let mut line: heapless::String<512> = heapless::String::new();
+    let _ = write!(
+        line,
         "{GRAY}{s:>6}.{ms:03}{RST} {dir} {badge} {kind} {RST} {GRAY}#{:05}{RST} {YELLOW}{from:<NODE_W$}{RST} {body}{extra}",
         frame.seq
     );
+    if live {
+        // The counters stay on the live line, so nothing needs the periodic stats line.
+        let _ = write!(line, "  {GRAY}│ tx {} rx {}{RST} ", stats.tx, stats.rx);
+        if stats.lost > 0 || stats.bad > 0 {
+            let _ = write!(line, "{RED}lost {} bad {}{RST}", stats.lost, stats.bad);
+        } else {
+            let _ = write!(line, "{GRAY}lost 0{RST}");
+        }
+        live_set(&line);
+    } else {
+        out!("{line}");
+    }
 }
 
 /// `  Δ  1249.873 ms ← RX`: time since the previous `DAT`, sent or received,
@@ -430,7 +496,7 @@ fn push_delta(extra: &mut heapless::String<96>, d: DatDelta) {
 
 /// A sent frame; `button`: for an `EVT`, which button and the interrupts behind
 /// it; `delta`: for a `DAT`.
-pub fn sent(now_ms: u64, frame: &Frame<'_>, button: Option<(&str, u32)>, delta: Option<DatDelta>) {
+pub fn sent(now_ms: u64, frame: &Frame<'_>, button: Option<(&str, u32)>, delta: Option<DatDelta>, stats: &Stats) {
     let mut extra: heapless::String<96> = heapless::String::new();
     if let Some(d) = delta {
         push_delta(&mut extra, d);
@@ -441,12 +507,12 @@ pub fn sent(now_ms: u64, frame: &Frame<'_>, button: Option<(&str, u32)>, delta: 
             let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {DIM}{n} edges{RST}"));
         }
     }
-    frame_line(now_ms, true, frame, &extra);
+    frame_line(now_ms, true, frame, &extra, stats);
 }
 
 /// A received frame; `rtt_us`: round-trip time measured from it (`ECH`);
 /// `delta`: for a `DAT`.
-pub fn received(now_ms: u64, frame: &Frame<'_>, rtt_us: Option<u64>, delta: Option<DatDelta>) {
+pub fn received(now_ms: u64, frame: &Frame<'_>, rtt_us: Option<u64>, delta: Option<DatDelta>, stats: &Stats) {
     let mut extra: heapless::String<96> = heapless::String::new();
     if let Some(d) = delta {
         push_delta(&mut extra, d);
@@ -454,7 +520,7 @@ pub fn received(now_ms: u64, frame: &Frame<'_>, rtt_us: Option<u64>, delta: Opti
     if let Some(rtt) = rtt_us {
         let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {GRAY}rtt{RST} {BOLD}{}{RST}", Us(rtt)));
     }
-    frame_line(now_ms, false, frame, &extra);
+    frame_line(now_ms, false, frame, &extra, stats);
 }
 
 pub fn bounce_ignored(now_ms: u64, button: &str, raw_edges: u32) {

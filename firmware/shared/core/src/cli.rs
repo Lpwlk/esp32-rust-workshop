@@ -196,7 +196,7 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
         "freq" | "f" => set("rgb.freq_hz", rest),
         "cycle" | "c" => set("rgb.cycle_ms", rest),
         "bright" | "b" => set("rgb.brightness", rest),
-        "verbose" | "v" => set("verbose", if rest.is_empty() { "on" } else { rest }),
+        "verbose" | "v" => set("verbose", if rest.is_empty() { "next" } else { rest }),
         "tx" => set("tx_mode", rest),
         "period" => set("data_period_ms", rest),
         "link" | "net" => Ok(Command::Link),
@@ -449,15 +449,17 @@ pub static COMMANDS: &[CmdHelp] = &[
     CmdHelp {
         name: "verbose",
         aliases: &["v"],
-        usage: "verbose [on|off]",
-        summary: "verbose console (= set verbose)",
+        usage: "verbose [0|1|2|live|frames|wire]",
+        summary: "how much the console prints (= set verbose)",
         details: &[
-            "Adds, for each frame: the raw line on the wire and its size; for each",
-            "received frame: time since the previous one from the peer. Also shows",
-            "ignored button bounces, and byte counters + RX buffer peak in the",
-            "stats line. `verbose` alone turns it on.",
+            "0 live    one line, updated in place, with the last frame sent or received and",
+            "          the counters. Lost frames, link events, bursts and errors still scroll.",
+            "1 frames  every frame on its own line, and the periodic stats line",
+            "2 wire    frames plus, for each, the raw line, its checksum and size, the time",
+            "          since the peer's previous frame, ignored button bounces and counters",
+            "`verbose` alone goes to the next level (wire goes back to live).",
         ],
-        examples: &["verbose", "verbose off"],
+        examples: &["verbose", "verbose frames", "verbose 0", "verbose wire"],
         group: Group::Shortcuts,
         only: None,
     },
@@ -746,7 +748,8 @@ mod tests {
         assert_eq!(parse("f 100"), Ok(set_cmd("rgb.freq_hz", "100")));
         assert_eq!(parse("c 2000"), Ok(set_cmd("rgb.cycle_ms", "2000")));
         assert_eq!(parse("b 70"), Ok(set_cmd("rgb.brightness", "70")));
-        assert_eq!(parse("verbose"), Ok(set_cmd("verbose", "on")));
+        assert_eq!(parse("verbose"), Ok(set_cmd("verbose", "next")));
+        assert_eq!(parse("verbose frames"), Ok(set_cmd("verbose", "frames")));
         assert_eq!(parse("v off"), Ok(set_cmd("verbose", "off")));
         assert_eq!(parse("led 2 rx"), Ok(set_cmd("led2", "rx")));
     }
@@ -793,7 +796,8 @@ mod tests {
                 // `help <topic>` looks commands up first: a name may only shadow a
                 // setting it is the shortcut of (`verbose`).
                 if Key::from_name(name).is_some() || READ_ONLY_UART.contains(name) || READ_ONLY_NET.contains(name) {
-                    assert_eq!(parse(name), Ok(set_cmd(name, "on")), "`{name}` shadows a setting");
+                    let alone = if matches!(*name, "verbose" | "v") { "next" } else { "on" };
+                    assert_eq!(parse(name), Ok(set_cmd(name, alone)), "`{name}` shadows a setting");
                 }
             }
             assert!(c.usage.starts_with(c.name), "{}: usage doesn't start with its name", c.name);

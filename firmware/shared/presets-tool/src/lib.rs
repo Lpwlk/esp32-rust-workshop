@@ -19,7 +19,7 @@
 //! Keys are the ones of `set <key> <value>` in the CLI (runtime settings), plus the build-time
 //! ones (`name`, `pins.*`, `net.*`); a `[table]` is the part of the key before the dot.
 //! Values are the text the CLI accepts, so units work (`"2.5Hz"`, `"blink 200ms"`), numbers
-//! and booleans may be written naturally (`brightness = 40`, `verbose = true`).
+//! and booleans may be written naturally (`brightness = 40`, `verbose = 1`).
 //!
 //! [`load`] checks everything and returns the config; [`rust_source`] is the Rust expression
 //! the firmware includes (`const CONFIG: NodeConfig = include!(...)`), which the compiler
@@ -328,7 +328,7 @@ mod tests {
         let dir = folder(
             "chain",
             &[
-                ("base", "name = \"base\"\nverbose = true\n[rgb]\nbrightness = 70\npattern = \"ocean\"\n"),
+                ("base", "name = \"base\"\nverbose = \"frames\"\n[rgb]\nbrightness = 70\npattern = \"ocean\"\n"),
                 ("mid", "extends = \"base\"\nled1 = \"blink 2.5Hz\"\n[rgb]\nbrightness = 10\n"),
                 (
                     "leaf",
@@ -338,7 +338,10 @@ mod tests {
         );
         let p = load(&dir, "leaf", App::Ethernet).unwrap();
         let c = p.config;
-        assert_eq!((c.name, c.verbose, c.rgb.brightness, c.rgb.pattern), ("leaf", true, 10, "ocean"));
+        assert_eq!(
+            (c.name, c.verbose, c.rgb.brightness, c.rgb.pattern),
+            ("leaf", workshop_core::config::Verbosity::Frames, 10, "ocean")
+        );
         assert_eq!(c.data_period_ms, 12.5);
         assert_eq!(c.led1, workshop_core::config::LedMode::Blink { period_ms: 400.0 });
         assert_eq!(p.files.len(), 3);

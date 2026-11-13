@@ -267,7 +267,7 @@ mod tests {
 
         let mut cfg = BUILD;
         assert_eq!(decode(&record, &mut cfg), Ok(Loaded { applied: 1, skipped: 3 }));
-        assert!(cfg.verbose);
+        assert_eq!(cfg.verbose, crate::config::Verbosity::Wire);
         assert_eq!(cfg.name, "node-A");
     }
 

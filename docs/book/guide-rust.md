@@ -808,7 +808,7 @@ cargo doc -p esp32-rust-workshop --no-deps --open
 | `burst` / `burst 1000 max` | measurement burst |
 | `pattern ocean` / `next` / `list` | RGB LED patterns |
 | `led 1 peer` / `led 2 blink 2.5Hz` | breadboard LEDs |
-| `verbose` | raw frames, checksums, counters |
+| `verbose` | console detail: `live` (one line updated in place), `frames`, `wire` (raw frames, checksums, counters) |
 
 Keyboard: `←` `→` to edit, `↑` `↓` for history, `Home`/`End`, `Ctrl+U` to clear
 the line, `Ctrl+C` to quit espflash.
