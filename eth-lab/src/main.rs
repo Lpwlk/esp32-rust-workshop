@@ -1,22 +1,23 @@
 //! Gigabit Ethernet on the ESP32-S31-Function-CoreBoard-1.
 //!
 //! The board's RJ45 is wired to a Motorcomm YT8531 PHY over RGMII. This firmware brings the
-//! link up with a static address (no DHCP, see `SUBNET` and `HOST`),
-//! and serves a small status page on port 80:
+//! link up with a static address (no DHCP, see `SUBNET` and `BOARDS`), then:
 //!
-//! ```text
-//! curl http://<ip>/
-//! ```
+//! * two boards cabled **directly** to each other talk over UDP and TCP (module `peer`): host `.11`
+//!   pings `.12` and measures the TCP throughput, `.12` echoes and swallows;
+//! * every board serves a status page on port 80 (`curl http://<ip>/`), for a computer on the cable.
 //!
 //! External parts (same GPIOs as the workshop firmware, see docs/book/wiring.md):
 //!
 //! * GPIO20, LED 1: lit while the Ethernet link is up;
-//! * GPIO21, LED 2: blinks on every HTTP request and every button edge;
+//! * GPIO21, LED 2: blinks on every HTTP request, every packet exchanged with the peer, every button edge;
 //! * GPIO4, jumper to GND: read by the status page.
 //!
 //! GPIO5-19 belong to the PHY (MDC 5, MDIO 6, reset 7, RGMII 8-19): nothing else may use them.
 #![no_std]
 #![no_main]
+
+mod peer;
 
 use core::{
     fmt::Write as _,
@@ -29,7 +30,7 @@ use embassy_time::{Duration, Instant, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     Async,
-    clock::CpuClock,
+    clock::{ClockConfig, CpuClock, ll::MpllClkConfig},
     efuse,
     ethernet::{Ethernet, EthernetDmaStorage, RgmiiPinBundle, mac::Duplex, mac::Speed, phy::generic::GenericPhy},
     gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
@@ -80,7 +81,7 @@ fn host_for(base_mac: [u8; 6]) -> u8 {
 type EthDriver = Ethernet<'static, Async, GenericPhy>;
 
 static DMA: ConstStaticCell<EthernetDmaStorage<10, 10>> = ConstStaticCell::new(EthernetDmaStorage::new());
-static RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
+static RESOURCES: StaticCell<StackResources<6>> = StaticCell::new();
 
 // State shared between the tasks (all plain atomics: no locks needed).
 static REQUESTS: AtomicU32 = AtomicU32::new(0);
@@ -92,7 +93,11 @@ static LINK_FULL_DUPLEX: AtomicBool = AtomicBool::new(false);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    // The RGMII TX clock comes from the MPLL through an integer divider: 1000 Mbit/s needs the MPLL
+    // at 500 MHz. The default (400 MHz, made for 200 MHz PSRAM, unused here) caps Ethernet at 100.
+    let mut clocks = ClockConfig::from(CpuClock::max());
+    clocks.mpll_clk = Some(MpllClkConfig::_500);
+    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(clocks));
     let timg0 = TimerGroup::new(p.TIMG0);
     esp_rtos::start(timg0.timer0);
 
@@ -180,17 +185,34 @@ async fn main(spawner: Spawner) {
     spawner.spawn(button_task(button).unwrap());
     spawner.spawn(http_task(0, stack).unwrap());
     spawner.spawn(http_task(1, stack).unwrap());
+    if host == peer::INITIATOR_HOST {
+        let peer = Ipv4Address::new(SUBNET[0], SUBNET[1], SUBNET[2], peer::PEER_HOST);
+        println!("Role: initiator, talking to {peer} (UDP ping, TCP throughput)");
+        spawner.spawn(peer::initiator_task(stack, peer).unwrap());
+    } else {
+        println!("Role: responder (UDP echo on 7777, TCP sink on 7779)");
+        spawner.spawn(peer::echo_task(stack).unwrap());
+        spawner.spawn(peer::sink_task(stack).unwrap());
+    }
 
     println!("Static address {address}/24, no DHCP. Status page: http://{address}/");
     println!("Your computer needs an address in {}.{}.{}.0/24, e.g. .1", SUBNET[0], SUBNET[1], SUBNET[2]);
 
     // `main` must not return: keep it alive and report the link every 5 s.
     let mut was_up = None;
+    let (mut echoed, mut sunk, mut ticks) = (0, 0, 0u32);
     loop {
         let up = stack.is_link_up();
         if was_up != Some(up) {
             println!("link {}", if up { "UP" } else { "DOWN" });
             was_up = Some(up);
+        }
+        // The responder has nothing else to print: show what it handled, every 5 s.
+        ticks += 1;
+        let (e, k) = (peer::ECHOED.load(Ordering::Relaxed), peer::SUNK_BYTES.load(Ordering::Relaxed));
+        if ticks % 5 == 0 && (e, k) != (echoed, sunk) {
+            println!("responder: {e} UDP packets echoed, {} kB of TCP data received", k / 1000);
+            (echoed, sunk) = (e, k);
         }
         Timer::after(Duration::from_secs(1)).await;
     }
@@ -207,7 +229,10 @@ async fn leds_task(stack: Stack<'static>, mut link_led: Output<'static>, mut act
     let mut seen = 0;
     loop {
         link_led.set_level(stack.is_link_up().into());
-        let activity = REQUESTS.load(Ordering::Relaxed).wrapping_add(BUTTON_EDGES.load(Ordering::Relaxed));
+        let activity = REQUESTS
+            .load(Ordering::Relaxed)
+            .wrapping_add(BUTTON_EDGES.load(Ordering::Relaxed))
+            .wrapping_add(peer::ACTIVITY.load(Ordering::Relaxed));
         if activity != seen {
             seen = activity;
             activity_led.set_high();
@@ -245,7 +270,7 @@ async fn http_task(id: u8, stack: Stack<'static>) -> ! {
         let _ = socket.read(&mut request).await;
         let n = REQUESTS.fetch_add(1, Ordering::Relaxed) + 1;
 
-        let mut body: String<640> = String::new();
+        let mut body: String<1024> = String::new();
         status_page(&mut body, stack, id, n);
         let mut head: String<128> = String::new();
         let _ = write!(
@@ -269,7 +294,7 @@ async fn http_task(id: u8, stack: Stack<'static>) -> ! {
     }
 }
 
-fn status_page(out: &mut String<640>, stack: Stack<'static>, task: u8, request: u32) {
+fn status_page(out: &mut String<1024>, stack: Stack<'static>, task: u8, request: u32) {
     let up = Instant::now().as_secs();
     let _ = writeln!(out, "ESP32-S31 CoreBoard, on-board RJ45 (YT8531, RGMII)");
     let _ = writeln!(out, "uptime      {}h {:02}m {:02}s", up / 3600, up / 60 % 60, up % 60);
@@ -299,6 +324,27 @@ fn status_page(out: &mut String<640>, stack: Stack<'static>, task: u8, request: 
         if BUTTON_PRESSED.load(Ordering::Relaxed) { "pressed" } else { "released" },
         BUTTON_EDGES.load(Ordering::Relaxed)
     );
+    let sent = peer::PING_SENT.load(Ordering::Relaxed);
+    if sent > 0 {
+        let _ = writeln!(
+            out,
+            "udp ping    {}/{sent} answered, rtt min/avg/max {}/{}/{} us",
+            peer::PING_RECV.load(Ordering::Relaxed),
+            peer::RTT_MIN_US.load(Ordering::Relaxed),
+            peer::RTT_AVG_US.load(Ordering::Relaxed),
+            peer::RTT_MAX_US.load(Ordering::Relaxed)
+        );
+        let kbps = peer::TCP_KBPS.load(Ordering::Relaxed);
+        let _ = writeln!(out, "tcp         {}.{:02} Mbit/s (last burst)", kbps / 1000, kbps % 1000 / 10);
+    }
+    let echoed = peer::ECHOED.load(Ordering::Relaxed);
+    if echoed > 0 {
+        let _ = writeln!(
+            out,
+            "responder   {echoed} UDP echoed, {} kB TCP received",
+            peer::SUNK_BYTES.load(Ordering::Relaxed) / 1000
+        );
+    }
     let _ = writeln!(out, "request     #{request} (served by task {task})");
 }
 

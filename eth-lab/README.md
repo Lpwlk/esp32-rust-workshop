@@ -1,37 +1,50 @@
 # eth-lab: the CoreBoard's RJ45 in Rust
 
-Gigabit Ethernet on the ESP32-S31-Function-CoreBoard-1: **static addresses, no DHCP**, a
-status page on port 80, the two breadboard LEDs and the jumper button. Standalone crate (own
-workspace); the node firmware is untouched.
+Gigabit Ethernet on the ESP32-S31-Function-CoreBoard-1: **two boards cabled directly to each
+other, static addresses, no DHCP, no switch**. They ping each other over UDP and measure TCP
+throughput; each also serves a status page on port 80. Standalone crate (own workspace); the node
+firmware is untouched.
 
-## Network plan
+## Two boards, one cable
 
-Subnet `192.168.77.0/24`, no gateway, all boards and your computer on the same hub/switch:
+Plug a cable from the RJ45 of one board to the RJ45 of the other (the PHYs detect the cable
+type, no crossover needed). Same firmware on both; the role comes from the chip's base MAC:
 
-| Who | Address |
-|---|---|
-| your computer | `192.168.77.1` |
-| board `1c:29:04:d0:6c:1a` (USB `…6C:1A`) | `192.168.77.11` |
-| board `1c:29:04:d0:21:fe` | `192.168.77.12` |
-| any other board | `192.168.77.20`, or `ETH_LAB_HOST=13 cargo run --release` |
+| Board (base MAC) | Address | Role |
+|---|---|---|
+| `1c:29:04:d0:6c:1a` | `192.168.77.11/24` | initiator: 20 UDP pings (port 7777), then 2 s of TCP (port 7779), repeat |
+| `1c:29:04:d0:21:fe` | `192.168.77.12/24` | responder: UDP echo, TCP sink |
+| any other board | `192.168.77.20/24` (or `ETH_LAB_HOST=13 cargo run --release`) | responder |
 
-The table is `BOARDS` in `src/main.rs`, keyed by the chip's base MAC (`espflash board-info`),
-so a plain `cargo run --release` is right on either board.
+The table is `BOARDS` in `src/main.rs` (`espflash board-info` prints the base MAC). Console of the
+initiator:
 
-Give the computer an address on the interface that faces the hub (here `en10`):
-
-```sh
-sudo ifconfig en10 alias 192.168.77.1/24          # temporary, gone at unplug/reboot
-# or permanently, for the "USB 10/100/1000 LAN" service:
-sudo networksetup -setmanual "USB 10/100/1000 LAN" 192.168.77.1 255.255.255.0
+```text
+udp ping 192.168.77.12: 20/20 answered, rtt min/avg/max = 358/407/901 us
+tcp  192.168.77.12: 13122 kB in 2011 ms = 52.19 Mbit/s
 ```
+
+Measured with a direct cable at **100 Mbit/s** (see the next section for gigabit): UDP round trip
+about 0.4 ms, TCP about 52 Mbit/s (limited by the CPU and a 8 kB window, not by the wire).
 
 ```sh
 cd eth-lab
 cargo run --release          # builds, flashes with espflash, opens the monitor
-ping 192.168.77.11
-curl http://192.168.77.11/
 ```
+
+## Gigabit needs the MPLL at 500 MHz
+
+The EMAC drives the RGMII TX clock from the MPLL through an integer divider. esp-hal's default
+MPLL is 400 MHz (what 200 MHz PSRAM wants), which caps Ethernet at **100 Mbit/s**: the HAL says so
+with a `log` warning, which is invisible without a logger. `main` sets `MpllClkConfig::_500` for
+1000 Mbit/s. (Not used here: PSRAM, which needs the 400 MHz setting.) The link then needs a cat5e
+or better cable, with all four pairs. The negotiated speed is printed at boot
+(`Link up: 1000 Mbit/s, Full duplex`).
+
+## A computer on the same cable (optional)
+
+For the status page, give the computer an address in the subnet, on the interface that faces the
+board, e.g. `sudo ifconfig en10 alias 192.168.77.1/24`, then `curl http://192.168.77.11/`.
 
 ## Why a separate crate
 
