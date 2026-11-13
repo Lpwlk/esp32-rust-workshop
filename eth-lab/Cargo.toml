@@ -1,40 +1,82 @@
-# Ethernet lab: the on-board RJ45 of the ESP32-S31-Function-CoreBoard-1 (YT8531 PHY, RGMII,
-# 10/100/1000 Mbit/s) with embassy-net.
+# The Ethernet app: the same node as the UART firmware (CLI, LEDs, RGB, buttons, saved settings,
+# frames with sequence numbers, round-trip times, bursts), over the board's RJ45 with
+# embassy-net: UDP datagrams or one TCP connection, static addresses.
 #
-# Standalone on purpose (own `[workspace]`, not a member of the firmware workspace): the EMAC
-# driver for the S31 is merged upstream (esp-rs/esp-hal #6192) but not in a release yet
-# (esp-hal 1.2.x has none), and it needs the async stack (esp-rtos + embassy), which the
-# blocking, 5 Mbaud node firmware does not use. Once a release ships it, pin the crates.io
-# versions here (and this can join the main workspace).
+# It is a separate crate with its own workspace (not a member of the UART firmware's) because the
+# EMAC driver for the S31 is merged upstream (esp-rs/esp-hal #6192) but not in a release yet
+# (esp-hal 1.2.x has none), and it needs the async stack (esp-rtos + embassy), which the blocking
+# UART firmware doesn't use. Once a release ships it, pin the crates.io versions here.
+#
+# Everything that doesn't touch a peripheral is shared with the UART firmware, in
+# `crates/workshop-core`. The settings of each node are the presets in `presets/eth/*.toml`.
 [workspace]
 
 [package]
 name         = "eth-lab"
-description  = "Gigabit Ethernet on the ESP32-S31 CoreBoard: DHCP, a tiny HTTP status server, LEDs and a button."
+description  = "Two ESP32-S31 boards talking over Gigabit Ethernet (UDP or TCP): the firmware (node-a, node-b)."
 edition      = "2024"
 rust-version = "1.95"
 version      = "0.1.0"
 publish      = false
 
 [[bin]]
-name  = "eth-lab"
-path  = "src/main.rs"
+name  = "node-a"
+path  = "src/bin/node_a.rs"
 test  = false
 bench = false
 
+[[bin]]
+name  = "node-b"
+path  = "src/bin/node_b.rs"
+test  = false
+bench = false
+
+[lib]
+test  = false
+bench = false
+
+[features]
+# Cargo features choose what is *compiled in*; what a node does at run time is chosen by its
+# preset and the CLI (same split as the UART firmware, see docs/book/configuration.md).
+default = ["persist", "watchdog"]
+# Settings saved in flash with the CLI `save`, applied at boot (`forget` erases them).
+persist = []
+# Hardware watchdog (TIMG0): resets the chip if the main loop stalls for 2 s.
+watchdog = []
+# RTT console through the debug probe (probe-rs / cargo-embed).
+rtt = ["dep:rtt-target"]
+
 [dependencies]
-# esp-hal main, pinned to a commit (2026-11-13), all esp-rs crates from the same revision.
+workshop-core = { path = "../crates/workshop-core" }
+
+# esp-hal main, pinned to a commit (2026-11-13); all esp-rs crates from the same revision.
 esp-hal                = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "unstable", "embassy-time-05"] }
 esp-rtos               = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "embassy"] }
 esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31"] }
 esp-backtrace          = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", features = ["esp32s31", "panic-handler", "println"] }
+# No `critical-section` feature: it would mask interrupts during every print.
 esp-println            = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f", default-features = false, features = ["esp32s31", "auto", "colors"] }
 
-embassy-executor = "0.10.0"
-embassy-net      = { version = "0.9.0", features = ["dhcpv4", "medium-ethernet", "tcp", "udp"] }
-embassy-time     = "0.5.0"
-heapless         = "0.9.3"
-static_cell      = "2.1.0"
+embassy-executor   = "0.10.0"
+embassy-futures    = "0.1.2"
+embassy-net        = { version = "0.9.0", features = ["proto-ipv4", "medium-ethernet", "tcp", "udp"] }
+embassy-net-driver = "0.2"
+embassy-sync       = "0.8"
+embassy-time       = "0.5.0"
+static_cell        = "2.1.0"
+heapless           = "0.9.3"
+critical-section   = "1.2.0"
+rtt-target         = { version = "0.6.2", optional = true }
+# RGB LED (WS2812-type on GPIO60) driven by the RMT peripheral.
+esp-hal-smartled   = "0.18.0"
+smart-leds-trait   = "0.3"
+
+[build-dependencies]
+workshop-presets = { path = "../crates/workshop-presets" }
+
+# esp-hal-smartled depends on esp-hal from crates.io: make it use the pinned git one.
+[patch.crates-io]
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee7ec0f15a4019a916af602d45fd51831bf4c1f" }
 
 [profile.dev]
 opt-level = "s"
