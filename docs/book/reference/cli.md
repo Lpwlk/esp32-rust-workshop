@@ -17,7 +17,7 @@ Changes are applied immediately and lost on reboot.
 
 ```text
 Lists every setting of this node. Values changed at runtime are shown
-in yellow next to their build value (from src/bin/node_*.rs).
+in yellow next to their build value (from the node's preset).
 Read-only settings (name, pins, link) need a rebuild to change.
 ```
 

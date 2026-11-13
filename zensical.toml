@@ -51,6 +51,7 @@ nav = [
     "console.md",
     "examples.md",
     "firmware.md",
+    "ethernet.md",
     "configuration.md",
     "wiring.md",
     "architecture.md",
@@ -65,6 +66,12 @@ nav = [
     "reference/protocol.md",
     "reference/pins.md",
     "reference/patterns.md",
+    { "Ethernet app" = [
+      "reference/eth-cli.md",
+      "reference/eth-config.md",
+      "reference/eth-protocol.md",
+      "reference/eth-pins.md",
+    ] },
     { "API (rustdoc)" = "api.md" },
   ] },
 ]

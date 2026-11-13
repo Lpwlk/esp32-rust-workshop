@@ -670,7 +670,7 @@ pub fn cli_help(topic: Option<&str>, cfg: &NodeConfig, defaults: &NodeConfig) {
                 help_key(t, k, cfg, defaults);
             } else if cfg.read_only().contains(&t) {
                 out!(
-                    "  {BOLD}{t}{RST} {GRAY}—{RST} read-only: set in src/bin/node_*.rs or config::shared, then rebuild"
+                    "  {BOLD}{t}{RST} {GRAY}—{RST} read-only: set in presets/uart/*.toml or config::shared, then rebuild"
                 );
             } else {
                 cli_error(format_args!("no help for '{t}' (try `help`)"));

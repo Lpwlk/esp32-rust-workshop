@@ -64,20 +64,30 @@ python3 scripts/dev.py flash a -m             # build, flash, monitor (+ Flash/R
 python3 scripts/dev.py check                  # everything CI checks, locally
 ```
 
-## A node is its config
+## A node is its preset
 
-```rust
-use esp32_rust_workshop::config::{LedMode, NodeConfig};
+Two apps, one shared core, the same documented presets:
 
-const CONFIG: NodeConfig = NodeConfig {
-    name: "node-A",
-    data_period_ms: 1000.0,
-    led1: LedMode::PeerButton,       // breadboard LED shows the peer's button
-    ..NodeConfig::DEFAULT
-};
+| App | Link | Run | Presets |
+|---|---|---|---|
+| UART (repository root) | 5 Mbaud UART, 3 wires | `cargo run --release --bin node-a` | [`presets/uart/`](presets/uart) |
+| Ethernet ([`eth-lab/`](eth-lab)) | Gigabit Ethernet, UDP or TCP, static IPs | `cd eth-lab && cargo run --release --bin node-a` | [`presets/eth/`](presets/eth) |
 
-esp32_rust_workshop::node_firmware!(CONFIG); // checks CONFIG at compile time
+```toml
+# presets/eth/node-a.toml: everything else comes from base.toml, where every setting is documented
+extends = "base"
+name    = "node-A"
+data_period_ms = 1000
+led1    = "peer"          # breadboard LED shows the peer's button
+
+[net]
+address = "192.168.77.11"
+peer    = "192.168.77.12"
 ```
+
+The build turns the preset into a `const NodeConfig` and **checks it at compile time**: a bad value
+stops the build with the file and the key. [`presets/README.md`](presets/README.md) explains the format;
+`cargo presets list|show|check` inspects them.
 
 A reserved pin or an out-of-range period is a **build error**, not a crash on the
 board. The same rules apply to `set` in the CLI and to settings loaded from flash.
@@ -116,9 +126,12 @@ cargo run -p workshop-core --target host-tuple --example frames
 
 ```text
 src/                     firmware: hardware glue (UART, GPIO, RMT, flash, watchdog)
-src/bin/node_{a,b}.rs    one binary per node = its NodeConfig
-crates/workshop-core/    hardware-free logic, no_std, tested on the host
+src/bin/node_{a,b}.rs    one binary per node = its preset, included by the build
+eth-lab/                 the Ethernet app: its own Cargo workspace (esp-hal main), same nodes over RJ45
+presets/{uart,eth}/      the nodes' settings in TOML, base.toml documents every one
+crates/workshop-core/    hardware-free logic shared by both apps, no_std, tested on the host
   examples/              runnable examples, included in the docs
+crates/workshop-presets/ host-only: reads and validates the TOML presets (`cargo presets`)
 tests/hil.rs             on-target tests (embedded-test)
 docs/book/               documentation site (Zensical); reference/ is generated
 scripts/                 dev.py (boards, flash, tests, docs), memsize.py, record.py

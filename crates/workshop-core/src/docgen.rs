@@ -92,7 +92,7 @@ pub fn config_reference(out: &mut impl Write, kind: LinkKind) -> fmt::Result {
     write!(out, "{HEADER}# Configuration{}\n\n", if kind == LinkKind::Net { " (Ethernet app)" } else { "" })?;
     match kind {
         LinkKind::Uart => {
-            out.write_str("Build values come from `NodeConfig::DEFAULT`, overridden per node in `src/bin/node_*.rs`.\n")?
+            out.write_str("Build values come from `NodeConfig::DEFAULT`, overridden per node by a preset (`presets/uart/*.toml`).\n")?
         }
         LinkKind::Net => out.write_str(
             "Build values come from `NodeConfig::DEFAULT_NET`, overridden per node by a preset (`eth-lab/presets/*.toml`).\n",

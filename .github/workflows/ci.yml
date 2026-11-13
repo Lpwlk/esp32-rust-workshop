@@ -1,8 +1,9 @@
 # Tests, firmware build and documentation site.
 #
 # - Every push and pull request: formatting, host tests (including the check that
-#   the generated reference pages match the code), firmware build + clippy for each
-#   Cargo feature combination, site build.
+#   the generated reference pages match the code, and the TOML presets), firmware
+#   build + clippy for each Cargo feature combination, for the UART app (repository
+#   root) and the Ethernet app (eth-lab/, its own Cargo workspace), site build.
 # - Every build: a Flash / RAM table in the job summary (scripts/memsize.py); on
 #   pull requests, compared with the same firmware built from the target branch.
 # - Push to `main`: the site (Zensical pages + rustdoc API) is published on GitHub
@@ -35,6 +36,9 @@ jobs:
       - run: rustup component add rustfmt
       - name: rustfmt (rustfmt.toml)
         run: cargo fmt --all -- --check
+      # eth-lab/ is its own Cargo workspace: `--all` above doesn't reach it.
+      - name: rustfmt (Ethernet app)
+        run: cd eth-lab && cargo fmt -- --check
 
   host-tests:
     name: Host tests (workshop-core)
@@ -53,8 +57,37 @@ jobs:
             cargo run -q --locked -p workshop-core --target host-tuple --example "$(basename "$ex" .rs)"
             echo "::endgroup::"
           done
-      - name: Clippy (core, host)
-        run: cargo clippy -p workshop-core --target host-tuple --all-targets -- -D warnings
+      - name: Clippy (core and presets, host)
+        run: cargo clippy -p workshop-core -p workshop-presets --target host-tuple --all-targets -- -D warnings
+      - name: Every preset loads and validates
+        run: cargo presets check
+
+  firmware-eth:
+    name: Ethernet firmware (${{ matrix.features.name }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: eth-lab
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - { name: default, flags: "" }
+          - { name: none, flags: "--no-default-features" }
+          - { name: all, flags: "--all-features" }
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: eth-lab
+          key: eth-${{ matrix.features.name }}
+      - name: Build both nodes (UDP presets)
+        run: cargo build --release --locked ${{ matrix.features.flags }}
+      - name: Build both nodes (TCP presets)
+        run: PRESET_NODE_A=node-a-tcp PRESET_NODE_B=node-b-tcp cargo build --release --locked ${{ matrix.features.flags }}
+      - name: Clippy (Ethernet firmware)
+        run: cargo clippy --release --locked ${{ matrix.features.flags }} -- -D warnings
 
   firmware:
     name: Firmware (${{ matrix.features.name }})

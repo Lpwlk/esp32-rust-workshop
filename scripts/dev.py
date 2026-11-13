@@ -140,6 +140,8 @@ def format_code(check: bool) -> None:
     from devlib import live, log, run
 
     live(["cargo", "fmt", "--all"] + (["--", "--check"] if check else []))
+    # eth-lab is its own Cargo workspace: `--all` at the root doesn't reach it.
+    live(["cargo", "fmt"] + (["--", "--check"] if check else []), cwd=APP_DIRS["eth"])
     run(
         [str(VENV_BIN / "black"), "--line-length", "100"]
         + (["--check"] if check else [])
@@ -153,8 +155,24 @@ def format_code(check: bool) -> None:
 # --------------------------------------------------------------------------------------
 
 
+# Which firmware the build / flash / monitor commands work on: `--app uart` (the repository root, the
+# default) or `--app eth` (eth-lab/, the Ethernet app: its own Cargo workspace). `--preset NAME`
+# builds that preset (presets/<app>/NAME.toml) instead of node-a / node-b.
+APP = "uart"
+PRESET: str | None = None
+APP_DIRS = {"uart": ROOT, "eth": ROOT / "eth-lab"}
+
+
+def app_dir() -> Path:
+    return APP_DIRS[APP]
+
+
+def preset_env() -> dict[str, str] | None:
+    return {"PRESET": PRESET} if PRESET else None
+
+
 def elf(node: str, release: bool = True) -> Path:
-    return ROOT / "target" / TARGET / ("release" if release else "debug") / f"node-{node}"
+    return app_dir() / "target" / TARGET / ("release" if release else "debug") / f"node-{node}"
 
 
 def board_for(node: str | None, selector: str | None):
@@ -216,7 +234,9 @@ def cargo_build(nodes: list[str], rtt: bool, release: bool) -> None:
         ["cargo", "build"]
         + (["--release"] if release else [])
         + (["--features", "rtt"] if rtt else [])
-        + [arg for n in nodes for arg in ("--bin", f"node-{n}")]
+        + [arg for n in nodes for arg in ("--bin", f"node-{n}")],
+        cwd=app_dir(),
+        extra_env=preset_env(),
     )
     memory_usage(nodes, release)
 
@@ -297,6 +317,7 @@ def rtt(node: str, selector: str | None) -> None:
     live(
         ["cargo", "embed", "--release", "--features", "rtt", "--bin", f"node-{node}"]
         + ["--probe", board.probe],
+        cwd=app_dir(),
         check=False,
     )
 
@@ -358,12 +379,15 @@ def check() -> None:
             )
             for ex in sorted((ROOT / "crates/workshop-core/examples").glob("*.rs"))
         ],
-        ("firmware build", ["cargo", "build", "--release"]),
-        ("clippy, firmware", "cargo clippy --release -- -D warnings".split()),
+        ("presets load and validate", ["cargo", "presets", "check"]),
+        ("firmware build (UART)", ["cargo", "build", "--release"]),
+        ("clippy, firmware (UART)", "cargo clippy --release -- -D warnings".split()),
+        ("firmware build (Ethernet)", ["cargo", "build", "--release"], APP_DIRS["eth"]),
+        ("clippy, firmware (Ethernet)", "cargo clippy --release -- -D warnings".split(), APP_DIRS["eth"]),
     ]
-    for i, (name, cmd) in enumerate(steps, 1):
+    for i, (name, cmd, *where) in enumerate(steps, 1):
         log.info(f"[bold]{i}/{len(steps) + 1}[/] {name}")
-        live(cmd)
+        live(cmd, cwd=where[0] if where else None)
     log.info(f"[bold]{len(steps) + 1}/{len(steps) + 1}[/] docs site")
     run([str(VENV_BIN / "zensical"), "build", "--clean"])
     log.info("✓ all green")
@@ -509,6 +533,13 @@ def parser() -> argparse.ArgumentParser:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument(
+        "--app",
+        choices=("uart", "eth"),
+        default="uart",
+        help="firmware that build / size / flash / monitor / rtt work on: uart (default) or eth (eth-lab/)",
+    )
+    p.add_argument("--preset", metavar="NAME", help="build presets/<app>/NAME.toml instead of node-a / node-b")
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
     def node_arg(s: argparse.ArgumentParser, optional: bool = False) -> None:
@@ -629,6 +660,8 @@ def main() -> None:
         if args.command not in ("update", "git", "docs", "format"):
             sys.exit("pyserial is missing from .venv: run `python3 scripts/dev.py update`.")
 
+    global APP, PRESET
+    APP, PRESET = args.app, args.preset
     release = not getattr(args, "debug", False)
     match args.command:
         case "doctor":

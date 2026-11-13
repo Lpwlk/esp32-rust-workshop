@@ -372,7 +372,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         summary: "all settings: current value, build value, read-only ones",
         details: &[
             "Lists every setting of this node. Values changed at runtime are shown",
-            "in yellow next to their build value (from src/bin/node_*.rs).",
+            "in yellow next to their build value (from the node's preset).",
             "Read-only settings (name, pins, link) need a rebuild to change.",
         ],
         examples: &["config"],

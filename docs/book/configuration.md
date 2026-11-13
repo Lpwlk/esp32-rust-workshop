@@ -7,7 +7,7 @@ place has a single job:
 |---|---|---|
 | **What is compiled into the firmware?** | Cargo features, in `Cargo.toml` | build |
 | **What must both nodes agree on?** | `config::shared` (`crates/workshop-core/src/config.rs`) | build |
-| **What does this node do by default?** | its `NodeConfig`, in `src/bin/node_a.rs` / `node_b.rs` | build |
+| **What does this node do by default?** | its preset, `presets/<app>/node-a.toml` (extends `base.toml`) | build |
 | **What did I change and keep?** | flash, written by the CLI `save` | every boot |
 | **What do I want to try right now?** | the CLI: `set`, `reset` | until reboot |
 | How do the esp-rs crates behave? | `.cargo/esp-config.toml` | build |
@@ -17,7 +17,7 @@ place has a single job:
 
 ```mermaid
 flowchart LR
-    default["NodeConfig::DEFAULT<br/>(workshop-core)"] --> node["src/bin/node_*.rs<br/>overrides"]
+    default["NodeConfig::DEFAULT<br/>(workshop-core)"] --> node["presets/*/node-*.toml<br/>overrides"]
     node -- "const check: invalid = build error" --> build["build config<br/>(in the firmware)"]
     build --> boot(("boot"))
     flash["saved in flash<br/>(CLI save)"] -- "applied on top,<br/>each value re-validated" --> boot
@@ -83,27 +83,28 @@ peer, never as a local setting.
 
 ## Node config: what each node does by default
 
-Each binary is its configuration plus one macro call:
+Each node is a preset, a TOML file in `presets/uart/` (or `presets/eth/` for the
+[Ethernet app](ethernet.md)):
 
-```rust
-use esp32_rust_workshop::config::{Console, LedMode, NodeConfig};
+```toml
+extends = "base"            # every setting, documented, is in base.toml
+name    = "node-A"
+data_period_ms = 1000
+led1    = "peer"
+console = "serial"
 
-const CONFIG: NodeConfig = NodeConfig {
-    name: "node-A",
-    data_period_ms: 1000.0,
-    led1: LedMode::PeerButton,
-    console: Console::Serial,
-    ..NodeConfig::DEFAULT     // everything else: the defaults
-};
-
-esp32_rust_workshop::node_firmware!(CONFIG);
+[pins]
+button = 5                  # plain settings first, then the [sections]
 ```
 
-- `..NodeConfig::DEFAULT` takes every field you don't name from the defaults,
-  so a node file lists only what makes that node different.
-- `node_firmware!` adds `const _: () = CONFIG.check();`: a bad value is a **build
-  error** with a message (`config: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)`),
+- A preset lists only what makes the node different: `extends` and the defaults supply the rest.
+- The build script (`workshop-presets`) reads the preset with the same code as the CLI's `set`, and
+  the compiler checks the result again with `const _: () = CONFIG.check();`: a bad value is a
+  **build error** that names the file and the key
+  (`pins.led1: a pin is reserved (flash, USB, console, RGB LED, on-board audio or BOOT)`),
   not a crash on the board.
+- `PRESET_NODE_A=my-preset cargo run --release --bin node-a` builds another preset;
+  `cargo presets list | show | check` inspects them. Format: `presets/README.md`.
 - The [settings reference](reference/config.md) lists every field, its range and
   its default; it is generated from the code.
 
@@ -111,8 +112,8 @@ Two kinds of fields:
 
 | Kind | Examples | Change it |
 |---|---|---|
-| **Runtime** | periods, LED modes, RGB pattern, `tx_mode`, `console`, `verbose` | in the node file, or live with `set` |
-| **Read-only** | `name`, `pins.*` | node file only: the pins are wired to peripherals at boot, and the name identifies the node (and its saved settings) |
+| **Runtime** | periods, LED modes, RGB pattern, `tx_mode`, `console`, `verbose` | in the preset, or live with `set` |
+| **Read-only** | `name`, `pins.*` (`net.*` on Ethernet) | the preset only: the pins are wired to peripherals at boot, and the name identifies the node (and its saved settings) |
 
 ## Saved settings: what you changed and keep
 
@@ -173,8 +174,8 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 |---|---|
 | try another RGB pattern | `pattern ocean` (CLI) |
 | keep it after a reboot | `save` |
-| make it the default of node A, for everyone | `rgb: RgbConfig { pattern: "ocean", ..NodeConfig::DEFAULT.rgb }` in `src/bin/node_a.rs` |
-| move the button to another GPIO | `pins: Pins { button: 5, ..NodeConfig::DEFAULT.pins }` in the node file (the build checks the pin) |
+| make it the default of node A, for everyone | `[rgb] pattern = "ocean"` in `presets/uart/node-a.toml` |
+| move the button to another GPIO | `[pins] button = 5` in the preset (the build checks the pin) |
 | change the link speed for good | `shared::BAUD_RATE`, then rebuild **both** nodes |
 | change the link speed now | `baud 1M` (both nodes switch together) |
 | read the console through the probe | build with `--features rtt`, then `set console rtt` |

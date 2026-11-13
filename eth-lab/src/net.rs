@@ -6,7 +6,7 @@
 //! hides what the PHY negotiated, so [`SpeedTap`] wraps the driver and records the link speed
 //! and duplex each time the stack asks for the link state, for [`link_state`].
 
-use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_net_driver::{Capabilities, Driver, HardwareAddress, LinkState as DriverLink};
@@ -37,6 +37,11 @@ static RESET: StaticCell<Output<'static>> = StaticCell::new();
 
 /// What the PHY reported at the last link check (0 = no link).
 static MBPS: AtomicU16 = AtomicU16::new(0);
+/// When the PHY was last read for its speed (ms since boot).
+static LAST_READ_MS: AtomicU32 = AtomicU32::new(0);
+/// The speed is re-read at most this often: every read is several slow MDIO transactions, and
+/// the stack asks for the link state on every one of its polls (that is, on every packet).
+const READ_EVERY_MS: u32 = 500;
 static FULL_DUPLEX: AtomicBool = AtomicBool::new(false);
 
 /// The PHY's state as last seen by the stack.
@@ -83,6 +88,12 @@ impl Driver for SpeedTap {
         let state = Driver::link_state(&mut self.0, cx);
         match state {
             DriverLink::Up => {
+                let now = (esp_hal::time::Instant::now().duration_since_epoch().as_millis() & 0xFFFF_FFFF) as u32;
+                let known = MBPS.load(Ordering::Relaxed) != 0;
+                if known && now.wrapping_sub(LAST_READ_MS.load(Ordering::Relaxed)) < READ_EVERY_MS {
+                    return state;
+                }
+                LAST_READ_MS.store(now, Ordering::Relaxed);
                 let phy = self.0.poll_link(None);
                 let mbps = match phy.speed {
                     Speed::_10M => 10,

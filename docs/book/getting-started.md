@@ -140,30 +140,27 @@ command.
 
 ## Configure a node
 
-Each binary is its configuration plus one macro:
+Each node is a **preset**, a small TOML file that lists what makes it different:
 
-```rust title="src/bin/node_a.rs"
-use esp32_rust_workshop::config::{LedMode, NodeConfig};
+```toml title="presets/uart/node-a.toml"
+extends = "base"                # (1)!
+name    = "node-A"              # (2)!
 
-const CONFIG: NodeConfig = NodeConfig {
-    name: "node-A",                 // (1)!
-    data_period_ms: 1000.0,         // (2)!
-    led1: LedMode::PeerButton,      // (3)!
-    ..NodeConfig::DEFAULT           // (4)!
-};
-
-esp32_rust_workshop::node_firmware!(CONFIG); // (5)!
+data_period_ms = 1000           # (3)!
+led1           = "peer"         # (4)!
 ```
 
-1. Sent in every frame; 1 to 12 printable characters, no `,` `*` `$`.
-2. Periods are `f32` milliseconds: `400.0`, `12.5`… The CLI also accepts
-   frequencies (`period 2.5Hz`).
-3. The LED on GPIO20 lights while the **peer's** button is pressed.
-4. Every field not named here keeps its default: a node file only lists what makes
-   that node different.
-5. Expands to the whole firmware: `const _: () = CONFIG.check();` (an invalid value
-   is a **build error**), the app descriptor the bootloader needs, the panic
-   handler and `main`.
+1. Everything not written here comes from `presets/uart/base.toml`, which spells out every
+   setting with its meaning, its range and its default.
+2. Sent in every frame; 1 to 12 printable characters, no `,` `*` `$`.
+3. Periods are milliseconds: `400`, `12.5`… Units work too (`"2.5Hz"`, `"250ms"`).
+4. The LED on GPIO20 lights while the **peer's** button is pressed.
+
+`cargo run --release --bin node-a` turns the preset into the node's `NodeConfig` and **checks it
+at compile time** (an invalid value is a build error naming the file and the key). Another preset:
+`PRESET_NODE_A=my-preset cargo run --release --bin node-a`. The format is described in
+[`presets/README.md`](https://github.com/Lpwlk/esp32-rust-workshop/blob/main/presets/README.md);
+the Ethernet app uses the same files: [Ethernet app](ethernet.md).
 
 Settings both nodes must share (the baud rate) are in `config::shared`. Cargo
 features (`persist`, `watchdog`, `rtt`), saved settings and where to change what:

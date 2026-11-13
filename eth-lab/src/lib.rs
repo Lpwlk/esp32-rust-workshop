@@ -514,7 +514,7 @@ impl Node {
 
     fn receive(&mut self) {
         // Bounded, so a flood can't starve the rest of the loop.
-        for _ in 0..32 {
+        for _ in 0..128 {
             let Some(packet) = self.link.recv() else { break };
             self.handle_line(&packet.data, packet.at_us);
         }

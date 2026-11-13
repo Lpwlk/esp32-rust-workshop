@@ -37,14 +37,17 @@ pub struct Packet {
     pub at_us: u64,
 }
 
-/// Frames waiting to be sent / received. Deep enough for a burst slice (see `BURST_SLICE_US`).
+/// Frames waiting to be sent. Deep enough for a burst slice (see `BURST_SLICE_US`).
 const QUEUE: usize = 64;
+/// Frames waiting for the main loop. TCP hands over a whole segment (about 15 frames) at once, and the
+/// loop can be busy for a few milliseconds (RGB LED, console formatting), so this is deeper.
+const RX_QUEUE: usize = 256;
 /// A frame to send, and when the main loop queued it.
 type Outgoing = (heapless::Vec<u8, MAX_FRAME>, u64);
 static TX: Channel<CriticalSectionRawMutex, Outgoing, QUEUE> = Channel::new();
 /// How long the last frame waited between the main loop and the stack's socket (µs).
 static TX_WAIT_US: AtomicU32 = AtomicU32::new(0);
-static RX: Channel<CriticalSectionRawMutex, Packet, QUEUE> = Channel::new();
+static RX: Channel<CriticalSectionRawMutex, Packet, RX_QUEUE> = Channel::new();
 
 /// TCP: the connection is established (always true for UDP, which has none).
 static CONNECTED: AtomicBool = AtomicBool::new(false);

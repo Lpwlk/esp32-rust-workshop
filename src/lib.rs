@@ -12,7 +12,7 @@
 //! - offers a small CLI on the USB console.
 //!
 //! **Configuration**: see [`config`]. Wire-level settings shared by both nodes are
-//! in [`config::shared`]; everything else is per node, in `src/bin/node_*.rs`.
+//! in [`config::shared`]; everything else is per node, in its preset (`presets/uart/node-*.toml`).
 //!
 //! Default wiring (header J2 labels = GPIO numbers):
 //!
@@ -677,7 +677,7 @@ impl Node {
             }
             Err(SetError::UnknownKey) => term::cli_error(format_args!("unknown key `{key}` (see `config`)")),
             Err(SetError::ReadOnly) => term::cli_error(format_args!(
-                "`{key}` is read-only: change it in src/bin/node_*.rs (or config::shared) and rebuild"
+                "`{key}` is read-only: change it in presets/uart/*.toml (or config::shared) and rebuild"
             )),
             Err(SetError::BadValue(expected)) => term::cli_error(format_args!("`{key}`: expected {expected}")),
             Err(SetError::Invalid(msg)) => term::cli_error(format_args!("{}", msg.trim_start_matches("config: "))),
