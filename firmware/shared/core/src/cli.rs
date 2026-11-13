@@ -62,6 +62,26 @@ pub enum Command {
     Baud(Option<u32>),
     /// `link`: the Ethernet link: PHY state, speed, addresses, transport, counters. Ethernet nodes.
     Link,
+    /// `browse [path]`: lists what the peer has under `path` (default `/`), see [`crate::space`].
+    Browse(Option<String<24>>),
+    /// `read <path>`: reads one of the peer's variables.
+    Read(String<24>),
+    /// `write <path> <value>`: writes one of the peer's variables.
+    Write {
+        /// The variable, e.g. `/leds/1`.
+        path: String<24>,
+        /// The new value, as text.
+        value: String<24>,
+    },
+    /// `watch <path> [interval]`: the peer reports a variable whenever it changes.
+    Watch {
+        /// The variable.
+        path: String<24>,
+        /// How often the peer checks it, ms.
+        interval_ms: u32,
+    },
+    /// `unwatch [path]`: stops watching one variable, or all of them.
+    Unwatch(Option<String<24>>),
     /// `burst [count [rate]]`. Missing values: ask them ([`BurstWizard`]).
     Burst {
         /// Frames in the burst.
@@ -115,6 +135,13 @@ fn split_first(text: &str) -> (&str, &str) {
         Some(i) => (&text[..i], text[i..].trim()),
         None => (text, ""),
     }
+}
+
+/// Default sampling interval of `watch`, ms.
+pub const DEFAULT_WATCH_MS: u32 = 250;
+
+fn path_arg(path: &str) -> Result<String<24>, CliError<'_>> {
+    String::try_from(path).map_err(|_| CliError::TooLong)
 }
 
 fn set<'a>(key: &'a str, value: &'a str) -> Result<Command, CliError<'a>> {
@@ -200,6 +227,40 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
         "tx" => set("tx_mode", rest),
         "period" => set("data_period_ms", rest),
         "link" | "net" => Ok(Command::Link),
+        "browse" | "br" => Ok(Command::Browse(if rest.is_empty() { None } else { Some(path_arg(rest)?) })),
+        "read" | "rd" => match rest {
+            "" => Err(CliError::MissingValue("path")),
+            path => Ok(Command::Read(path_arg(path)?)),
+        },
+        "write" | "wr" => match split_first(rest) {
+            ("", _) => Err(CliError::MissingValue("path")),
+            (_, "") => Err(CliError::MissingValue("value")),
+            (path, value) => Ok(Command::Write {
+                path: path_arg(path)?,
+                value: String::try_from(value).map_err(|_| CliError::TooLong)?,
+            }),
+        },
+        "watch" => match split_first(rest) {
+            ("", _) => Err(CliError::MissingValue("path")),
+            (path, interval) => Ok(Command::Watch {
+                path: path_arg(path)?,
+                interval_ms: if interval.is_empty() {
+                    DEFAULT_WATCH_MS
+                } else {
+                    // 1 ms to 1 h, as a period (250ms, 2s) or a frequency (4Hz).
+                    match crate::units::parse_period_ms(interval) {
+                        Some(ms) if (1.0..=3_600_000.0).contains(&ms) => ms as u32,
+                        _ => {
+                            return Err(CliError::BadNumber {
+                                expected: "a period (250ms, 2s) or a frequency (4Hz)",
+                                got: interval,
+                            });
+                        }
+                    }
+                },
+            }),
+        },
+        "unwatch" => Ok(Command::Unwatch(if rest.is_empty() { None } else { Some(path_arg(rest)?) })),
         "baud" => match rest {
             "" => Ok(Command::Baud(None)),
             rate => Ok(Command::Baud(Some(in_range(
@@ -329,6 +390,8 @@ pub enum Group {
     Shortcuts,
     /// Link speed and traffic tests.
     Link,
+    /// The peer's address space: browse, read, write, watch.
+    Space,
     /// Read-only information.
     Info,
     /// Saved settings and restart.
@@ -568,6 +631,77 @@ pub static COMMANDS: &[CmdHelp] = &[
         only: Some(LinkKind::Net),
     },
     CmdHelp {
+        name: "browse",
+        aliases: &["br"],
+        usage: "browse [path]",
+        summary: "list what the peer has: its address space",
+        details: &[
+            "Asks the peer to describe itself, one node per frame: its LEDs, buttons,",
+            "statistics and settings as a tree. `browse` alone starts at the root `/`;",
+            "`browse /leds` lists one branch. Each line shows the path, the kind of node",
+            "and, for a variable, its type and whether it can be written.",
+        ],
+        examples: &["browse", "browse /leds", "browse /config"],
+        group: Group::Space,
+        only: None,
+    },
+    CmdHelp {
+        name: "read",
+        aliases: &["rd"],
+        usage: "read <path>",
+        summary: "read one of the peer's variables",
+        details: &[
+            "The answer is the value, and a status: Good, or why not (BadNodeIdUnknown,",
+            "BadTypeMismatch for an object...). Paths come from `browse`.",
+        ],
+        examples: &["read /buttons/jumper", "read /stats/lost", "read /node/uptime"],
+        group: Group::Space,
+        only: None,
+    },
+    CmdHelp {
+        name: "write",
+        aliases: &["wr"],
+        usage: "write <path> <value>",
+        summary: "write one of the peer's variables",
+        details: &[
+            "The peer checks the value like its own `set` does, and answers with the value now",
+            "in force: what you wrote, or what stayed if it was refused (BadOutOfRange,",
+            "BadTypeMismatch, BadNotWritable for a read-only variable).",
+        ],
+        examples: &[
+            "write /leds/1 on",
+            "write /leds/2 blink 200",
+            "write /rgb/brightness 80",
+            "write /config/verbose frames",
+        ],
+        group: Group::Space,
+        only: None,
+    },
+    CmdHelp {
+        name: "watch",
+        aliases: &[],
+        usage: "watch <path> [interval]",
+        summary: "the peer reports a variable whenever it changes",
+        details: &[
+            "The peer checks the variable every `interval` (default 250ms; 4Hz, 1s work too) and",
+            "sends it only when it differs from the last one reported. A few variables can be",
+            "watched at once; `unwatch` stops one, or all.",
+        ],
+        examples: &["watch /buttons/jumper", "watch /stats/rx 1s", "watch /node/uptime 500ms"],
+        group: Group::Space,
+        only: None,
+    },
+    CmdHelp {
+        name: "unwatch",
+        aliases: &[],
+        usage: "unwatch [path]",
+        summary: "stop watching one variable, or all of them",
+        details: &[],
+        examples: &["unwatch /buttons/jumper", "unwatch"],
+        group: Group::Space,
+        only: None,
+    },
+    CmdHelp {
         name: "burst",
         aliases: &[],
         usage: "burst [count [rate|max]]",
@@ -688,6 +822,31 @@ mod link_command_tests {
         assert_eq!(parse("baud 1M"), Ok(Command::Baud(Some(1_000_000))));
         assert!(matches!(parse("baud 6M"), Err(CliError::BadNumber { .. })));
         assert!(matches!(parse("baud 300"), Err(CliError::BadNumber { .. })));
+    }
+
+    #[test]
+    fn address_space_commands() {
+        let s = |t: &str| String::<24>::try_from(t).unwrap();
+        assert_eq!(parse("browse"), Ok(Command::Browse(None)));
+        assert_eq!(parse("br /leds"), Ok(Command::Browse(Some(s("/leds")))));
+        assert_eq!(parse("read /buttons/jumper"), Ok(Command::Read(s("/buttons/jumper"))));
+        assert_eq!(parse("rd /node/uptime"), Ok(Command::Read(s("/node/uptime"))));
+        // The value is everything after the path, spaces included.
+        assert_eq!(parse("write /leds/2 blink 200"), Ok(Command::Write { path: s("/leds/2"), value: s("blink 200") }));
+        assert_eq!(
+            parse("watch /buttons/jumper"),
+            Ok(Command::Watch { path: s("/buttons/jumper"), interval_ms: DEFAULT_WATCH_MS })
+        );
+        assert_eq!(parse("watch /stats/rx 1s"), Ok(Command::Watch { path: s("/stats/rx"), interval_ms: 1000 }));
+        assert_eq!(parse("watch /stats/rx 4Hz"), Ok(Command::Watch { path: s("/stats/rx"), interval_ms: 250 }));
+        assert_eq!(parse("unwatch"), Ok(Command::Unwatch(None)));
+        assert_eq!(parse("unwatch /stats/rx"), Ok(Command::Unwatch(Some(s("/stats/rx")))));
+        assert_eq!(parse("read"), Err(CliError::MissingValue("path")));
+        assert_eq!(parse("write /leds/1"), Err(CliError::MissingValue("value")));
+        assert_eq!(parse("write"), Err(CliError::MissingValue("path")));
+        assert!(matches!(parse("watch /x fast"), Err(CliError::BadNumber { .. })));
+        assert!(matches!(parse("watch /x 0"), Err(CliError::BadNumber { .. })));
+        assert_eq!(parse("read /a/very/long/path/that/does/not/fit"), Err(CliError::TooLong));
     }
 
     #[test]

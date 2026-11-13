@@ -4,6 +4,7 @@
 
 UART1, 5000000 baud, 8N1. One frame = one ASCII line, at most 96 bytes with its `\n`.
 The checksum `CS` is the XOR of every byte between `$` and `*`, as 2 hex digits (NMEA style).
+The links, the sequence diagrams and the address space frames (`BRW` ... `VAL`) are in [Protocols](../protocols.md) and [Address space](space.md).
 
 | Frame | Format | Sent |
 |---|---|---|

@@ -143,6 +143,26 @@ pub fn checksum(body: &[u8]) -> u8 {
     body.iter().fold(0, |acc, b| acc ^ b)
 }
 
+/// Checks the envelope of a received line, `$<body>*<CS>`, and returns the body: what is between
+/// `$` and `*`, once its checksum is right. Shared by every frame family ([`parse`], and the
+/// address space frames of [`crate::space`]).
+pub fn verify(line: &str) -> Result<&str, ParseError> {
+    let line = line.trim_end_matches('\r');
+    let rest = line.strip_prefix('$').ok_or(ParseError::Malformed)?;
+    let (body, cs) = rest.rsplit_once('*').ok_or(ParseError::Malformed)?;
+    // Exactly the 2 uppercase hex digits `encode` writes: accepting `6a` for `6A`
+    // would let a corrupted byte (case flip) in the checksum go unnoticed.
+    if cs.len() != 2 || !cs.bytes().all(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(&b)) {
+        return Err(ParseError::Malformed);
+    }
+    let received = u8::from_str_radix(cs, 16).map_err(|_| ParseError::Malformed)?;
+    let expected = checksum(body.as_bytes());
+    if expected != received {
+        return Err(ParseError::Checksum { expected, received });
+    }
+    Ok(body)
+}
+
 /// Encodes a frame into a ready-to-send line terminated by `\n`.
 pub fn encode(frame: &Frame<'_>) -> String<MAX_FRAME> {
     let mut body: String<MAX_FRAME> = String::new();
@@ -179,20 +199,7 @@ pub fn encode(frame: &Frame<'_>) -> String<MAX_FRAME> {
 /// assert_eq!(parse("hello"), Err(ParseError::Malformed));
 /// ```
 pub fn parse(line: &str) -> Result<Frame<'_>, ParseError> {
-    let line = line.trim_end_matches('\r');
-    let rest = line.strip_prefix('$').ok_or(ParseError::Malformed)?;
-    let (body, cs) = rest.rsplit_once('*').ok_or(ParseError::Malformed)?;
-    // Exactly the 2 uppercase hex digits `encode` writes: accepting `6a` for `6A`
-    // would let a corrupted byte (case flip) in the checksum go unnoticed.
-    if cs.len() != 2 || !cs.bytes().all(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(&b)) {
-        return Err(ParseError::Malformed);
-    }
-    let received = u8::from_str_radix(cs, 16).map_err(|_| ParseError::Malformed)?;
-    let expected = checksum(body.as_bytes());
-    if expected != received {
-        return Err(ParseError::Checksum { expected, received });
-    }
-
+    let body = verify(line)?;
     let mut fields = body.split(',');
     let mut next = || fields.next().ok_or(ParseError::BadField);
     let kind = next()?;

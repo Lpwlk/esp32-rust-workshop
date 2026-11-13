@@ -58,6 +58,7 @@ pub fn cli_reference(out: &mut impl Write, kind: LinkKind) -> fmt::Result {
         (Group::Settings, "Settings"),
         (Group::Shortcuts, "Shortcuts"),
         (Group::Link, "Link tests"),
+        (Group::Space, "Address space (the peer)"),
         (Group::Info, "Information"),
         (Group::System, "Saved settings and restart"),
     ] {
@@ -210,7 +211,8 @@ pub fn protocol_reference(out: &mut impl Write, kind: LinkKind) -> fmt::Result {
             out.write_str("`BAU` frames are for the UART link: an Ethernet node ignores them.\n\n")?;
         }
     }
-    out.write_str("The checksum `CS` is the XOR of every byte between `$` and `*`, as 2 hex digits (NMEA style).\n\n")?;
+    out.write_str("The checksum `CS` is the XOR of every byte between `$` and `*`, as 2 hex digits (NMEA style).\n")?;
+    out.write_str("The links, the sequence diagrams and the address space frames (`BRW` ... `VAL`) are in [Protocols](../protocols.md) and [Address space](space.md).\n\n")?;
     out.write_str("| Frame | Format | Sent |\n|---|---|---|\n")?;
     out.write_str("| `DAT` | `$DAT,<node>,<seq>,<t_ms>,<btn>,<events>,<period_us>*CS` | every `data_period_ms` |\n")?;
     out.write_str("| `EVT` | `$EVT,<node>,<seq>,<t_ms>,<RISE\\|FALL>,<key>*CS` | on each debounced button edge |\n")?;
@@ -270,17 +272,105 @@ pub fn protocol_reference(out: &mut impl Write, kind: LinkKind) -> fmt::Result {
     Ok(())
 }
 
+/// `docs/book/reference/space.md`: the UA-lite address space and its frames.
+pub fn space_reference(out: &mut impl Write) -> fmt::Result {
+    use crate::space::{self, CONFIG_BASE, Class, DataType, NODES, NodeId, Status, TAGS, VALUE_LEN};
+
+    write!(out, "{HEADER}# Address space (UA-lite)\n\n")?;
+    out.write_str("A node describes its LEDs, buttons, statistics and settings as a tree; its peer can browse it, read and write\n")?;
+    out.write_str("values and subscribe to changes. The frames are the same checksummed lines as the others, so it works over the UART,\n")?;
+    out.write_str("UDP and TCP. The explanation is in [Protocols](../protocols.md).\n\n")?;
+
+    out.write_str("## Frames\n\n| Frame | Format | Meaning |\n|---|---|---|\n")?;
+    for (tag, format, what) in [
+        ("BRW", "$BRW,<node>,<seq>,<t_ms>,<id>,<index>*CS", "browse: child number `index` (from 0) of node `id`"),
+        (
+            "BRR",
+            "$BRR,<node>,<seq>,<t_ms>,<req>,<id>,<name>,<kind>,<more>*CS",
+            "one child; `id` 65535 = there is none; `more` = 1 if another follows",
+        ),
+        ("RED", "$RED,<node>,<seq>,<t_ms>,<id>*CS", "read a variable"),
+        ("WRT", "$WRT,<node>,<seq>,<t_ms>,<id>,<value>*CS", "write a variable"),
+        (
+            "SUB",
+            "$SUB,<node>,<seq>,<t_ms>,<id>,<interval_ms>*CS",
+            "report a variable when it changes, checked every `interval_ms`; 0 cancels (with id 65535: every subscription)",
+        ),
+        (
+            "VAL",
+            "$VAL,<node>,<seq>,<t_ms>,<req>,<id>,<status>,<value>*CS",
+            "a value or why there is none: the answer to RED, WRT and SUB, then every change",
+        ),
+    ] {
+        debug_assert!(TAGS.contains(&tag));
+        writeln!(out, "| `{tag}` | `{format}` | {what} |")?;
+    }
+    write!(
+        out,
+        "\n`req` is the `seq` of the request an answer belongs to (a notification carries the `seq` of its `SUB`).\n"
+    )?;
+    writeln!(
+        out,
+        "`kind` is three letters: class (`O`bject, `V`ariable), type (`B`ool, `U`32, `T`ext, `-` for an object), access (`R`ead, `W`rite)."
+    )?;
+    writeln!(out, "Values are text of at most {VALUE_LEN} characters without `,` `*` `$`; a bool is `0` or `1`.\n")?;
+
+    out.write_str("## Status codes\n\n| Code | Name | Meaning |\n|---|---|---|\n")?;
+    for code in 0..=255u8 {
+        let Some(status) = Status::from_code(code) else { continue };
+        let what = match status {
+            Status::Good => "done",
+            Status::BadNodeIdUnknown => "no such node",
+            Status::BadNotWritable => "the node can't be written",
+            Status::BadTypeMismatch => "an object has no value, or the value isn't of the node's type",
+            Status::BadOutOfRange => "of the right type, refused by the node's own checks (a range, a name...)",
+            Status::BadTooManySubscriptions => "all subscription slots are taken",
+        };
+        writeln!(out, "| {code} | `{status}` | {what} |")?;
+    }
+
+    out.write_str("\n## The address space\n\nWhat every node has. Ids below 100 are fixed; `/config` has one variable per runtime setting, from id ")?;
+    writeln!(out, "{CONFIG_BASE}.\n")?;
+    out.write_str("| Path | Id | Kind | Type | Access | What |\n|---|---|---|---|---|---|\n")?;
+    let mut row = |id: NodeId| -> fmt::Result {
+        let Some(n) = space::describe(id) else { return Ok(()) };
+        let class = if n.class == Class::Object { "object" } else { "variable" };
+        let ty = match n.ty {
+            DataType::None => "",
+            DataType::Bool => "bool",
+            DataType::U32 => "u32",
+            DataType::Text => "text",
+        };
+        writeln!(
+            out,
+            "| `{}` | {} | {class} | {ty} | {} | {} |",
+            space::path_string(id),
+            n.id,
+            if n.writable { "read-write" } else { "read" },
+            n.doc
+        )
+    };
+    for n in &NODES {
+        row(n.id)?;
+    }
+    for i in 0..crate::config::KEYS.len() {
+        row(CONFIG_BASE + i as NodeId)?;
+    }
+    Ok(())
+}
+
 /// Writes one reference page.
 pub type Generator = fn(&mut dyn Write) -> fmt::Result;
 
 /// Every generated page: `(file name in docs/book/reference, generator)`. The `eth-*` pages
 /// are the Ethernet app's versions of the UART ones.
-pub const PAGES: [(&str, Generator); 9] = [
+pub const PAGES: [(&str, Generator); 10] = [
     ("cli.md", |o| cli_reference(&mut Dyn(o), LinkKind::Uart)),
     ("config.md", |o| config_reference(&mut Dyn(o), LinkKind::Uart)),
     ("pins.md", |o| pins_reference(&mut Dyn(o), LinkKind::Uart)),
     ("patterns.md", |o| patterns_reference(&mut Dyn(o))),
     ("protocol.md", |o| protocol_reference(&mut Dyn(o), LinkKind::Uart)),
+    ("space.md", |o| space_reference(&mut Dyn(o))),
     ("eth-cli.md", |o| cli_reference(&mut Dyn(o), LinkKind::Net)),
     ("eth-config.md", |o| config_reference(&mut Dyn(o), LinkKind::Net)),
     ("eth-pins.md", |o| pins_reference(&mut Dyn(o), LinkKind::Net)),

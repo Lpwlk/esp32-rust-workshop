@@ -229,6 +229,7 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 | [Getting started](https://lpwlk.github.io/esp32-rust-workshop/getting-started/) | tools, wiring, flashing, first commands |
 | [The console](https://lpwlk.github.io/esp32-rust-workshop/console/) | every part of the output, the CLI, link tests, RTT |
 | [Ethernet app](https://lpwlk.github.io/esp32-rust-workshop/ethernet/) | the RJ45 link: design, measurements, what is still open |
+| [Protocols](https://lpwlk.github.io/esp32-rust-workshop/protocols/) | the frames, the three links, and UA-lite: an OPC UA-style address space of LEDs and buttons |
 | [Presets](https://lpwlk.github.io/esp32-rust-workshop/presets/) | the TOML format of a node's settings |
 | [Examples](https://lpwlk.github.io/esp32-rust-workshop/examples/) | runnable code: frames, settings, debouncing, CLI |
 | [Firmware walkthrough](https://lpwlk.github.io/esp32-rust-workshop/firmware/) | the UART app's code explained: boot, main loop, interrupt, shared state, flash, RMT |

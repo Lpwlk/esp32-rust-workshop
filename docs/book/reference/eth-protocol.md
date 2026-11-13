@@ -8,6 +8,7 @@ a lost frame shows as a gap in `seq`. With `tcp`, the lines are the stream of on
 `BAU` frames are for the UART link: an Ethernet node ignores them.
 
 The checksum `CS` is the XOR of every byte between `$` and `*`, as 2 hex digits (NMEA style).
+The links, the sequence diagrams and the address space frames (`BRW` ... `VAL`) are in [Protocols](../protocols.md) and [Address space](space.md).
 
 | Frame | Format | Sent |
 |---|---|---|

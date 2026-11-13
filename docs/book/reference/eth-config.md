@@ -13,7 +13,7 @@ Invalid values fail the build; at runtime `set` applies the same checks.
 | `status_period_ms` | period of the stats line in the console | 100-3600000 ms, or a frequency | `10000` |
 | `link_timeout_periods` | link DOWN after this many peer periods without a frame | 2-100 | `3` |
 | `debounce_ms` | button: line must be stable this long before an edge counts, ms | 1-1000 | `30` |
-| `lockout_ms` | button: changes ignored this long after an accepted edge, ms | 0-5000 | `500` |
+| `lockout_ms` | button: changes ignored this long after an accepted edge, ms | 0-5000 | `1000` |
 | `rgb.pattern` | RGB LED fade pattern | name or number, see `list` | `viridis` |
 | `rgb.freq_hz` | RGB LED refresh rate | 1-200 Hz, or a period: 20ms | `50` |
 | `rgb.cycle_ms` | duration of one fade loop (lower = faster) | 200-60000 ms, or a frequency | `6000` |

@@ -19,6 +19,7 @@
 //! | [`protocol`] | frame format on the UART link: encode / parse |
 //! | [`line`](mod@line) | splitting the received byte stream into lines |
 //! | [`seq`] | lost-frame and peer-restart detection |
+//! | [`space`] | UA-lite: an address space of LEDs, buttons, statistics and settings: browse, read, write, subscribe |
 //! | [`config`] | node configuration, its validation and the CLI `set` |
 //! | [`cli`] | CLI command parser and help table |
 //! | [`editor`] | CLI line editor: cursor, history |
@@ -51,6 +52,7 @@ pub mod persist;
 pub mod protocol;
 pub mod rtt;
 pub mod seq;
+pub mod space;
 #[doc(hidden)]
 pub mod test_vectors;
 pub mod units;

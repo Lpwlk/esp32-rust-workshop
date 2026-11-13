@@ -745,10 +745,11 @@ pub fn cli_help(topic: Option<&str>, cfg: &NodeConfig, defaults: &NodeConfig) {
     }
 }
 
-const HELP_GROUPS: [(cli::Group, &str); 5] = [
+const HELP_GROUPS: [(cli::Group, &str); 6] = [
     (cli::Group::Settings, "settings"),
     (cli::Group::Shortcuts, "shortcuts"),
     (cli::Group::Link, "link tests"),
+    (cli::Group::Space, "address space"),
     (cli::Group::Info, "info"),
     (cli::Group::System, "system"),
 ];
@@ -919,5 +920,58 @@ pub fn cli_status(led: &fx::Settings, output: crate::led::RGB8, leds: &ExtLeds) 
     );
     for i in 0..2 {
         out!("  {BOLD}LED{}{RST} {GRAY}GPIO{}{RST}  {}", i + 1, leds.pins[i], leds.modes[i]);
+    }
+}
+
+// --- Address space (UA-lite) ----------------------------------------------------------------------
+
+/// A line about the address space protocol: `rx` when it is the peer asking (or answering), else us.
+pub fn space_event(now_ms: u64, rx: bool, args: core::fmt::Arguments<'_>) {
+    let (s, ms) = stamp(now_ms);
+    let dir = if rx { "\x1b[32mRX ◀\x1b[0m" } else { "\x1b[36mTX ▶\x1b[0m" };
+    out!("{GRAY}{s:>6}.{ms:03}{RST} {dir} {LNK_BADGE} UA {RST} {args}");
+}
+
+/// What a request from the peer says, for the console.
+pub struct SpaceRequest<'a>(pub &'a str, pub &'a workshop_core::space::Body);
+
+impl core::fmt::Display for SpaceRequest<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use workshop_core::space::{Body, path_string};
+        let who = self.0;
+        match self.1 {
+            Body::Browse { id, index } => write!(f, "{YELLOW}{who}{RST} browses {} #{index}", path_string(*id)),
+            Body::Read { id } => write!(f, "{YELLOW}{who}{RST} reads {}", path_string(*id)),
+            Body::Write { id, value } => {
+                write!(f, "{YELLOW}{who}{RST} writes {} = {BOLD}{value}{RST}", path_string(*id))
+            }
+            Body::Subscribe { id, interval_ms: 0 } if *id == workshop_core::space::NONE => {
+                write!(f, "{YELLOW}{who}{RST} stops watching everything")
+            }
+            Body::Subscribe { id, interval_ms: 0 } => {
+                write!(f, "{YELLOW}{who}{RST} stops watching {}", path_string(*id))
+            }
+            Body::Subscribe { id, interval_ms } => {
+                write!(f, "{YELLOW}{who}{RST} watches {} every {}", path_string(*id), Period(*interval_ms as f32))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// One node of a browse, as a list line.
+pub fn space_node(path: &str, kind: &str, id: workshop_core::space::NodeId) {
+    out!("    {CYAN}{path:<28}{RST} {GRAY}{kind}  (id {id}){RST}");
+}
+
+/// A value from the peer: the answer to a read, a write or a subscribe, or a notification.
+pub fn space_value(path: &str, status: workshop_core::space::Status, value: &str) {
+    if status == workshop_core::space::Status::Good {
+        out!("    {CYAN}{path:<28}{RST} = {BOLD}{value}{RST}");
+    } else if value.is_empty() {
+        out!("    {CYAN}{path:<28}{RST} {RED}✗ {status}{RST}");
+    } else {
+        // A refused write: the status, and the value that stayed.
+        out!("    {CYAN}{path:<28}{RST} {RED}✗ {status}{RST} {GRAY}(still {value}){RST}");
     }
 }

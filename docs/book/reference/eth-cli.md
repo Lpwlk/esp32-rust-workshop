@@ -254,6 +254,90 @@ period 12.5
 period 4Hz
 ```
 
+## Address space (the peer)
+
+| Command | Aliases | Summary |
+|---|---|---|
+| `browse [path]` | `br` | list what the peer has: its address space |
+| `read <path>` | `rd` | read one of the peer's variables |
+| `write <path> <value>` | `wr` | write one of the peer's variables |
+| `watch <path> [interval]` |  | the peer reports a variable whenever it changes |
+| `unwatch [path]` |  | stop watching one variable, or all of them |
+
+### `browse`
+
+```text
+Asks the peer to describe itself, one node per frame: its LEDs, buttons,
+statistics and settings as a tree. `browse` alone starts at the root `/`;
+`browse /leds` lists one branch. Each line shows the path, the kind of node
+and, for a variable, its type and whether it can be written.
+```
+
+Examples:
+
+```text
+browse
+browse /leds
+browse /config
+```
+
+### `read`
+
+```text
+The answer is the value, and a status: Good, or why not (BadNodeIdUnknown,
+BadTypeMismatch for an object...). Paths come from `browse`.
+```
+
+Examples:
+
+```text
+read /buttons/jumper
+read /stats/lost
+read /node/uptime
+```
+
+### `write`
+
+```text
+The peer checks the value like its own `set` does, and answers with the value now
+in force: what you wrote, or what stayed if it was refused (BadOutOfRange,
+BadTypeMismatch, BadNotWritable for a read-only variable).
+```
+
+Examples:
+
+```text
+write /leds/1 on
+write /leds/2 blink 200
+write /rgb/brightness 80
+write /config/verbose frames
+```
+
+### `watch`
+
+```text
+The peer checks the variable every `interval` (default 250ms; 4Hz, 1s work too) and
+sends it only when it differs from the last one reported. A few variables can be
+watched at once; `unwatch` stops one, or all.
+```
+
+Examples:
+
+```text
+watch /buttons/jumper
+watch /stats/rx 1s
+watch /node/uptime 500ms
+```
+
+### `unwatch`
+
+Examples:
+
+```text
+unwatch /buttons/jumper
+unwatch
+```
+
 ## Information
 
 | Command | Aliases | Summary |

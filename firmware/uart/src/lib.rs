@@ -43,7 +43,7 @@ pub mod trng;
 
 // Hardware-independent logic, tested on the host (`cargo test-host`). Re-exported
 // so the rest of the firmware and the node configs keep using `crate::config`, etc.
-pub use workshop_core::{baud, burst, config, line, persist, protocol, rtt, seq, units, wire};
+pub use workshop_core::{baud, burst, config, line, persist, protocol, rtt, seq, space, units, wire};
 
 use esp_hal::{
     clock::CpuClock,
@@ -63,6 +63,7 @@ use crate::{
     protocol::{Edge, Frame, MAX_FRAME, Payload},
     rtt::RttTracker,
     seq::SeqCheck,
+    space::Subscriptions,
     term::Stats,
     wire::{DatClock, DatDelta, Dir},
 };
@@ -256,6 +257,8 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
         dat_clock: DatClock::new(),
         last_status: Instant::now(),
         seen_peer_up: None,
+        subs: Subscriptions::new(),
+        browse: None,
         baud: BaudControl::new(shared::BAUD_RATE),
         tx_hold_until_us: 0,
         rtt: RttTracker::new(),
@@ -299,6 +302,10 @@ struct Node {
     last_status: Instant,
     /// Whether the peer was answering at the last check, to print a line when that changes.
     seen_peer_up: Option<bool>,
+    /// What the peer is subscribed to here (address space).
+    subs: Subscriptions<4>,
+    /// A `browse` in progress: the node being listed and the next child to ask for.
+    browse: Option<(space::NodeId, u16)>,
     baud: BaudControl,
     /// No transmission before this time (just switched speed on the peer's request).
     tx_hold_until_us: u64,
@@ -364,6 +371,7 @@ impl Node {
         self.receive();
         self.timers();
         self.watch_peer();
+        self.poll_subscriptions();
         // --8<-- [end:step]
 
         // --- Status line ----------------------------------------------------------
@@ -478,6 +486,9 @@ impl Node {
     }
 
     fn handle_line(&mut self, line: &[u8], wire_end_us: u64) {
+        if core::str::from_utf8(line).is_ok_and(space::is_space) {
+            return self.handle_space(line);
+        }
         let parsed = core::str::from_utf8(line).map_err(|_| protocol::ParseError::Malformed).and_then(protocol::parse);
         let frame = match parsed {
             Ok(frame) => frame,
@@ -567,6 +578,175 @@ impl Node {
             Some(BaudAction::Confirmed(baud)) => {
                 term::link_event(now_ms(), format_args!("✓ frames arrive at {}: switch confirmed", term::Baud(baud)));
             }
+            _ => {}
+        }
+    }
+
+    // --- Address space (UA-lite, see `workshop_core::space`) -------------------------------------
+
+    /// Sends an address space frame with the next sequence number.
+    fn send_space(&mut self, body: space::Body) {
+        let frame = space::Frame { node: self.cfg.name, seq: self.seq, t_ms: now_ms() as u32, body };
+        let line = space::encode(&frame);
+        match self.link.send(line.as_bytes()) {
+            Ok(_) => {
+                self.stats.tx += 1;
+                self.leds.on_tx();
+            }
+            Err(_) => term::uart_error(now_ms(), "TX error"),
+        }
+        self.seq = self.seq.wrapping_add(1);
+    }
+
+    /// Reports the subscribed variables that changed: called every loop, it does nothing while
+    /// nobody watches anything.
+    fn poll_subscriptions(&mut self) {
+        if self.subs.is_empty() {
+            return;
+        }
+        let mut node = space::NodeSpace {
+            uptime_ms: now_ms() as u32,
+            jumper: self.button.is_pressed(),
+            boot: self.boot.is_pressed(),
+            tx: self.stats.tx,
+            rx: self.stats.rx,
+            lost: self.stats.lost,
+            cfg: &mut self.cfg,
+        };
+        if let Some(body) = self.subs.poll(now_ms() as u32, &mut node) {
+            self.send_space(body);
+        }
+    }
+
+    /// A line of the address space protocol from the peer: a request to answer, or the answer to
+    /// one of ours.
+    fn handle_space(&mut self, line: &[u8]) {
+        use space::Body;
+        let parsed = core::str::from_utf8(line).map_err(|_| protocol::ParseError::Malformed).and_then(space::parse);
+        let frame = match parsed {
+            Ok(frame) => frame,
+            Err(e) => {
+                self.stats.bad += 1;
+                term::rx_error(now_ms(), e, line);
+                return;
+            }
+        };
+        // Same bookkeeping as any other frame: the peer is alive, and its sequence has no gap.
+        self.peer.last_rx = Some(Instant::now());
+        self.leds.on_rx();
+        self.stats.rx += 1;
+        match seq::check(self.peer.seq, frame.seq) {
+            SeqCheck::Lost(missing) => {
+                self.stats.lost += missing;
+                term::lost(now_ms(), missing);
+            }
+            SeqCheck::Restarted => term::peer_restarted(now_ms(), frame.node),
+            SeqCheck::First | SeqCheck::InOrder => {}
+        }
+        self.peer.seq = Some(frame.seq);
+
+        match &frame.body {
+            Body::Browse { .. } | Body::Read { .. } | Body::Write { .. } | Body::Subscribe { .. } => {
+                // Writes and subscriptions change something here: always say so. Browsing and
+                // reading only from `verbose frames`.
+                let loud = matches!(frame.body, Body::Write { .. } | Body::Subscribe { .. });
+                if loud || self.cfg.verbose >= Verbosity::Frames {
+                    term::space_event(now_ms(), true, format_args!("{}", term::SpaceRequest(frame.node, &frame.body)));
+                }
+                let reply = {
+                    let mut node = space::NodeSpace {
+                        uptime_ms: now_ms() as u32,
+                        jumper: self.button.is_pressed(),
+                        boot: self.boot.is_pressed(),
+                        tx: self.stats.tx,
+                        rx: self.stats.rx,
+                        lost: self.stats.lost,
+                        cfg: &mut self.cfg,
+                    };
+                    space::serve(&frame, &mut node, &mut self.subs, now_ms() as u32)
+                };
+                if matches!(frame.body, Body::Write { .. }) {
+                    // A written setting takes effect now, like `set`.
+                    self.sync();
+                }
+                if let Some(body) = reply {
+                    self.send_space(body);
+                }
+            }
+            Body::BrowseResult { id, name, kind, more, .. } => {
+                let Some((parent, index)) = self.browse else { return };
+                if *id == space::NONE {
+                    if index == 0 {
+                        term::space_event(
+                            now_ms(),
+                            true,
+                            format_args!("{} has no children", space::path_string(parent)),
+                        );
+                    }
+                    self.browse = None;
+                    return;
+                }
+                let path = space::path_string(*id);
+                term::space_node(if path == "?" { name } else { &path }, &space::describe_kind(*kind), *id);
+                if *more {
+                    self.browse = Some((parent, index + 1));
+                    self.send_space(Body::Browse { id: parent, index: index + 1 });
+                } else {
+                    self.browse = None;
+                }
+            }
+            Body::Value { id, status, value, .. } => {
+                term::space_value(&space::path_string(*id), *status, value);
+            }
+        }
+    }
+
+    /// The CLI's address space commands: they are requests to the peer, whose answers print as
+    /// they arrive.
+    fn ask_peer(&mut self, command: cli::Command) {
+        use cli::Command;
+        use space::Body;
+        let resolve = |path: &str| {
+            let id = space::find(path);
+            if id.is_none() {
+                term::cli_error(format_args!("unknown path `{path}` (`browse` lists them)"));
+            }
+            id
+        };
+        match command {
+            Command::Browse(path) => {
+                let path = path.as_deref().unwrap_or("/");
+                if let Some(id) = resolve(path) {
+                    self.browse = Some((id, 0));
+                    term::space_event(now_ms(), false, format_args!("browse {}", space::path_string(id)));
+                    self.send_space(Body::Browse { id, index: 0 });
+                }
+            }
+            Command::Read(path) => {
+                if let Some(id) = resolve(&path) {
+                    self.send_space(Body::Read { id });
+                }
+            }
+            Command::Write { path, value } => {
+                if let Some(id) = resolve(&path) {
+                    if space::text_ok(&value) {
+                        self.send_space(Body::Write { id, value: value.as_str().try_into().unwrap_or_default() });
+                    } else {
+                        term::cli_error(format_args!("a value can't contain `,` `*` or `$`"));
+                    }
+                }
+            }
+            Command::Watch { path, interval_ms } => {
+                if let Some(id) = resolve(&path) {
+                    self.send_space(Body::Subscribe { id, interval_ms });
+                }
+            }
+            Command::Unwatch(Some(path)) => {
+                if let Some(id) = resolve(&path) {
+                    self.send_space(Body::Subscribe { id, interval_ms: 0 });
+                }
+            }
+            Command::Unwatch(None) => self.send_space(Body::Subscribe { id: space::NONE, interval_ms: 0 }),
             _ => {}
         }
     }
@@ -776,6 +956,11 @@ impl Node {
                 Err(BaudError::Same) => term::cli_error(format_args!("the link is already at {}", term::Baud(baud))),
                 Err(BaudError::Busy) => term::cli_error(format_args!("a speed change is already in progress")),
             },
+            Command::Browse(_)
+            | Command::Read(_)
+            | Command::Write { .. }
+            | Command::Watch { .. }
+            | Command::Unwatch(_) => self.ask_peer(cmd),
             Command::Burst { count: None, rate_hz: None } => self.cli.start_burst_wizard(self.cfg.burst),
             Command::Burst { count, rate_hz } => {
                 self.start_burst(count.unwrap_or(self.cfg.burst.count), rate_hz.unwrap_or(self.cfg.burst.rate_hz));

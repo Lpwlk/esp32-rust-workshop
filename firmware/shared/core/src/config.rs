@@ -367,7 +367,7 @@ impl NodeConfig {
     pub const DEFAULT_NET: NodeConfig = NodeConfig {
         link: Link::Net(NetLink::DEFAULT),
         // A longer lockout than UART's: a jumper wire pushed into the breadboard bounces for a while.
-        lockout_ms: 500,
+        lockout_ms: 1000,
         ..NodeConfig::DEFAULT
     };
 
