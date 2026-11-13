@@ -292,6 +292,7 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
         seen_peer_up: None,
         subs: Subscriptions::new(),
         browse: None,
+        help: None,
         rtt: RttTracker::new(),
         burst_id: 0,
         burst_tx: None,
@@ -352,6 +353,8 @@ struct Node {
     subs: Subscriptions<4>,
     /// A `browse` in progress: the node being listed and the next child to ask for.
     browse: Option<(space::NodeId, u16)>,
+    /// The `help` overview being printed, a section at a time.
+    help: Option<cli::HelpPager>,
     rtt: RttTracker,
     burst_id: u32,
     burst_tx: Option<BurstTx>,
@@ -424,6 +427,7 @@ impl Node {
         self.timers();
         self.watch_peer();
         self.poll_subscriptions();
+        self.poll_help();
         self.watch_network();
 
         // --- Status line ----------------------------------------------------------
@@ -639,6 +643,17 @@ impl Node {
 
     /// Reports the subscribed variables that changed: called every loop, it does nothing while
     /// nobody watches anything.
+    /// Prints the next section of the `help` overview when its pause is over.
+    fn poll_help(&mut self) {
+        let Some(pager) = self.help.as_mut() else { return };
+        if let Some(step) = pager.poll(now_ms() as u32) {
+            term::help_step(step);
+        }
+        if pager.is_done() {
+            self.help = None;
+        }
+    }
+
     fn poll_subscriptions(&mut self) {
         if self.subs.is_empty() {
             return;
@@ -929,7 +944,8 @@ impl Node {
         use config::Key;
 
         match cmd {
-            Command::Help(topic) => term::cli_help(topic.as_deref(), &self.cfg, self.defaults),
+            Command::Help(None) => self.help = Some(cli::HelpPager::new(now_ms() as u32, term::HELP_GROUPS.len())),
+            Command::Help(Some(topic)) => term::cli_help(&topic, &self.cfg, self.defaults),
             Command::List => term::cli_list(self.fx.settings.pattern),
             Command::Status => term::cli_status(&self.fx.settings, self.fx.last, &self.leds),
             Command::Config => term::cli_config(&self.cfg, self.defaults),

@@ -789,6 +789,64 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
 ];
 
+/// Pause between the sections of `help`, in ms: the full list is long, and arriving in one block it
+/// scrolls past before it can be read.
+pub const HELP_PAUSE_MS: u32 = 150;
+
+/// One piece of the `help` overview, to print when [`HelpPager::poll`] returns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HelpStep {
+    /// The `n`th section (settings, shortcuts, ...), in the order of the app's list of sections.
+    Section(usize),
+    /// The closing hints.
+    Footer,
+}
+
+/// Hands out the pieces of the `help` overview one at a time, [`HELP_PAUSE_MS`] apart, without ever
+/// blocking: the main loop calls [`poll`](Self::poll) on each pass and prints what it returns. (A
+/// delay inside the command would stop the frames and, on Ethernet, the network task.)
+///
+/// ```
+/// use workshop_core::cli::{HelpPager, HelpStep};
+///
+/// let mut pager = HelpPager::new(1_000, 2);
+/// assert_eq!(pager.poll(1_000), Some(HelpStep::Section(0)));  // at once
+/// assert_eq!(pager.poll(1_010), None);                        // then a pause
+/// assert_eq!(pager.poll(1_150), Some(HelpStep::Section(1)));
+/// assert_eq!(pager.poll(1_300), Some(HelpStep::Footer));
+/// assert_eq!(pager.poll(9_999), None);                        // and it's over
+/// assert!(pager.is_done());
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HelpPager {
+    next: usize,
+    sections: usize,
+    due_ms: u32,
+}
+
+impl HelpPager {
+    /// A pager for `sections` sections plus the footer; the first piece is due at `now_ms`.
+    pub const fn new(now_ms: u32, sections: usize) -> Self {
+        Self { next: 0, sections, due_ms: now_ms }
+    }
+
+    /// Whether everything was handed out.
+    pub const fn is_done(&self) -> bool {
+        self.next > self.sections
+    }
+
+    /// The next piece, if its time has come (`now_ms` is the node's uptime, wrapping is fine).
+    pub fn poll(&mut self, now_ms: u32) -> Option<HelpStep> {
+        if self.is_done() || now_ms.wrapping_sub(self.due_ms) >= 1 << 31 {
+            return None;
+        }
+        let step = if self.next < self.sections { HelpStep::Section(self.next) } else { HelpStep::Footer };
+        self.next += 1;
+        self.due_ms = now_ms.wrapping_add(HELP_PAUSE_MS);
+        Some(step)
+    }
+}
+
 /// Finds a command by name or alias.
 pub fn find_help(name: &str) -> Option<&'static CmdHelp> {
     COMMANDS.iter().find(|c| c.name == name || c.aliases.contains(&name))
@@ -925,6 +983,25 @@ mod tests {
         assert_eq!(msg("set abcdefghijklmnopqrstuvwxyz 1"), "argument too long");
         // Help never fails: an over-long topic shows the general help.
         assert_eq!(parse("help abcdefghijklmnopqrstuvwxyz"), Ok(Command::Help(None)));
+    }
+
+    #[test]
+    fn help_pager_spaces_the_sections_and_ends() {
+        let mut p = HelpPager::new(u32::MAX - 10, 3); // across the wrap of the clock
+        let mut now = u32::MAX - 10;
+        let mut steps = std::vec::Vec::new();
+        for _ in 0..100 {
+            if let Some(s) = p.poll(now) {
+                steps.push((now, s));
+            }
+            now = now.wrapping_add(10);
+        }
+        let kinds: std::vec::Vec<_> = steps.iter().map(|(_, s)| *s).collect();
+        assert_eq!(kinds, [HelpStep::Section(0), HelpStep::Section(1), HelpStep::Section(2), HelpStep::Footer]);
+        for pair in steps.windows(2) {
+            assert!(pair[1].0.wrapping_sub(pair[0].0) >= HELP_PAUSE_MS);
+        }
+        assert!(p.is_done());
     }
 
     /// Every example printed by `help <command>` is a valid command, and every

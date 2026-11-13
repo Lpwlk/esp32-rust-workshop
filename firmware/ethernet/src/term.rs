@@ -806,24 +806,19 @@ pub fn cli_ok(args: core::fmt::Arguments<'_>) {
 
 /// `help` (no topic): every command, grouped, from the table in `cli`.
 /// `help <topic>`: details on a command, or on a setting key.
-pub fn cli_help(topic: Option<&str>, cfg: &NodeConfig, defaults: &NodeConfig) {
-    match topic {
-        None => help_overview(),
-        Some(t) => {
-            if let Some(c) = cli::find_help(t) {
-                help_command(c);
-            } else if let Some(k) = config::Key::from_name(t) {
-                help_key(t, k, cfg, defaults);
-            } else if cfg.read_only().contains(&t) {
-                out!("  {BOLD}{t}{RST} {GRAY}—{RST} read-only: set in firmware/ethernet/presets/*.toml, then rebuild");
-            } else {
-                cli_error(format_args!("no help for '{t}' (try `help`)"));
-            }
-        }
+pub fn cli_help(t: &str, cfg: &NodeConfig, defaults: &NodeConfig) {
+    if let Some(c) = cli::find_help(t) {
+        help_command(c);
+    } else if let Some(k) = config::Key::from_name(t) {
+        help_key(t, k, cfg, defaults);
+    } else if cfg.read_only().contains(&t) {
+        out!("  {BOLD}{t}{RST} {GRAY}—{RST} read-only: set in firmware/ethernet/presets/*.toml, then rebuild");
+    } else {
+        cli_error(format_args!("no help for '{t}' (try `help`)"));
     }
 }
 
-const HELP_GROUPS: [(cli::Group, &str); 6] = [
+pub const HELP_GROUPS: [(cli::Group, &str); 6] = [
     (cli::Group::Settings, "settings"),
     (cli::Group::Shortcuts, "shortcuts"),
     (cli::Group::Link, "link tests"),
@@ -832,8 +827,21 @@ const HELP_GROUPS: [(cli::Group, &str); 6] = [
     (cli::Group::System, "system"),
 ];
 
-fn help_overview() {
-    // Usage column as wide as the longest usage, so summaries always line up.
+/// One piece of the `help` overview: a section of commands, or the closing hints (the main loop
+/// prints them a pause apart, see `cli::HelpPager`).
+pub fn help_step(step: cli::HelpStep) {
+    match step {
+        cli::HelpStep::Section(n) => help_section(n),
+        cli::HelpStep::Footer => {
+            out!("  {GRAY}`help <command>` or `help <key>` for details{RST}");
+            out!("  {GRAY}← → edit · ↑ ↓ history · Home/End · Ctrl+U clears · Ctrl+C quits espflash{RST}");
+        }
+    }
+}
+
+fn help_section(n: usize) {
+    let Some(&(group, title)) = HELP_GROUPS.get(n) else { return };
+    // Usage column as wide as the longest usage of any section, so summaries line up across them.
     let usage_w = cli::COMMANDS
         .iter()
         .filter(|c| c.on(config::LinkKind::Net))
@@ -841,14 +849,10 @@ fn help_overview() {
         .max()
         .unwrap_or(0)
         + 2;
-    for (group, title) in HELP_GROUPS {
-        out!("  {BOLD}{title}{RST}");
-        for c in cli::COMMANDS.iter().filter(|c| c.group == group && c.on(config::LinkKind::Net)) {
-            out!("    {CYAN}{:<usage_w$}{RST}{GRAY}{}{RST}", c.usage, c.summary);
-        }
+    out!("  {BOLD}{title}{RST}");
+    for c in cli::COMMANDS.iter().filter(|c| c.group == group && c.on(config::LinkKind::Net)) {
+        out!("    {CYAN}{:<usage_w$}{RST}{GRAY}{}{RST}", c.usage, c.summary);
     }
-    out!("  {GRAY}`help <command>` or `help <key>` for details{RST}");
-    out!("  {GRAY}← → edit · ↑ ↓ history · Home/End · Ctrl+U clears · Ctrl+C quits espflash{RST}");
 }
 
 /// Width of the label column in `help <command>` / `help <key>`.
