@@ -4,6 +4,7 @@
 #
 #   zensical serve     local preview at http://localhost:8000 (rebuilds on change)
 #   zensical build     static site in docs/site/
+# (from docs/; from the repository root add `-f docs/zensical.toml`, or use `python3 scripts/dev.py docs serve`)
 #
 # Layout:
 #   docs/book/              pages (docs_dir)
@@ -176,7 +177,7 @@ pygments_lang_class = true
 # Code shown in the docs is included from real, compiled files
 # (`--8<-- "firmware/shared/core/examples/frames.rs:encode"`): it can't drift.
 [project.markdown_extensions.pymdownx.snippets]
-base_path = ["."]   # the working directory, i.e. the repository root: includes are written as firmware/uart/src/...
+base_path = [".", ".."]   # the repository root, whether zensical runs from it or from docs/: includes are written as firmware/uart/src/...
 check_paths = true
 dedent_subsections = true
 [project.markdown_extensions.pymdownx.superfences]
