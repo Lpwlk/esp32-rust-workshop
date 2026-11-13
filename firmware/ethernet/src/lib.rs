@@ -301,11 +301,14 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
         seen_connected: link.connected(),
         seen_dropped: 0,
         loops: 0,
+        loop_max_us: 0,
         // Last, so the boot itself is never cut short.
         watchdog: Watchdog::start(p.TIMG0),
     };
     loop {
+        let started = Instant::now();
         node.step();
+        node.loop_max_us = node.loop_max_us.max(started.elapsed().as_micros() as u32);
         // Lets the network tasks run: they and this loop share the executor.
         embassy_futures::yield_now().await;
     }
@@ -362,6 +365,8 @@ struct Node {
     seen_dropped: u32,
     /// Main loop iterations since the last status line (shown in verbose mode).
     loops: u32,
+    /// Duration of the slowest main loop iteration since the last status line, µs.
+    loop_max_us: u32,
 }
 
 impl Node {
@@ -422,7 +427,14 @@ impl Node {
             if self.cfg.verbose >= Verbosity::Wire {
                 let per_s = u64::from(self.loops) * 1000 / self.cfg.status_period_ms.max(1.0) as u64;
                 self.loops = 0;
-                term::link_counters(&self.link.counters(), net::link_state(), self.peer.period_us, per_s);
+                term::link_counters(
+                    &self.link.counters(),
+                    net::link_state(),
+                    self.peer.period_us,
+                    per_s,
+                    self.loop_max_us,
+                );
+                self.loop_max_us = 0;
             }
         }
     }

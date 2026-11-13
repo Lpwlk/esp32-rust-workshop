@@ -39,7 +39,7 @@ link_timeout_periods = 3
 # Range: 1-1000 ms.
 debounce_ms = 30
 # Range: 0-5000 ms.
-lockout_ms = 500
+lockout_ms = 1000
 
 # ---------------------------------------------------------------------------------------------
 # What the two breadboard LEDs show. One of:

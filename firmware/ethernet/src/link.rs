@@ -47,6 +47,9 @@ type Outgoing = (heapless::Vec<u8, MAX_FRAME>, u64);
 static TX: Channel<CriticalSectionRawMutex, Outgoing, QUEUE> = Channel::new();
 /// How long the last frame waited between the main loop and the stack's socket (µs).
 static TX_WAIT_US: AtomicU32 = AtomicU32::new(0);
+/// Of which: from the main loop queuing it to the network task picking it up (µs). The rest is
+/// `send_to` itself. A large value here means the executor was slow to run the task.
+static TX_PICKUP_US: AtomicU32 = AtomicU32::new(0);
 static RX: Channel<CriticalSectionRawMutex, Packet, RX_QUEUE> = Channel::new();
 
 /// TCP: the connection is established (always true for UDP, which has none).
@@ -77,6 +80,8 @@ pub struct Counters {
     pub rx_dropped: u32,
     /// Last frame: time from the main loop queuing it to the network task having handed it to the stack, µs.
     pub tx_wait_us: u32,
+    /// Part of `tx_wait_us`: queued by the main loop -> picked up by the network task.
+    pub tx_pickup_us: u32,
     pub connects: u32,
     pub disconnects: u32,
 }
@@ -135,6 +140,7 @@ impl Link {
             rx_bytes: RX_BYTES.load(Ordering::Relaxed),
             rx_dropped: RX_DROPPED.load(Ordering::Relaxed),
             tx_wait_us: TX_WAIT_US.load(Ordering::Relaxed),
+            tx_pickup_us: TX_PICKUP_US.load(Ordering::Relaxed),
             connects: CONNECTS.load(Ordering::Relaxed),
             disconnects: DISCONNECTS.load(Ordering::Relaxed),
         }
@@ -183,6 +189,7 @@ pub async fn udp_task(stack: Stack<'static>, net: NetLink) -> ! {
             }
             Either::First(Err(_)) => {}
             Either::Second((frame, queued_us)) => {
+                TX_PICKUP_US.store(now_us().saturating_sub(queued_us) as u32, Ordering::Relaxed);
                 // Waits for room in the stack's queue: back-pressure on the main loop (`can_send`).
                 if socket.send_to(&frame, peer).await.is_ok() {
                     TX_WAIT_US.store(now_us().saturating_sub(queued_us) as u32, Ordering::Relaxed);
@@ -232,6 +239,7 @@ pub async fn tcp_task(stack: Stack<'static>, net: NetLink) -> ! {
                     }
                 }
                 Either::Second((frame, queued_us)) => {
+                    TX_PICKUP_US.store(now_us().saturating_sub(queued_us) as u32, Ordering::Relaxed);
                     let mut written = 0;
                     while written < frame.len() {
                         match socket.write(&frame[written..]).await {

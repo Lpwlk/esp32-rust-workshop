@@ -886,19 +886,26 @@ pub fn wire(line: &[u8], delta_ms: Option<u64>, wait_us: Option<u64>) {
     out!("{GRAY}             wire {DIM}{text}{RST}{GRAY}  cs 0x{cs}  {size} B{tail}{RST}")
 }
 
-pub fn link_counters(c: &crate::link::Counters, phy: PhyLink, peer_period_us: Option<u32>, loops_per_s: u64) {
+pub fn link_counters(
+    c: &crate::link::Counters,
+    phy: PhyLink,
+    peer_period_us: Option<u32>,
+    loops_per_s: u64,
+    loop_max_us: u32,
+) {
     let mut peer: heapless::String<24> = heapless::String::new();
     let _ = match peer_period_us {
         Some(us) => core::fmt::Write::write_fmt(&mut peer, format_args!("{}", Period(us as f32 / 1000.0))),
         None => core::fmt::Write::write_str(&mut peer, "?"),
     };
     out!(
-        "{GRAY}            bytes tx {} · rx {} · rx overflow {} · phy {} · main loop {loops_per_s}/s · last tx waited {} µs · peer DAT period {peer}{RST}",
+        "{GRAY}            bytes tx {} · rx {} · rx overflow {} · phy {} · main loop {loops_per_s}/s (slowest {loop_max_us} µs) · last tx waited {} µs (task pickup {} µs) · peer DAT period {peer}{RST}",
         c.tx_bytes,
         c.rx_bytes,
         c.rx_dropped,
         Speed(phy.mbps),
-        c.tx_wait_us
+        c.tx_wait_us,
+        c.tx_pickup_us
     );
 }
 
