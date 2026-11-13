@@ -1,7 +1,7 @@
 //! Gigabit Ethernet on the ESP32-S31-Function-CoreBoard-1.
 //!
 //! The board's RJ45 is wired to a Motorcomm YT8531 PHY over RGMII. This firmware brings the
-//! link up, gets an address by DHCP (or falls back to a link-local one for a direct cable),
+//! link up with a static address (no DHCP, see `SUBNET` and `HOST`),
 //! and serves a small status page on port 80:
 //!
 //! ```text
@@ -24,10 +24,8 @@ use core::{
 };
 
 use embassy_executor::Spawner;
-use embassy_net::{
-    Config, ConfigV4, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4, tcp::TcpSocket,
-};
-use embassy_time::{Duration, Instant, Timer, with_timeout};
+use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4, tcp::TcpSocket};
+use embassy_time::{Duration, Instant, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     Async,
@@ -44,8 +42,40 @@ use static_cell::{ConstStaticCell, StaticCell};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-/// How long to wait for a DHCP lease before using a link-local address (direct cable).
-const DHCP_TIMEOUT: Duration = Duration::from_secs(15);
+/// Static addressing, no DHCP: `192.168.77.<host>/24`, no gateway. Your computer takes `.1`.
+const SUBNET: [u8; 3] = [192, 168, 77];
+
+/// Host number of each known board, found by the chip's base MAC (the one `espflash board-info`
+/// prints), so a plain `cargo run` is right on either board. An unknown board gets `.20`.
+const BOARDS: [([u8; 6], u8); 2] =
+    [([0x1c, 0x29, 0x04, 0xd0, 0x6c, 0x1a], 11), ([0x1c, 0x29, 0x04, 0xd0, 0x21, 0xfe], 12)];
+const UNKNOWN_BOARD_HOST: u8 = 20;
+
+/// Build-time override for a board that is not in `BOARDS`: `ETH_LAB_HOST=13 cargo run --release`.
+const HOST_OVERRIDE: Option<u8> = parse_host(option_env!("ETH_LAB_HOST"));
+
+/// Parses `ETH_LAB_HOST` (2..=254) at compile time; a bad value stops the build.
+const fn parse_host(value: Option<&str>) -> Option<u8> {
+    let Some(text) = value else { return None };
+    let bytes = text.as_bytes();
+    assert!(!bytes.is_empty() && bytes.len() <= 3, "ETH_LAB_HOST must be a number from 2 to 254");
+    let mut n: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        assert!(bytes[i].is_ascii_digit(), "ETH_LAB_HOST must be a number from 2 to 254");
+        n = n * 10 + (bytes[i] - b'0') as u32;
+        i += 1;
+    }
+    assert!(n >= 2 && n <= 254, "ETH_LAB_HOST must be a number from 2 to 254 (.1 is for your computer)");
+    Some(n as u8)
+}
+
+/// The host number of this board: build-time override, else its entry in `BOARDS`.
+fn host_for(base_mac: [u8; 6]) -> u8 {
+    HOST_OVERRIDE
+        .or_else(|| BOARDS.iter().find(|(mac, _)| *mac == base_mac).map(|&(_, host)| host))
+        .unwrap_or(UNKNOWN_BOARD_HOST)
+}
 
 type EthDriver = Ethernet<'static, Async, GenericPhy>;
 
@@ -59,7 +89,6 @@ static BUTTON_PRESSED: AtomicBool = AtomicBool::new(false);
 /// Link speed in Mbit/s and duplex, as negotiated at boot (0 = no link then).
 static LINK_MBPS: AtomicU32 = AtomicU32::new(0);
 static LINK_FULL_DUPLEX: AtomicBool = AtomicBool::new(false);
-static LINK_LOCAL: AtomicBool = AtomicBool::new(false);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -83,6 +112,7 @@ async fn main(spawner: Spawner) {
     // MAC address: the chip's unique base MAC, +3 for the Ethernet interface as ESP-IDF does.
     let mut mac = [0u8; 6];
     mac.copy_from_slice(efuse::base_mac_address().as_bytes());
+    let host = host_for(mac);
     mac[5] = mac[5].wrapping_add(3);
     println!("MAC {}", Mac(mac));
 
@@ -134,39 +164,36 @@ async fn main(spawner: Spawner) {
         println!("No link yet: the stack keeps polling, plug a cable any time.");
     }
 
+    let address = Ipv4Address::new(SUBNET[0], SUBNET[1], SUBNET[2], host);
+    let config = Config::ipv4_static(StaticConfigV4 {
+        address: Ipv4Cidr::new(address, 24),
+        gateway: None,
+        dns_servers: heapless::Vec::new(),
+    });
+
     let rng = Rng::new();
     let seed = u64::from(rng.random()) << 32 | u64::from(rng.random());
-    let (stack, runner) = embassy_net::new(
-        eth.into_async(),
-        Config::dhcpv4(Default::default()),
-        RESOURCES.init(StackResources::new()),
-        seed,
-    );
+    let (stack, runner) = embassy_net::new(eth.into_async(), config, RESOURCES.init(StackResources::new()), seed);
 
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(leds_task(stack, link_led, activity_led).unwrap());
     spawner.spawn(button_task(button).unwrap());
-
-    stack.wait_link_up().await;
-    println!("Waiting for a DHCP lease ({} s max)...", DHCP_TIMEOUT.as_secs());
-    if with_timeout(DHCP_TIMEOUT, stack.wait_config_up()).await.is_err() {
-        // No DHCP server (cable straight to a computer or another board): link-local address.
-        let addr = Ipv4Address::new(169, 254, mac[4].clamp(1, 254), mac[5].clamp(1, 254));
-        println!("No DHCP answer: using the link-local address {addr}/16");
-        LINK_LOCAL.store(true, Ordering::Relaxed);
-        stack.set_config_v4(ConfigV4::Static(StaticConfigV4 {
-            address: Ipv4Cidr::new(addr, 16),
-            gateway: None,
-            dns_servers: heapless::Vec::new(),
-        }));
-    }
-    if let Some(cfg) = stack.config_v4() {
-        println!("IP {}  gateway {:?}", cfg.address, cfg.gateway);
-        println!("Status page: http://{}/", cfg.address.address());
-    }
-
     spawner.spawn(http_task(0, stack).unwrap());
     spawner.spawn(http_task(1, stack).unwrap());
+
+    println!("Static address {address}/24, no DHCP. Status page: http://{address}/");
+    println!("Your computer needs an address in {}.{}.{}.0/24, e.g. .1", SUBNET[0], SUBNET[1], SUBNET[2]);
+
+    // `main` must not return: keep it alive and report the link every 5 s.
+    let mut was_up = None;
+    loop {
+        let up = stack.is_link_up();
+        if was_up != Some(up) {
+            println!("link {}", if up { "UP" } else { "DOWN" });
+            was_up = Some(up);
+        }
+        Timer::after(Duration::from_secs(1)).await;
+    }
 }
 
 #[embassy_executor::task]
@@ -258,8 +285,7 @@ fn status_page(out: &mut String<640>, stack: Stack<'static>, task: u8, request: 
         )
     };
     if let Some(cfg) = stack.config_v4() {
-        let how = if LINK_LOCAL.load(Ordering::Relaxed) { "link-local" } else { "DHCP" };
-        let _ = writeln!(out, "address     {} ({how})", cfg.address);
+        let _ = writeln!(out, "address     {} (static)", cfg.address);
         if let Some(gw) = cfg.gateway {
             let _ = writeln!(out, "gateway     {gw}");
         }

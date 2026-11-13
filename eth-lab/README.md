@@ -1,17 +1,37 @@
 # eth-lab: the CoreBoard's RJ45 in Rust
 
-Gigabit Ethernet on the ESP32-S31-Function-CoreBoard-1: DHCP, a status page on port 80,
-the two breadboard LEDs and the jumper button. Standalone crate (own workspace); the node
-firmware is untouched.
+Gigabit Ethernet on the ESP32-S31-Function-CoreBoard-1: **static addresses, no DHCP**, a
+status page on port 80, the two breadboard LEDs and the jumper button. Standalone crate (own
+workspace); the node firmware is untouched.
+
+## Network plan
+
+Subnet `192.168.77.0/24`, no gateway, all boards and your computer on the same hub/switch:
+
+| Who | Address |
+|---|---|
+| your computer | `192.168.77.1` |
+| board `1c:29:04:d0:6c:1a` (USB `…6C:1A`) | `192.168.77.11` |
+| board `1c:29:04:d0:21:fe` | `192.168.77.12` |
+| any other board | `192.168.77.20`, or `ETH_LAB_HOST=13 cargo run --release` |
+
+The table is `BOARDS` in `src/main.rs`, keyed by the chip's base MAC (`espflash board-info`),
+so a plain `cargo run --release` is right on either board.
+
+Give the computer an address on the interface that faces the hub (here `en10`):
+
+```sh
+sudo ifconfig en10 alias 192.168.77.1/24          # temporary, gone at unplug/reboot
+# or permanently, for the "USB 10/100/1000 LAN" service:
+sudo networksetup -setmanual "USB 10/100/1000 LAN" 192.168.77.1 255.255.255.0
+```
 
 ```sh
 cd eth-lab
 cargo run --release          # builds, flashes with espflash, opens the monitor
-curl http://<ip printed on the console>/
+ping 192.168.77.11
+curl http://192.168.77.11/
 ```
-
-Plug a cable into the RJ45 first (router, switch, or straight to your computer/another
-board: with no DHCP answer after 15 s the board takes a `169.254.x.y/16` address).
 
 ## Why a separate crate
 
