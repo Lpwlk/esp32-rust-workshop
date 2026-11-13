@@ -15,7 +15,7 @@ loop, the Ethernet app's `esp-rtos` + Embassy) with a scheduler the project owns
       also checked to be able to fail (see there).
     - **Not exercised on hardware yet:** the wrap of the tick counter (after 49 days), a `give` from an interrupt
       handler, stack overflow, many tasks at once (12 is the table size).
-    - **The apps do not use it yet.** See [Moving the apps onto ferrite](#moving-the-apps-onto-ferrite) for why and how.
+    - **The Ethernet app can run on it** (feature `ferrite`, no async code), written but not run on two boards yet; the UART app does not use it. See [Moving the Ethernet app onto Ferrite](#moving-the-ethernet-app-onto-ferrite).
 
 ## Design
 
