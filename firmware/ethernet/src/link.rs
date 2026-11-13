@@ -43,17 +43,17 @@ const QUEUE: usize = 64;
 /// loop can be busy for a few milliseconds (RGB LED, console formatting), so this is deeper.
 const RX_QUEUE: usize = 256;
 /// A frame to send, and when the main loop queued it.
-type Outgoing = (heapless::Vec<u8, MAX_FRAME>, u64);
-static TX: Channel<CriticalSectionRawMutex, Outgoing, QUEUE> = Channel::new();
+pub(crate) type Outgoing = (heapless::Vec<u8, MAX_FRAME>, u64);
+pub(crate) static TX: Channel<CriticalSectionRawMutex, Outgoing, QUEUE> = Channel::new();
 /// How long the last frame waited between the main loop and the stack's socket (µs).
-static TX_WAIT_US: AtomicU32 = AtomicU32::new(0);
+pub(crate) static TX_WAIT_US: AtomicU32 = AtomicU32::new(0);
 /// Of which: from the main loop queuing it to the network task picking it up (µs). The rest is
 /// `send_to` itself. A large value here means the executor was slow to run the task.
-static TX_PICKUP_US: AtomicU32 = AtomicU32::new(0);
+pub(crate) static TX_PICKUP_US: AtomicU32 = AtomicU32::new(0);
 static RX: Channel<CriticalSectionRawMutex, Packet, RX_QUEUE> = Channel::new();
 
 /// TCP: the connection is established (always true for UDP, which has none).
-static CONNECTED: AtomicBool = AtomicBool::new(false);
+pub(crate) static CONNECTED: AtomicBool = AtomicBool::new(false);
 
 static TX_FRAMES: AtomicU32 = AtomicU32::new(0);
 static RX_FRAMES: AtomicU32 = AtomicU32::new(0);
@@ -62,11 +62,11 @@ static RX_BYTES: AtomicU32 = AtomicU32::new(0);
 /// Frames dropped because the main loop didn't take them in time (RX queue full).
 static RX_DROPPED: AtomicU32 = AtomicU32::new(0);
 /// TCP connections established / lost.
-static CONNECTS: AtomicU32 = AtomicU32::new(0);
-static DISCONNECTS: AtomicU32 = AtomicU32::new(0);
+pub(crate) static CONNECTS: AtomicU32 = AtomicU32::new(0);
+pub(crate) static DISCONNECTS: AtomicU32 = AtomicU32::new(0);
 
 /// Same clock as the main loop's `now_us`, so frame stamps and loop times compare.
-fn now_us() -> u64 {
+pub(crate) fn now_us() -> u64 {
     esp_hal::time::Instant::now().duration_since_epoch().as_micros()
 }
 
@@ -152,7 +152,7 @@ fn peer_endpoint(net: &NetLink) -> IpEndpoint {
 }
 
 /// Hands a received frame (no `\n`) to the main loop.
-fn deliver(frame: &[u8], at_us: u64) {
+pub(crate) fn deliver(frame: &[u8], at_us: u64) {
     let Ok(data) = heapless::Vec::from_slice(frame) else { return };
     RX_FRAMES.fetch_add(1, Ordering::Relaxed);
     RX_BYTES.fetch_add(frame.len() as u32 + 1, Ordering::Relaxed);
@@ -162,7 +162,7 @@ fn deliver(frame: &[u8], at_us: u64) {
 }
 
 /// Counts a sent frame.
-fn sent(frame: &[u8]) {
+pub(crate) fn sent(frame: &[u8]) {
     TX_FRAMES.fetch_add(1, Ordering::Relaxed);
     TX_BYTES.fetch_add(frame.len() as u32, Ordering::Relaxed);
 }

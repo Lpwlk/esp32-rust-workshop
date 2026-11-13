@@ -54,6 +54,9 @@ the [Ethernet pins](reference/eth-pins.md).
 
 ## Running it
 
+The node runs on one of two runtimes. The default is `esp-rtos` + Embassy (async). With `--features ferrite` it runs on
+[Ferrite](ferrite.md#moving-the-ethernet-app-onto-ferrite), the project's own RTOS, with no async code (not yet validated on two boards).
+
 ```sh
 cd firmware/ethernet
 cargo run --release --bin node-a      # then, on the other board: --bin node-b

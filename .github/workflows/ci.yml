@@ -97,6 +97,8 @@ jobs:
           - { name: default, flags: "" }
           - { name: none, flags: "--no-default-features" }
           - { name: all, flags: "--all-features" }
+          # On Ferrite (the project's RTOS) instead of esp-rtos + Embassy: no async code.
+          - { name: ferrite, flags: "--features ferrite" }
     steps:
       - uses: actions/checkout@v7
       - run: rustup show

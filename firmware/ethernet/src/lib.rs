@@ -38,6 +38,8 @@ pub mod fx;
 pub mod led;
 pub mod link;
 pub mod net;
+#[cfg(feature = "ferrite")]
+pub mod rt;
 pub mod rtt_console;
 pub mod settings;
 pub mod term;
@@ -90,6 +92,15 @@ macro_rules! node_firmware {
         // App descriptor required by the ESP-IDF second-stage bootloader.
         esp_bootloader_esp_idf::esp_app_desc!();
 
+        // The Ferrite runtime (feature `ferrite`): ordinary tasks, no async.
+        #[cfg(feature = "ferrite")]
+        #[esp_hal::main]
+        fn main() -> ! {
+            $crate::rt::run(&$config)
+        }
+
+        // The Embassy runtime.
+        #[cfg(not(feature = "ferrite"))]
         #[esp_rtos::main]
         async fn main(spawner: embassy_executor::Spawner) {
             $crate::run(spawner, &$config).await

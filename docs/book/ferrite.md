@@ -132,20 +132,68 @@ A test is only worth something if it can fail, so it was run twice with the feat
 | priority inheritance off (`boost` does nothing) | `high waited 650..650 ms`, every cycle bad: the 650 ms the scenario predicts without inheritance |
 | float registers not saved (`--no-default-features`) | `floats 325 bad` out of 30000: corrupted sums |
 
-## Moving the apps onto ferrite
+## Moving the Ethernet app onto Ferrite
 
-Neither app uses ferrite yet, on purpose: a context switch that has never run on the chip is not something to put
-under firmware that works. What each move needs:
+The Ethernet app can now run **without any async code**: `cargo build --release --features ferrite` (from
+`firmware/ethernet/`) builds the node on Ferrite instead of `esp-rtos` + Embassy. The Embassy runtime is still the default
+and is untouched, so the two can be compared on the same boards.
 
-| App | Today | To move it |
-|---|---|---|
-| **Ethernet** | `esp-rtos` + Embassy: one executor runs the main loop and the network tasks | Ferrite has no Embassy integration yet. Two ways: run the Embassy executor *as one ferrite task* (it needs a time driver on the ferrite tick and a "pender" that readies that task), or give the network stack its own ferrite task and keep the main loop in another. The first keeps the code. |
-| **UART** | a blocking loop on `esp-hal` 1.2.2 (crates.io) | the port builds on `esp-hal` `main` (it needs the S31 RTOS hooks), so the UART app stays on its loop until a release has them, or moves to the Ethernet workspace's `esp-hal`. |
-| **Tests** | host tests of `workshop-core`; on-target tests (`cargo test-target`) on the UART app | the kernel's tests are already in `cargo test-host`. Once the demo runs, the demo's expectations (a periodic task's jitter, the round robin's fairness) become on-target tests. |
+!!! warning "Status: builds, not run on two boards yet"
+    The Ferrite runtime compiles, passes clippy, and builds for UDP and TCP presets and every feature combination
+    (it is a CI matrix entry). It has **not run on a board yet** (both were busy when it was written): use the
+    checklist below before trusting it.
 
-Suggested order: add a stack-usage and task-list command to the CLI (`tasks`) using the
-kernel's `state`/`priority`; move the Ethernet app's console task (already a separate task) onto ferrite as the
-first real user; then the executor.
+### How it is built
+
+```text
+  node task      the main loop: node.step() then yield_now(), forever          (same Node as before)
+  net task       owns the EMAC and smoltcp; each turn: poll the stack, serve the UDP/TCP socket, yield
+  console task   moves the print pipe to the USB FIFO, yield when it is empty
+```
+
+- **No executor, no futures.** What waited with `.await` is now a task that polls and gives the processor
+  up (`yield_now`). The three tasks have the same priority, so they take turns, as the futures did.
+- **smoltcp directly.** `embassy-net` is smoltcp behind an async runner. The EMAC driver in `esp-hal` also has a
+  *blocking* mode (`receive`, `transmit`, `poll_link`), so `rt.rs` wraps it as a smoltcp `Device` (a received frame is copied out of
+  the DMA ring at once) and the net task runs `Interface::poll` itself. The sockets, the line framing and the
+  connect/retry logic of TCP are the same as in the Embassy tasks, written as a function called on each turn.
+- **Unchanged:** `Node`, the CLI, the frames, the address space, the settings, the TX/RX queues between the node and the
+  network (they are `embassy-sync` channels, which work without an executor), the counters, the console pipe.
+- **Differences to know:** the PHY is read every 500 ms by the net task; there is no DMA interrupt wake-up (the net
+  task polls on every turn); the console task has no 200 µs sleep when the USB FIFO is full, it yields instead.
+
+### Checklist before it becomes the default
+
+Flash one board with the Ferrite build and the other with the default one first (they speak the same frames), then both
+with Ferrite:
+
+```sh
+cd firmware/ethernet
+cargo run --release --features ferrite --bin node-a      # board A on Ferrite
+cargo run --release --bin node-b                         # board B on Embassy
+```
+
+| Check | Expect |
+|---|---|
+| boot card, then `cable connected: 1 Gbit/s · full duplex` | as on Embassy |
+| frames in both directions (`verbose frames`) | `DAT` every period, `lost 0` |
+| `burst 20000 max`, `burst 5000 1kHz` | 0 lost |
+| `tx on-rx` on B, `rtt` on A | compare with the Embassy figures (about 4 ms): Ferrite polls on every turn, so it should not be worse |
+| TCP presets (`PRESET_NODE_A=node-a-tcp PRESET_NODE_B=node-b-tcp`) | connects, `link` shows it, a burst passes; unplug and replug the cable: it reconnects |
+| CLI, `save`/`forget`, `reboot`, `browse / 2` | as before |
+| `link` and the status line: `main loop` rate, `slowest` | the loop rate is about the same order as before |
+| watchdog | doesn't reset (the node loop keeps running) |
+
+### The plan
+
+1. **Done:** the Ferrite runtime behind the `ferrite` feature, in CI; the Embassy runtime stays the default.
+2. **Next:** the checklist above, on two boards, UDP then TCP, Ferrite against Embassy then against itself.
+3. **Then:** measure and tune: a wake-up on the DMA interrupt instead of polling on every turn (less CPU, the same latency),
+   priorities (the net task above the node task), the console's back-pressure.
+4. **Then:** make `ferrite` the default and delete the Embassy runtime (`run`, `udp_task`, `tcp_task`, `net_task`, the `esp-rtos`,
+   `embassy-executor`, `embassy-net` dependencies).
+5. **The UART app** stays on its blocking loop: Ferrite's port needs `esp-hal` `main`, and the UART app is on the 1.2 release
+   from crates.io. It moves when a release has the S31 RTOS hooks, or when the two apps share one workspace.
 
 ## What is missing
 

@@ -56,6 +56,30 @@ pub fn print(args: fmt::Arguments<'_>) {
     let _ = Sink.write_fmt(args);
 }
 
+/// The Ferrite runtime's console task: moves what is in the pipe to the USB FIFO. Returns whether it moved
+/// anything (the task yields the processor when it didn't).
+#[cfg(feature = "ferrite")]
+pub(crate) fn pump(tx: &mut UsbSerialJtagTx<'static, Blocking>) -> bool {
+    let mut chunk = [0u8; 64];
+    let Ok(n) = PIPE.try_read(&mut chunk) else { return false };
+    for &byte in &chunk[..n] {
+        // The FIFO holds 64 bytes: when it is full, hand it to the host and let the others run.
+        while tx.write_byte_nb(byte).is_err() {
+            let _ = tx.flush_tx_nb();
+            ferrite_esp32s31::yield_now();
+        }
+    }
+    let _ = tx.flush_tx_nb();
+
+    let lost = DROPPED.swap(0, Ordering::Relaxed);
+    if lost > 0 {
+        let mut note: heapless::String<64> = heapless::String::new();
+        let _ = write!(note, "\r\n[console: {lost} bytes dropped, the terminal can't keep up]\r\n");
+        write_str(&note);
+    }
+    true
+}
+
 /// Writes the pipe to the USB Serial/JTAG FIFO: spawn once, with the TX half of the port.
 #[embassy_executor::task]
 pub async fn console_task(mut tx: UsbSerialJtagTx<'static, Blocking>) -> ! {

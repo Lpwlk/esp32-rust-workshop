@@ -44,6 +44,25 @@ static LAST_READ_MS: AtomicU32 = AtomicU32::new(0);
 const READ_EVERY_MS: u32 = 500;
 static FULL_DUPLEX: AtomicBool = AtomicBool::new(false);
 
+/// Records what the PHY negotiated (the Ferrite runtime reads it itself; the Embassy one through [`SpeedTap`]).
+#[cfg(feature = "ferrite")]
+pub(crate) fn store_link(mbps: u16, full_duplex: bool) {
+    MBPS.store(mbps, Ordering::Relaxed);
+    FULL_DUPLEX.store(full_duplex, Ordering::Relaxed);
+}
+
+/// The EMAC's DMA frame buffers, for the blocking driver (taken once).
+#[cfg(feature = "ferrite")]
+pub(crate) fn dma_storage() -> &'static mut EthernetDmaStorage<32, 16> {
+    DMA.take()
+}
+
+/// Keeps the PHY's reset line driven high for the life of the firmware.
+#[cfg(feature = "ferrite")]
+pub(crate) fn keep_reset_high(reset: Output<'static>) {
+    RESET.init(reset);
+}
+
 /// The PHY's state as last seen by the stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PhyLink {

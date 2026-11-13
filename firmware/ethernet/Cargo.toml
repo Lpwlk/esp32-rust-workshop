@@ -45,6 +45,9 @@ persist = []
 watchdog = []
 # RTT console through the debug probe (probe-rs / cargo-embed).
 rtt = ["dep:rtt-target"]
+# Runs the node on Ferrite (the project's own RTOS, firmware/ferrite-esp32s31) with smoltcp polled by a task,
+# instead of esp-rtos + Embassy: no async code runs. See docs/book/ferrite.md.
+ferrite = ["dep:ferrite-esp32s31", "dep:smoltcp"]
 
 [dependencies]
 workshop-core = { path = "../shared/core" }
@@ -64,6 +67,8 @@ embassy-net-driver = "0.2"
 embassy-sync       = "0.8"
 embassy-time       = "0.5.0"
 static_cell        = "2.1.0"
+ferrite-esp32s31   = { path = "../ferrite-esp32s31", optional = true }
+smoltcp            = { version = "0.13", default-features = false, features = ["proto-ipv4", "medium-ethernet", "socket-tcp", "socket-udp"], optional = true }
 heapless           = "0.9.3"
 critical-section   = "1.2.0"
 rtt-target         = { version = "0.6.2", optional = true }

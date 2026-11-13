@@ -872,9 +872,11 @@ dependencies = [
  "esp-hal-smartled",
  "esp-println",
  "esp-rtos",
+ "ferrite-esp32s31",
  "heapless 0.9.3",
  "rtt-target",
  "smart-leds-trait",
+ "smoltcp",
  "static_cell",
  "workshop-core",
  "workshop-presets",
@@ -968,6 +970,19 @@ source = "git+https://github.com/esp-rs/esp-pacs.git?rev=61f9678#61f9678dd039f76
 dependencies = [
  "critical-section",
  "vcell",
+]
+
+[[package]]
+name = "ferrite"
+version = "0.1.0"
+
+[[package]]
+name = "ferrite-esp32s31"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "esp-hal",
+ "ferrite",
 ]
 
 [[package]]
