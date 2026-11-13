@@ -85,6 +85,7 @@ link tests and RTT.
     ```sh
     rustup target add riscv32imafc-unknown-none-elf
     cargo install espflash --locked
+    cd firmware/ethernet                # or firmware/uart for the UART link
     cargo run --release --bin node-a    # board A
     cargo run --release --bin node-b    # board B, in another terminal
     ```

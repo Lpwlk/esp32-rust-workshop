@@ -50,13 +50,13 @@ pattern = "ocean"
 
 | What | Command |
 |---|---|
-| the default preset of each node | `cargo run --release --bin node-a` |
+| the default preset of each node | `cargo run --release --bin node-a` (from the app's folder) |
 | another preset, one node | `PRESET_NODE_A=bench cargo run --release --bin node-a` |
 | the same preset for both | `PRESET=bench cargo build --release` |
-| through the helper script | `python3 scripts/dev.py --app eth --preset bench flash a` |
+| through the helper script | `python3 scripts/dev.py --preset bench flash a` (`--app uart` for the UART app) |
 
-Changing a preset file or one of these variables rebuilds the firmware. Build presets of the Ethernet
-app from `firmware/ethernet/` (or with `dev.py --app eth`).
+Changing a preset file or one of these variables rebuilds the firmware. Build the presets of an app from its
+folder (`firmware/ethernet/` or `firmware/uart/`), or with `dev.py` (Ethernet unless `--app uart`).
 
 ## Looking at presets
 

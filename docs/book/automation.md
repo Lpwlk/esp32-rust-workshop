@@ -157,8 +157,8 @@ the new status line; `record.py` records them again with the commands of [the co
       `firmware-<commit>` for 30 days: flash a past commit without rebuilding it
       (`gh run download`, then `espflash flash --chip esp32s31 node-a`);
 5. **site** (once 1 and 2 pass, without waiting for the firmware matrix):
-   `zensical build --clean -f docs/zensical.ci.toml`, then `cargo doc` for the core and the UART firmware, copied into
-   `docs/site/api/core/` and `docs/site/api/firmware/` (separate folders: two rustdoc outputs
+   `zensical build --clean -f docs/zensical.ci.toml`, then `cargo doc` for the core and the two firmwares, copied into
+   `docs/site/api/core/`, `docs/site/api/firmware-eth/` and `docs/site/api/firmware/` (separate folders: rustdoc outputs
    in one folder would overwrite each other's search index). The footer of every
    page says which commit it was built from, with a link: CI adds `build_commit`,
    `build_sha` and `build_date` to a copy of `docs/zensical.toml`, read by

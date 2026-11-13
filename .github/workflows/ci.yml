@@ -156,6 +156,10 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            firmware/ethernet
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -174,9 +178,12 @@ jobs:
         run: |
           cargo doc -p workshop-core --target host-tuple --no-deps
           cargo doc -p esp32-rust-workshop --no-deps
-          mkdir -p docs/site/api/core docs/site/api/firmware
+          # firmware/ethernet/ is its own Cargo workspace, with its own target/.
+          (cd firmware/ethernet && cargo doc --no-deps)
+          mkdir -p docs/site/api/core docs/site/api/firmware docs/site/api/firmware-eth
           cp -r target/"$(rustc --print host-tuple)"/doc/. docs/site/api/core/
           cp -r target/riscv32imafc-unknown-none-elf/doc/. docs/site/api/firmware/
+          cp -r firmware/ethernet/target/riscv32imafc-unknown-none-elf/doc/. docs/site/api/firmware-eth/
       - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/site

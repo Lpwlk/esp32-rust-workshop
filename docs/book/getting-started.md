@@ -45,8 +45,15 @@ target. `rust-toolchain.toml` pins the channel, the target and the components, s
 
 ## 2. Wire the boards
 
-Pick the link: the **UART app** (three wires, 5 Mbaud) or the **Ethernet app** (the RJ45 ports, Gigabit, UDP or TCP). Both
-are the same node with the same console; you can run either on the same two boards.
+Pick the link: the **Ethernet app** (the RJ45 ports, Gigabit, UDP or TCP) or the **UART app** (three wires, 5 Mbaud). Both
+are the same node with the same console; you can run either on the same two boards, and the project's scripts
+default to the Ethernet one (`--app uart` for the other).
+
+=== "Ethernet"
+
+    A cable between the two **RJ45** ports. A straight cat5e cable is enough (the PHYs detect the cable type), and
+    there is no switch and no DHCP: the boards have static addresses, `192.168.77.11` (node A) and `192.168.77.12`
+    (node B), set in their [presets](presets.md). The PHY uses GPIO5-19, so keep those free.
 
 === "UART"
 
@@ -57,12 +64,6 @@ are the same node with the same console; you can run either on the same two boar
     | `2` GPIO2 (TX) | → | `3` GPIO3 (RX) |
     | `3` GPIO3 (RX) | ← | `2` GPIO2 (TX) |
     | `G` GND | — | `G` GND |
-
-=== "Ethernet"
-
-    A cable between the two **RJ45** ports. A straight cat5e cable is enough (the PHYs detect the cable type), and
-    there is no switch and no DHCP: the boards have static addresses, `192.168.77.11` (node A) and `192.168.77.12`
-    (node B), set in their [presets](presets.md). The PHY uses GPIO5-19, so keep those free.
 
 The button is optional: a jumper from `4` to `G` on either board, or simply the
 board's **BOOT** button. Details, LEDs and pins to avoid: [Wiring](wiring.md).
@@ -90,6 +91,9 @@ Plug each board by its **USB Serial/JTAG** USB-C port.
     python3 scripts/dev.py monitor a     # console only, backtraces decoded
     ```
 
+    These work on the **Ethernet app**. For the UART one, put `--app uart` before the command
+    (`python3 scripts/dev.py --app uart flash a -m`); `--preset node-a-tcp` picks a preset (TCP instead of UDP).
+
     The assignment is kept in `.boards.json` (not committed: it describes your desk).
     After each build, the script prints the flash and RAM used.
 
@@ -99,30 +103,18 @@ Plug each board by its **USB Serial/JTAG** USB-C port.
     of `.cargo/config.toml`):
 
     ```sh
+    cd firmware/ethernet               # or firmware/uart for the UART app
     cargo run --release --bin node-a
     cargo run --release --bin node-b -- --port /dev/cu.usbmodem11301   # two boards: pick the port
     ```
 
-    The Ethernet app is its own Cargo workspace: run the same commands from `firmware/ethernet/`, and
-    set `ESPFLASH_PORT=/dev/cu.usbmodem…` to skip the question when two boards are plugged in.
-
-    ```sh
-    cd firmware/ethernet && cargo run --release --bin node-a
-    ```
-
-=== "Ethernet with dev.py"
-
-    The same script works for both apps; `--app eth` picks the Ethernet one, `--preset` a preset:
-
-    ```sh
-    python3 scripts/dev.py --app eth flash a -m
-    python3 scripts/dev.py --app eth flash all
-    python3 scripts/dev.py --app eth --preset node-a-tcp flash a   # TCP instead of UDP
-    ```
+    Each app is built from its own folder (the Ethernet app is its own Cargo workspace). Set
+    `ESPFLASH_PORT=/dev/cu.usbmodem…` to skip the port question when two boards are plugged in.
 
 === "espflash"
 
     ```sh
+    cd firmware/ethernet                # or firmware/uart (its binaries are in the repository's target/)
     cargo build --release
     espflash flash --chip esp32s31 --monitor --port /dev/cu.usbmodem11201 \
         target/riscv32imafc-unknown-none-elf/release/node-a

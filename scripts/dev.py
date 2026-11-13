@@ -4,7 +4,8 @@
     python3 scripts/dev.py setup                 # once: .venv (Python 3.13) + requirements
     python3 scripts/dev.py doctor                # tools, Rust target, boards: what's missing
 
-  Boards (node = a | b)
+  Boards (node = a | b). These work on the Ethernet app unless you pass `--app uart`:
+    python3 scripts/dev.py --app uart flash a -m  # the UART app instead (the option goes before the command)
     python3 scripts/dev.py boards                # plugged boards: MAC, port, probe, node
     python3 scripts/dev.py boards assign a 6C:1A # this board is node A (remembered)
     python3 scripts/dev.py build [a|b]           # firmware, release (both by default)
@@ -155,10 +156,11 @@ def format_code(check: bool) -> None:
 # --------------------------------------------------------------------------------------
 
 
-# Which firmware the build / flash / monitor commands work on: `--app uart` (the repository root, the
-# default) or `--app eth` (firmware/ethernet/, the Ethernet app: its own Cargo workspace). `--preset NAME`
-# builds that preset (firmware/<app>/presets/NAME.toml) instead of node-a / node-b.
-APP = "uart"
+# Which firmware the build / flash / monitor commands work on: `--app eth` (firmware/ethernet/, the
+# Ethernet app: its own Cargo workspace; the default) or `--app uart` (firmware/uart/, a member of the
+# root workspace). `--preset NAME` builds that preset (firmware/<app>/presets/NAME.toml) instead of
+# node-a / node-b.
+APP = "eth"
 PRESET: str | None = None
 APP_DIRS = {"uart": ROOT / "firmware" / "uart", "eth": ROOT / "firmware" / "ethernet"}
 # The UART app is a member of the root workspace (one `target/` at the root); the Ethernet app is its own.
@@ -318,7 +320,9 @@ def rtt(node: str, selector: str | None) -> None:
     flash(node, board.mac, monitor=False, rtt=True, release=True)
     live(
         ["cargo", "embed", "--release", "--features", "rtt", "--bin", f"node-{node}"]
-        + ["--probe", board.probe],
+        + ["--probe", board.probe]
+        # The settings live in the UART app's folder; they are not specific to it.
+        + ["--config", str(APP_DIRS["uart"] / "Embed.toml")],
         cwd=app_dir(),
         check=False,
     )
@@ -469,9 +473,11 @@ def docs_api(open_browser: bool) -> None:
     from devlib import live
 
     live(["cargo", "doc", "-p", "workshop-core", "--target", "host-tuple", "--no-deps"])
+    live(["cargo", "doc", "-p", "esp32-rust-workshop", "--no-deps"])
+    # The Ethernet firmware is its own Cargo workspace, with its own target/.
     live(
-        ["cargo", "doc", "-p", "esp32-rust-workshop", "--no-deps"]
-        + (["--open"] if open_browser else [])
+        ["cargo", "doc", "--no-deps"] + (["--open"] if open_browser else []),
+        cwd=APP_DIRS["eth"],
     )
 
 
@@ -542,8 +548,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--app",
         choices=("uart", "eth"),
-        default="uart",
-        help="firmware that build / size / flash / monitor / rtt work on: uart (default) or eth (firmware/ethernet/)",
+        default="eth",
+        help="firmware that build / size / flash / monitor / rtt work on: eth (default, firmware/ethernet/) or uart (firmware/uart/)",
     )
     p.add_argument(
         "--preset",

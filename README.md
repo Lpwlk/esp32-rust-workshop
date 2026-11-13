@@ -19,13 +19,13 @@ button edge, decodes everything the other one sends, and shows it all on a color
 a real CLI. Built on [esp-hal](https://github.com/esp-rs/esp-hal) for the
 ESP32-S31-Function-CoreBoard-1. The same node exists with two different **links**:
 
-| | **UART app** | **Ethernet app** |
+| | **Ethernet app** | **UART app** |
 |---|---|---|
-| link | 5 Mbaud UART, three wires | the board's RJ45, Gigabit, UDP or TCP, static IPs |
-| folder | [`firmware/uart/`](firmware/uart) | [`firmware/ethernet/`](firmware/ethernet) |
-| run | `cargo run --release --bin node-a` | `cd firmware/ethernet && cargo run --release --bin node-a` |
-| settings | [`firmware/uart/presets/`](firmware/uart/presets) | [`firmware/ethernet/presets/`](firmware/ethernet/presets) |
-| esp-hal | 1.2.2, blocking main loop | `main` (the S31 EMAC driver isn't released yet), async with embassy |
+| link | the board's RJ45, Gigabit, UDP or TCP, static IPs | 5 Mbaud UART, three wires |
+| folder | [`firmware/ethernet/`](firmware/ethernet) | [`firmware/uart/`](firmware/uart) |
+| run | `cd firmware/ethernet && cargo run --release --bin node-a` | `cd firmware/uart && cargo run --release --bin node-a` |
+| settings | [`firmware/ethernet/presets/`](firmware/ethernet/presets) | [`firmware/uart/presets/`](firmware/uart/presets) |
+| esp-hal | `main` (the S31 EMAC driver isn't released yet), async with embassy | 1.2.2, blocking main loop |
 
 Everything that isn't the link (frames, CLI, settings, LEDs, buttons, saved settings) is the same
 code, in [`firmware/shared/core`](firmware/shared/core), tested on your computer.
@@ -37,20 +37,21 @@ rustup target add riscv32imafc-unknown-none-elf    # rust-toolchain.toml does it
 cargo install espflash --locked
 ```
 
-**UART**: wire GPIO2 → GPIO3 both ways and GND between the boards
-([wiring](https://lpwlk.github.io/esp32-rust-workshop/wiring/)), then:
-
-```sh
-cargo run --release --bin node-a    # flash board A and open its console
-cargo run --release --bin node-b    # board B, in another terminal
-```
-
 **Ethernet**: plug a cable between the two RJ45 ports (a straight cat5e is enough, no switch, no DHCP):
 
 ```sh
 cd firmware/ethernet
-cargo run --release --bin node-a    # 192.168.77.11
-cargo run --release --bin node-b    # 192.168.77.12, in another terminal
+cargo run --release --bin node-a    # flash board A and open its console: 192.168.77.11
+cargo run --release --bin node-b    # board B, in another terminal: 192.168.77.12
+```
+
+**UART**: wire GPIO2 → GPIO3 both ways and GND between the boards
+([wiring](https://lpwlk.github.io/esp32-rust-workshop/wiring/)), then:
+
+```sh
+cd firmware/uart
+cargo run --release --bin node-a
+cargo run --release --bin node-b    # in another terminal
 ```
 
 Type `help` in either console. No Rust at hand? Flash a
@@ -61,8 +62,8 @@ to skip the question, or let `scripts/dev.py` tell the boards apart by MAC addre
 ```sh
 python3 scripts/dev.py setup                       # once: Python venv for the tools
 python3 scripts/dev.py boards assign a 6C:1A       # this board is node A
-python3 scripts/dev.py flash a -m                  # build, flash, monitor (+ Flash/RAM table)
-python3 scripts/dev.py --app eth flash a -m        # the same for the Ethernet app
+python3 scripts/dev.py flash a -m                  # build, flash, monitor (+ Flash/RAM table): Ethernet app
+python3 scripts/dev.py --app uart flash a -m       # the same for the UART app
 python3 scripts/dev.py check                       # everything CI checks, locally
 ```
 

@@ -137,6 +137,10 @@ like a shell:
     verbose [0|1|2]           console detail: live line, every frame, or raw frames too
     ```
 
+`help` prints its sections (settings, shortcuts, link tests, ...) one after the other, 150 ms apart, so the list can be
+read as it appears; the node keeps running meanwhile (`workshop_core::cli::HelpPager`: the pause never blocks the main
+loop or the network).
+
 Every command, with its examples (each one is checked by a unit test):
 [CLI reference](reference/cli.md).
 

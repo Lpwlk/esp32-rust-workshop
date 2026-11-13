@@ -23,14 +23,14 @@ esp32-rust-workshop/
         └── presets-tool/        host only: reads and validates the TOML presets (`cargo presets`)
 ```
 
-| | UART app | Ethernet app |
+| | Ethernet app | UART app |
 |---|---|---|
-| directory | `firmware/uart/` (workspace root) | `firmware/ethernet/` (own workspace) |
-| run | `cargo run --release --bin node-a` (from the root or `firmware/uart/`) | `cd firmware/ethernet && cargo run --release --bin node-a` |
-| presets | `firmware/uart/presets/` | `firmware/ethernet/presets/` |
-| esp-hal | 1.2.2 (crates.io) | `main`, pinned to a commit |
-| main loop | blocking | async (esp-rtos + embassy-net) |
-| helper script | `dev.py flash a` | `dev.py --app eth flash a` |
+| directory | `firmware/ethernet/` (own workspace) | `firmware/uart/` (member of the root workspace) |
+| run | `cd firmware/ethernet && cargo run --release --bin node-a` | `cd firmware/uart && cargo run --release --bin node-a` |
+| presets | `firmware/ethernet/presets/` | `firmware/uart/presets/` |
+| esp-hal | `main`, pinned to a commit | 1.2.2 (crates.io) |
+| main loop | async (esp-rtos + embassy-net) | blocking |
+| helper script | `dev.py flash a` | `dev.py --app uart flash a` |
 
 !!! info "Why not one workspace"
     The EMAC driver for the ESP32-S31 is merged in esp-hal (PR #6192) but isn't in a release yet, and it

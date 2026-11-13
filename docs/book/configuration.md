@@ -36,7 +36,8 @@ CLI or the flash.
 
 ## Cargo features: what is compiled in
 
-The two apps have the same three features, with the same meaning (the Ethernet app builds from `firmware/ethernet/`).
+The two apps have the same three features, with the same meaning. Run these from the app's folder (`firmware/ethernet/` or
+`firmware/uart/`).
 
 ```sh
 cargo build --release                                   # default: persist + watchdog
