@@ -10,8 +10,11 @@ loop, the Ethernet app's `esp-rtos` + Embassy) with a scheduler the project owns
       ticks)** with no fault. What that showed: tick, context switch, preemption, `delay`, the queue's blocking
       `send`/`recv`, and round robin (the two spinners' counters stayed within 0.1 %, at about 104 switches
       a second, as 10 ms slices plus the periodic tasks predict).
-    - **Not exercised on hardware yet:** the mutex and its priority inheritance, the semaphore, timeouts, floating-point
-      registers across a switch (the demo uses no floats), the wrap of the tick counter (after 49 days).
+    - **A second, self-checking test (`stress`)** ran on the board and passes: floating-point registers kept across
+      switches, priority inheritance, semaphore and timeouts (details [below](#the-self-checking-test)). It was
+      also checked to be able to fail (see there).
+    - **Not exercised on hardware yet:** the wrap of the tick counter (after 49 days), a `give` from an interrupt
+      handler, stack overflow, many tasks at once (12 is the table size).
     - **The apps do not use it yet.** See [Moving the apps onto mros](#moving-the-apps-onto-mros) for why and how.
 
 ## Design
@@ -109,6 +112,26 @@ Measured on a board (from the 21-minute run):
 Per 5 s: 28.2 million loops each, 520 switches (100 a second between the spinners, the rest for the other tasks), and
 the `ticker` prints on the exact millisecond every time.
 
+## The self-checking test
+
+`cargo run --release --example stress` (in `firmware/mros-esp32s31`) runs eight tasks and prints a PASS or FAIL line
+every 5 s:
+
+| What | How | Passes when |
+|---|---|---|
+| **Float registers** | two tasks sum 1000 floats in a loop, forever, while the kernel switches between them 100 times a second | every sum is exactly right |
+| **Priority inheritance** | each second: `low` (3) holds a mutex for 300 ms, `mid` (4) hogs the processor from 150 to 750 ms, `high` (5) asks for the mutex at 100 ms | `high` waits at most 350 ms |
+| **Semaphore, timeouts** | `giver` (7) gives a token each second, `taker` (6) waits for one at most 400 ms | a timed-out wait lasts 400 to 403 ticks, a token is taken within 2 ticks of being given |
+
+On a board it reports, after 25 s: `floats 65489 ok 0 bad | inversion 25 cycles, high waited 200..200 ms | semaphore 25 taken 52 timed out, 0 late, 0 wrong timeouts | PASS`.
+
+A test is only worth something if it can fail, so it was run twice with the feature deliberately broken, on the same board:
+
+| Broken on purpose | Result |
+|---|---|
+| priority inheritance off (`boost` does nothing) | `high waited 650..650 ms`, every cycle bad: the 650 ms the scenario predicts without inheritance |
+| float registers not saved (`--no-default-features`) | `floats 325 bad` out of 30000: corrupted sums |
+
 ## Moving the apps onto mros
 
 Neither app uses mros yet, on purpose: a context switch that has never run on the chip is not something to put
@@ -120,13 +143,9 @@ under firmware that works. What each move needs:
 | **UART** | a blocking loop on `esp-hal` 1.2.2 (crates.io) | the port builds on `esp-hal` `main` (it needs the S31 RTOS hooks), so the UART app stays on its loop until a release has them, or moves to the Ethernet workspace's `esp-hal`. |
 | **Tests** | host tests of `workshop-core`; on-target tests (`cargo test-target`) on the UART app | the kernel's tests are already in `cargo test-host`. Once the demo runs, the demo's expectations (a periodic task's jitter, the round robin's fairness) become on-target tests. |
 
-Suggested order: test what the demo doesn't cover (below); add a stack-usage and task-list command to the CLI (`tasks`) using the
+Suggested order: add a stack-usage and task-list command to the CLI (`tasks`) using the
 kernel's `state`/`priority`; move the Ethernet app's console task (already a separate task) onto mros as the
 first real user; then the executor.
-
-The demo doesn't cover the mutex, the semaphore, timeouts or floats: a second on-target demo should (two tasks
-doing float arithmetic and checking their results while switching all the time; a low/mid/high priority-inversion
-scenario; a semaphore signalled from the tick) before anything depends on them.
 
 ## What is missing
 

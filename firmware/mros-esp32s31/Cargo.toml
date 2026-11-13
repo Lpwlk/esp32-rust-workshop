@@ -37,6 +37,9 @@ esp-println            = { git = "https://github.com/esp-rs/esp-hal", rev = "3ee
 [[example]]
 name = "demo"
 
+[[example]]
+name = "stress"
+
 [profile.dev]
 opt-level = "s"
 
