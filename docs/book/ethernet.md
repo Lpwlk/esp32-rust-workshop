@@ -59,8 +59,11 @@ cd firmware/ethernet
 cargo run --release --bin node-a      # then, on the other board: --bin node-b
 ```
 
-The console shows `cable connected: 1 Gbit/s · full duplex`, then the frames, exactly as on UART. In the CLI,
-`link` replaces `baud`: the cable, what the PHY negotiated, the addresses, the transport, the counters.
+The console shows `cable connected: 1 Gbit/s · full duplex`, then, by default, **one status line updated in
+place** (`verbose live`): the elapsed time, the frame counters, the link, the round trip and the last event. `verbose
+frames` prints every frame, `verbose wire` adds the raw frames, checksums and the timing breakdown (see the
+[console](console.md#how-much-the-console-prints-verbose)). In the CLI, `link` replaces `baud`: the cable, what the PHY negotiated, the
+addresses, the transport, the counters.
 TCP instead of UDP is a preset: `PRESET_NODE_A=node-a-tcp PRESET_NODE_B=node-b-tcp cargo build --release`.
 
 ## How it works
@@ -80,6 +83,9 @@ TCP instead of UDP is a preset: `PRESET_NODE_A=node-a-tcp PRESET_NODE_B=node-b-t
   millisecond), and the main loop shares an executor with the network tasks, so output goes into a pipe
   that a task drains. Without it the packets being described were held back by their own log lines.
 - **`baud` and `BAU` frames don't exist here.** An Ethernet node ignores a `BAU` frame.
+- **The peer's LEDs, buttons and settings are an address space.** The same link also carries
+  [UA-lite](protocols.md) requests (`BRW`, `RED`, `WRT`, `SUB`): `write /leds/1 on` lights the other board's LED,
+  `read /stats/rx`, `subscribe /buttons/jumper`. It is the same code on both apps (`workshop-core::space`).
 
 ## What was measured
 
@@ -94,10 +100,13 @@ Two boards cabled directly, default presets (UDP), and the TCP presets:
 | `tx on-rx` round trip | about 4 ms | about 5 ms |
 
 The back-to-back burst reaches about 365 kB/s (0.3 % of the link): the node's frame handling, not the
-wire, is the limit. The **round-trip time is an open problem**: it is about 20 times the UART link's
+wire, is the limit. (UA-lite and the live line were written after these measurements and are tested on the
+host, not yet measured on two boards.) The **round-trip time is an open problem**: it is about 20 times the UART link's
 and the raw network path measured on its own was 0.4 ms. The main loop runs about 50 000 times a second
 and printing no longer blocks, yet received frames wait about 0.4 ms for the loop and a sent frame about
-1 ms for the network task (`verbose wire` shows both); the cause isn't found yet.
+1 ms for the network task (`verbose wire` shows both, with the slowest main-loop iteration and the task pickup
+delay); the cause isn't found yet. The leading suspect is one slow step of the main loop (probably the RGB LED
+write) delaying the single cooperative executor, to be confirmed by timing it.
 
 ## Reference
 

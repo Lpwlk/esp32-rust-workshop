@@ -19,7 +19,10 @@ cargo run --release --bin node-b      # board B: 192.168.77.12
 
 Cable the two RJ45 ports together (a straight cat5e cable is enough: the PHYs detect the cable
 type). Both consoles show `cable connected: 1 Gbit/s · full duplex`, then the frames. `help` lists
-the CLI; `link` shows the cable, the negotiated speed, the addresses and the counters.
+the CLI; `link` shows the cable, the negotiated speed, the addresses and the counters. By default the console
+is one status line updated in place; `verbose frames` and `verbose wire` print every frame (and the raw frames,
+checksums and timing breakdown). `write /leds/1 on` and `read /stats/rx` use the peer's UA-lite address space
+([`protocols.md`](../docs/book/protocols.md)).
 
 | Want | Do |
 |---|---|

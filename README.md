@@ -69,6 +69,9 @@ python3 scripts/dev.py check                       # everything CI checks, local
 ## What it looks like (Ethernet)
 
 Every scene below is a real recording of two boards, made by `python3 scripts/record_demos.py`.
+The look of the GIFs (font size, theme, speed, line height...) is in
+[`render.toml`](docs/book/assets/demo/render.toml); to change it without a board, re-render the saved
+recordings: `python3 scripts/render_demos.py --font-size 12`.
 Each one is shown with the preset it runs.
 
 ### Boot: the cable comes up at 1 Gbit/s
@@ -216,7 +219,7 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 │       ├── core/                hardware-free logic, no_std, tested on the host; examples/ run on your computer
 │       └── presets-tool/        host-only: reads and validates the TOML presets (`cargo presets`)
 ├── docs/                        the documentation site: book/ (pages; book/reference/ is generated), zensical.toml
-├── scripts/                     dev.py (boards, flash, tests, docs), record.py, record_demos.py, memsize.py
+├── scripts/                     dev.py (boards, flash, tests, docs), record.py, record_demos.py, render_demos.py, gifrender.py, memsize.py
 └── .github/                     CI and releases
 ```
 

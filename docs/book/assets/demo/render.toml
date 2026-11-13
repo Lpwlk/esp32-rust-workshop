@@ -1,0 +1,44 @@
+# How the console recordings (*.cast) are turned into GIFs.
+#
+# A .cast file is the raw text of a session, so it can be rendered again with another look WITHOUT
+# recording again (no board needed). Edit this file, then:
+#
+#   python3 scripts/render_demos.py                  every cast
+#   python3 scripts/render_demos.py boot eth-boot    some of them
+#   python3 scripts/render_demos.py --font-size 12   try a value without editing this file
+#   python3 scripts/render_demos.py --list           what each cast would use
+#
+# `scripts/record.py --gif` and `scripts/record_demos.py` read this file too, so a new recording
+# comes out in the same style. Needs `agg` (brew install agg) and, to shrink the file, `gifsicle`.
+
+# The look of every GIF. All keys are optional: what is missing keeps the value written here.
+[style]
+# Size of the text, in pixels. The GIF is as wide as `cols x` one character, so a smaller font
+# gives a smaller picture (and a smaller file): 15 is comfortable on a README, 12 is dense.
+font_size = 15
+# Space between lines, as a multiple of the font size.
+line_height = 1.3
+# asciinema, dracula, github-dark, github-light, kanagawa, kanagawa-dragon, kanagawa-light,
+# monokai, nord, solarized-dark, solarized-light, gruvbox-dark
+theme = "monokai"
+# A monospace font, or a comma-separated list tried in order. Empty: agg's own list
+# (JetBrains Mono, Fira Code, SF Mono, Menlo, Consolas, DejaVu Sans Mono, Liberation Mono).
+font_family = ""
+# Playback speed: 2 plays twice as fast.
+speed = 1.0
+# Pauses longer than this many seconds are cut to it (a recording waits for the board).
+idle_time_limit = 1.2
+# How long the last frame stays, seconds, before the loop starts again.
+last_frame_duration = 3.0
+# Frames per second at most: lower makes a smaller file, 30 is smooth.
+fps_cap = 30
+# Size of the terminal window, in characters. 0 keeps the size the session was recorded in.
+cols = 0
+rows = 0
+# Colors in the GIF palette (2-256). A terminal needs few: lower is smaller, 256 is lossless.
+colors = 256
+
+# Per-recording overrides: a table named like the cast file, with any key of [style].
+# Example: show the long boot card smaller, so all of it fits.
+# [eth-boot]
+# font_size = 12

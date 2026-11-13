@@ -10,8 +10,12 @@ time) and renders a GIF with agg:
     burst   back-to-back and 1 kHz bursts, then round-trip times (`tx on-rx` on node B)
     tcp     the TCP presets: the client connects, `link`, a burst
 
-    python3 scripts/record_demos.py              # every scene
-    python3 scripts/record_demos.py boot burst   # some of them
+    python3 scripts/record_demos.py                  # every scene
+    python3 scripts/record_demos.py boot burst       # some of them
+    python3 scripts/record_demos.py --font-size 12   # with another look (see render.toml)
+
+The look of the GIFs (font size, theme, speed...) is in docs/book/assets/demo/render.toml. To
+change it for recordings that exist, without a board: python3 scripts/render_demos.py.
 
 Needs both boards plugged in and assigned (`python3 scripts/dev.py boards assign a 6C:1A`), the
 Ethernet cable between them, no other program holding their serial ports, and
@@ -21,6 +25,7 @@ Output: docs/book/assets/demo/eth-<scene>.cast and .gif.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -31,6 +36,8 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
+
+from gifrender import add_style_arguments, overrides_from, style_flags  # noqa: E402
 
 ETH = ROOT / "firmware" / "ethernet"
 OUT = ROOT / "docs" / "book" / "assets" / "demo"
@@ -125,7 +132,7 @@ def type_on(port: str, line: str) -> None:
         os.close(fd)
 
 
-def record(scene: str, ports: dict[str, str]) -> None:
+def record(scene: str, ports: dict[str, str], look: list[str]) -> None:
     preset_a, preset_b, seconds, start, extra = SCENES[scene]
     flash(preset_a, preset_b, ports)
     if scene == "burst":
@@ -136,6 +143,7 @@ def record(scene: str, ports: dict[str, str]) -> None:
         + ["--cols", "100", "--rows", "34", "--seconds", str(seconds), "--start", str(start)]
         + ["--trim", TRIM]
         + extra
+        + look
         + ["--", "espflash", "monitor", "--chip", CHIP, "--port", ports["a"], "--skip-update-check"]
     )
     if scene == "burst":
@@ -145,7 +153,17 @@ def record(scene: str, ports: dict[str, str]) -> None:
 def main() -> None:
     from boards import BoardError, resolve
 
-    wanted = sys.argv[1:] or list(SCENES)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "scenes", nargs="*", metavar="SCENE", help=f"{', '.join(SCENES)} (default: all)"
+    )
+    add_style_arguments(parser)
+    args = parser.parse_args()
+    # The look: render.toml, and whatever was given here on top (passed on to record.py).
+    look = style_flags(overrides_from(args))
+    wanted = args.scenes or list(SCENES)
     unknown = [s for s in wanted if s not in SCENES]
     if unknown:
         sys.exit(f"unknown scene {unknown}: choose from {', '.join(SCENES)}")
@@ -160,7 +178,7 @@ def main() -> None:
 
     for scene in wanted:
         print(f"\n=== {scene}", flush=True)
-        record(scene, ports)
+        record(scene, ports, look)
     # Leave the boards on the default presets.
     if any(SCENES[s][0].endswith("-tcp") for s in wanted):
         flash("node-a", "node-b", ports)

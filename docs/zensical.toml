@@ -20,8 +20,8 @@
 # Project
 # ----------------------------------------------------------------------------
 [project]
-site_name = "ESP32-S31 UART workshop"
-site_description = "Two ESP32-S31 boards talking over UART at 5 Mbaud, in no_std Rust"
+site_name = "ESP32-S31 workshop"
+site_description = "Two ESP32-S31 boards talking over UART at 5 Mbaud or Gigabit Ethernet, in no_std Rust"
 site_author = "Loïc Pawlicki | @Lpwlk"
 site_url = "https://lpwlk.github.io/esp32-rust-workshop/"
 repo_url = "https://github.com/Lpwlk/esp32-rust-workshop"

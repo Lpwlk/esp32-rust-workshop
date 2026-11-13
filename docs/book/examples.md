@@ -16,6 +16,7 @@ cargo run -p workshop-core --target host-tuple --example frames
 cargo run -p workshop-core --target host-tuple --example settings
 cargo run -p workshop-core --target host-tuple --example button
 cargo run -p workshop-core --target host-tuple --example cli
+cargo run -p workshop-core --target host-tuple --example space
 ```
 
 ## Frames on the wire
@@ -228,6 +229,78 @@ a history. It is fed the same way from the USB console and from RTT.
     led 3 on         → error: usage: led <1|2> <off|on|blink [ms]|button|peer|link|rx|tx>
     frobnicate       → error: unknown command 'frobnicate' (try `help`)
     ```
+
+## The address space (UA-lite)
+
+Node B describes itself as a tree (its LEDs, buttons, statistics and settings); node A browses it, reads a button,
+writes a LED and watches the button. B's side is the real `space::serve` function, fed with the lines A sends: what is
+printed is exactly what would travel on the UART, over UDP or over TCP. The protocol is explained in
+[Protocols](protocols.md#the-address-space-ua-lite).
+
+### Browse
+
+=== "Code"
+
+    ```rust title="firmware/shared/core/examples/space.rs"
+    --8<-- "firmware/shared/core/examples/space.rs:browse"
+    ```
+
+=== "Output"
+
+    ```text
+    A> $BRW,node-A,1,1000,4,0*33
+    B> $BRR,node-B,1,1000,1,5,1,VTW,1*4C
+       found 1 (id 5)
+    A> $BRW,node-A,2,1000,4,1*31
+    B> $BRR,node-B,2,1000,2,6,2,VTW,0*4D
+       found 2 (id 6)
+    ```
+
+One child per frame, until `more` is 0. `VTW` says a **V**ariable of type **T**ext that is **W**ritable.
+
+### Read and write
+
+=== "Code"
+
+    ```rust
+    --8<-- "firmware/shared/core/examples/space.rs:read_write"
+    ```
+
+=== "Output"
+
+    ```text
+    A> $RED,node-A,3,2000,8*36
+    B> $VAL,node-B,3,2000,3,8,0,0*22
+       jumper = 0
+    A> $WRT,node-A,4,3000,5,blink 200*63
+    B> $VAL,node-B,4,3000,4,5,0,blink 200 ms*50
+       LED 1 written: Good, now blink 200 ms
+    A> $WRT,node-A,5,4000,5,disco*67
+    B> $VAL,node-B,5,4000,5,5,3,blink 200 ms*54
+       LED 1 written: BadTypeMismatch, still blink 200 ms
+    ```
+
+A write goes through the same checks as the CLI's `set`; the answer carries the value now in force, so a refused write
+(status 3, `BadTypeMismatch`) leaves the LED alone and says so.
+
+### Watch
+
+=== "Code"
+
+    ```rust
+    --8<-- "firmware/shared/core/examples/space.rs:watch"
+    ```
+
+=== "Output"
+
+    ```text
+    A> $SUB,node-A,6,5000,8,100*3E
+    B> $VAL,node-B,6,5000,6,8,0,0*25
+    B> $VAL,node-B,99,5200,6,8,0,1*10
+    ```
+
+The answer to the `SUB` is the value now; the last line is a notification, sent only because the button changed, and
+its `req` (6) is the `seq` of the `SUB`.
 
 ## Write your own
 
