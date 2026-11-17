@@ -37,16 +37,18 @@ pub mod ext_leds;
 pub mod fx;
 pub mod led;
 pub mod link;
+pub mod loadgen;
 pub mod net;
 #[cfg(feature = "ferrite")]
 pub mod rt;
 pub mod rtt_console;
 pub mod settings;
 pub mod term;
+pub mod trace;
 pub mod trng;
 
 // Hardware-independent logic, tested on the host (`cargo test-host` in the repository root).
-pub use workshop_core::{burst, config, line, persist, protocol, rtt, seq, space, units, wire};
+pub use workshop_core::{burst, config, dissect, line, persist, protocol, rtt, seq, space, units, wire};
 
 use embassy_executor::Spawner;
 use esp_hal::{
@@ -65,7 +67,7 @@ use crate::{
     config::{NodeConfig, TxMode, Verbosity},
     ext_leds::{ExtLeds, LedInputs},
     link::{Link, SendError},
-    protocol::{Edge, Frame, MAX_FRAME, Payload},
+    protocol::{Edge, Frame, Payload},
     rtt::RttTracker,
     seq::SeqCheck,
     space::Subscriptions,
@@ -268,6 +270,8 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
         Transport::Udp => spawner.spawn(link::udp_task(stack, net_cfg).unwrap()),
         Transport::Tcp => spawner.spawn(link::tcp_task(stack, net_cfg).unwrap()),
     }
+    // The traffic generator (`gen`) has its own UDP socket, whatever carries the node's frames.
+    spawner.spawn(link::gen_task(stack, net_cfg).unwrap());
     let link = Link::new(&net_cfg);
 
     // One GPIO interrupt handler for both buttons (src/button.rs).
@@ -279,7 +283,12 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
     let rgb_led = led::Led::new(p.RMT, p.GPIO60);
     let fx = fx::Animator::new(fx_settings(&cfg.rgb));
 
+    workshop_core::theme::activate(&defaults.colors);
     term::set_verbosity(cfg.verbose);
+    term::set_local(&net_cfg);
+    term::set_short_ip(cfg.trace_short_ip);
+    trace::set_dash(cfg.trace_window_s, cfg.trace_dash.columns(cfg.trace_dash_view));
+    trace::set_level(cfg.trace);
     term::boot_card(&cfg, &chip_info(&rng), &system_info(&cfg, defaults, boot_load));
     let cli = cli::Cli::new(usb_rx);
 
@@ -304,6 +313,7 @@ pub async fn run(spawner: Spawner, defaults: &'static NodeConfig) -> ! {
         subs: Subscriptions::new(),
         browse: None,
         help: None,
+        deferred: None,
         rtt: RttTracker::new(),
         burst_id: 0,
         burst_tx: None,
@@ -334,7 +344,6 @@ struct Queued {
     seq: u32,
     t_ms: u32,
     payload: Payload,
-    line: heapless::String<{ MAX_FRAME }>,
     sent_us: u64,
 }
 
@@ -366,6 +375,8 @@ struct Node {
     browse: Option<space::BrowseWalk>,
     /// The `help` overview being printed, a section at a time.
     help: Option<cli::HelpPager>,
+    /// A command that answers at length, waiting for the console to have room (see `step`).
+    deferred: Option<cli::Command>,
     rtt: RttTracker,
     burst_id: u32,
     burst_tx: Option<BurstTx>,
@@ -400,8 +411,21 @@ impl Node {
         let inputs =
             LedInputs { button: self.pressed(), peer_button: self.peer.button, link_up: self.peer.link_up(&self.cfg) };
         self.leds.update(&inputs);
-        if let Some(cmd) = self.cli.poll() {
-            self.apply(cmd);
+        // A command that answers at length waits until the console has room for the whole answer: the pipe drops what
+        // doesn't fit, in the middle (the end of a `help` page, the last keys of `config`). Meanwhile no other command is
+        // read; what is typed waits in the USB buffer.
+        if let Some(cmd) = self.deferred.take() {
+            if console::has_room_for_reply() {
+                self.apply(cmd);
+            } else {
+                self.deferred = Some(cmd);
+            }
+        } else if let Some(cmd) = self.cli.poll() {
+            if answers_at_length(&cmd) && !console::has_room_for_reply() {
+                self.deferred = Some(cmd);
+            } else {
+                self.apply(cmd);
+            }
         }
 
         // --- Button edges (jumper, BOOT) -> EVT frames ------------------------------
@@ -440,6 +464,8 @@ impl Node {
         self.poll_subscriptions();
         self.poll_help();
         self.watch_network();
+        self.poll_trace();
+        self.poll_gen();
 
         // --- Status line ----------------------------------------------------------
         if self.last_status.elapsed() >= ms_f(self.cfg.status_period_ms) {
@@ -458,6 +484,49 @@ impl Node {
                     self.loop_max_us,
                 );
                 self.loop_max_us = 0;
+            }
+        }
+    }
+
+    /// Prints the frames the network trace kept (`trace`): a couple per pass, and only while the console has
+    /// room for them, so a burst of frames can't bury the node's own output or stall the loop. What the
+    /// queue had no room for is counted, and said.
+    fn poll_trace(&mut self) {
+        use config::{Trace, TraceDash, TraceView};
+        if self.cfg.trace != Trace::Off {
+            // One line per frame (or a folded run of them) is about 200 bytes of console output; a frame with
+            // its layers and a hex dump about 1.5 KB. Take only what the console has room for.
+            let one_line = self.cfg.trace != Trace::Frames || self.cfg.trace_view == TraceView::Compact;
+            let (limit, room) = if one_line { (8, 512) } else { (2, 2048) };
+            let mut batch: heapless::Vec<trace::Captured, 8> = heapless::Vec::new();
+            // The room an answer to a command needs is left alone: the trace is the first thing to give way.
+            while batch.len() < limit && console::free() >= console::REPLY_ROOM + room * (batch.len() + 1) {
+                let Some(frame) = trace::take() else { break };
+                let _ = batch.push(frame);
+            }
+            if !batch.is_empty() {
+                term::trace_batch(&batch, self.cfg.trace, self.cfg.trace_view, usize::from(self.cfg.trace_bytes));
+            }
+            // The dashboard, a few times a second, when the console has room for it.
+            if self.cfg.trace_dash != TraceDash::Off && trace::dash_due() && console::free() >= console::REPLY_ROOM {
+                term::dash_update(self.cfg.trace_dash, self.cfg.trace_dash_view, &trace::snapshot(), net::link_state());
+            }
+        }
+        let dropped = trace::take_dropped();
+        if dropped > 0 && self.cfg.trace != Trace::Off {
+            term::trace_dropped(dropped);
+        }
+    }
+
+    /// Prints what the traffic generator has to say: the state after a command, a stream that ended, one received.
+    fn poll_gen(&mut self) {
+        while let Some(report) = loadgen::take_report() {
+            let capacity = self.capacity();
+            match report {
+                loadgen::Report::Status(status) => term::gen_status(&status),
+                loadgen::Report::Error(why) => term::cli_error(format_args!("gen: {why}")),
+                loadgen::Report::Tx(summary) => term::gen_sent(now_ms(), &summary, capacity),
+                loadgen::Report::Rx(summary) => term::gen_received(now_ms(), &summary, capacity),
             }
         }
     }
@@ -524,7 +593,7 @@ impl Node {
                 self.stats.tx += 1;
                 self.leds.on_tx();
                 self.rtt.sent(frame.seq, sent_us);
-                Some(Queued { seq: frame.seq, t_ms: frame.t_ms, payload, line, sent_us })
+                Some(Queued { seq: frame.seq, t_ms: frame.t_ms, payload, sent_us })
             }
             Err(SendError::NotConnected) => {
                 term::net_error(now_ms(), "not sent: no TCP connection to the peer yet");
@@ -542,9 +611,6 @@ impl Node {
         let frame = Frame { node: self.cfg.name, seq: q.seq, t_ms: q.t_ms, payload: q.payload };
         let delta = self.dat_mark(&q.payload, Dir::Tx, q.sent_us);
         term::sent(now_ms(), &frame, button, delta, &self.stats);
-        if self.cfg.verbose >= Verbosity::Wire {
-            term::wire(q.line.as_bytes(), None, None);
-        }
     }
 
     /// For a DAT frame, the time since the previous DAT (either direction).
@@ -628,7 +694,8 @@ impl Node {
 
         term::received(now_ms(), &frame, rtt, delta, &self.stats);
         if self.cfg.verbose >= Verbosity::Wire {
-            term::wire(line, since_previous, Some(now.saturating_sub(arrived_us)));
+            // The raw line and its checksum are `trace`'s: this is what only the node knows.
+            term::timing(since_previous, now.saturating_sub(arrived_us));
         }
         if let Some(Some(queued)) = echo {
             self.report(&queued, None);
@@ -657,6 +724,11 @@ impl Node {
     /// Prints the next section of the `help` overview when its pause is over.
     fn poll_help(&mut self) {
         let Some(pager) = self.help.as_mut() else { return };
+        // A section, and the prompt block drawn after it, are up to 4 KB each: wait for room (there is no pause
+        // between sections, the console's own pace is the pause).
+        if !console::has_room_for_reply() {
+            return;
+        }
         if let Some(step) = pager.poll(now_ms() as u32) {
             term::help_step(step);
         }
@@ -912,6 +984,12 @@ impl Node {
         self.boot.set_timing(ms(self.cfg.debounce_ms), ms(self.cfg.lockout_ms));
         rtt_console::set_route(self.cfg.console);
         term::set_verbosity(self.cfg.verbose);
+        trace::set_dash(self.cfg.trace_window_s, self.cfg.trace_dash.columns(self.cfg.trace_dash_view));
+        trace::set_level(self.cfg.trace);
+        term::set_short_ip(self.cfg.trace_short_ip);
+        if self.cfg.trace == config::Trace::Off || self.cfg.trace_dash == config::TraceDash::Off {
+            term::dash_clear();
+        }
     }
 
     /// `set <key> <value>`: validates, applies, and reports the result.
@@ -1015,12 +1093,23 @@ impl Node {
             | Command::Write { .. }
             | Command::Watch { .. }
             | Command::Unwatch(_) => self.ask_peer(cmd),
+            Command::Gen(cmd) => {
+                if !loadgen::command(cmd) {
+                    term::cli_error(format_args!("gen: the generator hasn't taken the previous command yet"));
+                }
+            }
             Command::Burst { count: None, rate_hz: None } => self.cli.start_burst_wizard(self.cfg.burst),
             Command::Burst { count, rate_hz } => {
                 self.start_burst(count.unwrap_or(self.cfg.burst.count), rate_hz.unwrap_or(self.cfg.burst.rate_hz));
             }
         }
     }
+}
+
+/// Whether answering this command takes a few KB of console output (the page of `help`, the table of `config`...).
+fn answers_at_length(cmd: &cli::Command) -> bool {
+    use cli::Command;
+    matches!(cmd, Command::Help(_) | Command::Config | Command::Link | Command::Info | Command::List | Command::Status)
 }
 
 /// Compiled-in features and saved settings, for the boot card.

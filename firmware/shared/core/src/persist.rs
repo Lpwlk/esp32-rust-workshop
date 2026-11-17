@@ -71,7 +71,7 @@ pub fn encode(live: &NodeConfig, build: &NodeConfig) -> Record {
     for (name, key) in KEYS {
         let value = live.value(key);
         if value != build.value(key) {
-            // Can't overflow: 16 keys × (20 + 24 + 2) bytes < 1014.
+            // Can't overflow: 23 keys × (20 + 24 + 2) bytes < 1014.
             let _ = writeln!(payload, "{name}={value}");
         }
     }
@@ -214,6 +214,13 @@ mod tests {
             ("burst.count", "99999"),
             ("burst.rate_hz", "19999.99"),
             ("console", "serial"),
+            ("trace", "events"),
+            ("trace_bytes", "256"),
+            ("trace_view", "inside-out"),
+            ("trace_dash", "full"),
+            ("trace_dash_view", "mix"),
+            ("trace_window_s", "3600"),
+            ("trace_short_ip", "on"),
         ] {
             c.set(k, v).unwrap_or_else(|e| panic!("{k}: {e:?}"));
         }

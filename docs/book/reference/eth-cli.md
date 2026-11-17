@@ -11,7 +11,7 @@ Changes are applied immediately and lost on reboot.
 |---|---|---|
 | `config` | `cfg`, `get` | all settings: current value, build value, read-only ones |
 | `set <key> <value>` | `s` | change a setting, applied immediately |
-| `reset [key]` |  | back to the build value (one key, or all) |
+| `reset [key]` | `r` | back to the build value (one key, or all) |
 
 ### `config`
 
@@ -62,7 +62,7 @@ reset
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `verbose [0|1|2|live|frames|wire]` | `v` | how much the console prints (= set verbose) |
+| `verbose [0|1|2|3|silent|live|frames|wire]` | `v` | how much the console prints (= set verbose) |
 | `pattern <name|1-5>` | `p` | RGB LED pattern (= set rgb.pattern) |
 | `next` | `n` | next RGB LED pattern |
 | `freq <Hz|period>` | `f` | RGB LED refresh rate (= set rgb.freq_hz) |
@@ -73,12 +73,15 @@ reset
 ### `verbose`
 
 ```text
-0 live    one line, updated in place, with the last frame sent or received and
+0 silent  only what you ask for (replies, burst results) and what is wrong
+          (bad frames, frames not sent): no live line, no frames, no link events
+1 live    one line, updated in place, with the last frame sent or received and
           the counters. Lost frames, link events, bursts and errors still scroll.
-1 frames  every frame on its own line, and the periodic stats line
-2 wire    frames plus, for each, the raw line, its checksum and size, the time
-          since the peer's previous frame, ignored button bounces and counters
-`verbose` alone goes to the next level (wire goes back to live).
+2 frames  every frame on its own line, and the periodic stats line
+3 wire    frames plus what is behind each: the time since the peer's previous frame,
+          ignored button bounces and counters (UART: also the raw line, checksum
+          and size; on Ethernet the raw bytes are `trace`'s)
+`verbose` alone goes to the next level: live, frames, wire, silent, and round again.
 ```
 
 Examples:
@@ -86,8 +89,8 @@ Examples:
 ```text
 verbose
 verbose frames
-verbose 0
-verbose wire
+verbose silent
+verbose 3
 ```
 
 ### `pattern`
@@ -181,10 +184,15 @@ led 2 blink 2.5Hz
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `link` | `net` | the Ethernet link: cable, speed, addresses, transport, counters |
-| `burst [count [rate|max]]` |  | send a burst of frames and measure the link |
+| `link` | `net`, `lk` | the Ethernet link: cable, speed, addresses, transport, counters |
+| `trace [0|1|2|off|events|frames|compact|layers|inside-out]` | `t`, `tr` | decode the network frames on the port (= set trace, or trace_view) |
+| `dash [bars|chart|mix | off|mini|normal|full]` | `ds` | the traffic dashboard under the trace (= set trace_dash[_view]) |
+| `gen [start|stop|pause|resume|rate|size|shape|for|count] ...` | `g` | traffic generator: UDP datagrams to the peer, finely controlled |
+| `window <2-3600 seconds>` | `win` | the time the dashboard's graphs cover (= set trace_window_s) |
+| `dump <0-256>` | `d` | raw bytes of each traced frame as a hex dump (= set trace_bytes) |
+| `burst [count [rate|max]]` | `bs` | send a burst of frames and measure the link |
 | `tx <periodic [period]|on-rx|quiet>` |  | when this node transmits (= set tx_mode) |
-| `period <period|freq>` |  | DAT period (= set data_period_ms) |
+| `period <period|freq>` | `pd` | DAT period (= set data_period_ms) |
 
 ### `link`
 
@@ -198,6 +206,112 @@ Examples:
 
 ```text
 link
+```
+
+### `trace`
+
+```text
+0 off     nothing (the driver doesn't even copy the frames)
+1 events  one line per control frame: ARP, ICMP, TCP SYN/FIN/RST, the undecodable
+2 frames  every frame decoded, checksums checked, and `dump` bytes as a hex dump
+`trace` alone goes to the next level (frames goes back to off).
+Independent of `verbose`. How a frame is laid out (= set trace_view):
+compact     one line per frame: who to whom, flags, the node's frame
+layers      a header line, then Ethernet, IPv4, UDP/TCP, the node's frame, raw bytes
+inside-out  the node's frame first, then the layers back out to the cable
+```
+
+Examples:
+
+```text
+trace
+trace events
+trace frames
+trace compact
+trace inside-out
+t 0
+```
+
+### `dash`
+
+```text
+Graphs of what is received and sent, at the bottom of the console above the
+prompt, redrawn in place. Shown while `trace` is on. A view, and a size:
+bars   a small bar graph per direction, with its rate (default)
+chart  the traffic as a time series: bit rate over the window with a time axis,
+       and beside it frames per second, average frame size, peak, link use
+mix    the chart, and under it the protocols that went by as horizontal bars
+off | mini | normal | full   how many lines (0 off, 1 mini, 2 normal, 3 full)
+`dash` alone goes to the next view; `dash next` to the next size.
+`window` sets the time the graphs cover.
+```
+
+Examples:
+
+```text
+dash
+dash chart
+dash mix
+dash full
+dash off
+```
+
+### `gen`
+
+```text
+gen start [rate] [size] [shape] [time]   in any order; the rest stays as it was
+gen rate R | size S | shape P | for T | count N | stop | pause | resume | status
+R rate: 5000 (datagrams/s), 5kpps, or on the wire 2Mbit, 500kbit, 1Gbit.
+  With a shape it is the FLOOR.
+S size of the payload: 512B, 64-1400 (random), imix (7 small, 4 medium, 1 large)
+T time: 30s, 2min, forever, auto. Default auto: as long as the shape (one cycle),
+  10 s at least.
+P shape (it has a colon): the second value is the PEAK, the last is one CYCLE,
+  not the length of the stream:
+  sine:3Mbit:20s  cosine:...  triangle:...  saw:...  square:...
+  ramp:3Mbit:30s  steps:3Mbit:5:30s  pulse:200ms:800ms  random
+A wave repeats for as long as the stream runs: add `forever` (or a time).
+```
+
+Examples:
+
+```text
+gen start 2Mbit 512B 30s
+gen start 200kbit triangle:2Mbit:10s forever
+gen start 200kbit sine:2Mbit:20s forever
+gen start 5000 imix
+gen rate 50Mbit
+gen stop
+```
+
+### `window`
+
+```text
+Each column of a graph is a slice of it: 30 s over 40 columns is 750 ms a column.
+Seconds, or with a unit: 30, 30s, 2min. Changing it starts the graphs over.
+```
+
+Examples:
+
+```text
+window 30
+window 2min
+win 10s
+```
+
+### `dump`
+
+```text
+0 shows no dump. The headers of any frame fit in 134 bytes;
+a frame is cut after 256.
+```
+
+Examples:
+
+```text
+dump 64
+d 0
+dump 256
 ```
 
 ### `burst`
@@ -261,8 +375,8 @@ period 4Hz
 | `browse [path] [depth]` | `br`, `tree` | list what the peer has, as a tree: its address space |
 | `read <path>` | `rd` | read one of the peer's variables |
 | `write <path> <value>` | `wr` | write one of the peer's variables |
-| `watch <path> [interval]` |  | the peer reports a variable whenever it changes |
-| `unwatch [path]` |  | stop watching one variable, or all of them |
+| `watch <path> [interval]` | `wa` | the peer reports a variable whenever it changes |
+| `unwatch [path]` | `uw` | stop watching one variable, or all of them |
 
 ### `browse`
 
@@ -345,7 +459,7 @@ unwatch
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `info` | `about`, `boot` | the boot card again: link, node, build, chip, LEDs |
+| `info` | `about`, `boot`, `i` | the boot card again: link, node, build, chip, LEDs |
 | `list` | `ls` | RGB patterns with a color preview |
 | `status` | `st` | current state of the RGB LED and breadboard LEDs |
 | `help [command|key]` | `h`, `?` | this list, or details on one command or setting |
@@ -396,8 +510,8 @@ help data_period_ms
 | Command | Aliases | Summary |
 |---|---|---|
 | `save` | `w` | keep the current settings across reboots (in flash) |
-| `forget` |  | erase the saved settings (next boot: build config) |
-| `reboot` | `restart` | restart the chip (software reset) |
+| `forget` | `fg` | erase the saved settings (next boot: build config) |
+| `reboot` | `restart`, `rb` | restart the chip (software reset) |
 
 ### `save`
 
@@ -417,7 +531,8 @@ save
 ### `forget`
 
 ```text
-The current settings stay as they are until the next reboot; `reset` then `reboot` to go back now.
+The current settings stay as they are until the next reboot;
+`reset` then `reboot` to go back now.
 ```
 
 Examples:
@@ -429,7 +544,8 @@ forget
 ### `reboot`
 
 ```text
-Settings not saved with `save` are lost. The boot card then shows a software reset (`CoreSw`).
+Settings not saved with `save` are lost.
+The boot card then shows a software reset (`CoreSw`).
 ```
 
 Examples:

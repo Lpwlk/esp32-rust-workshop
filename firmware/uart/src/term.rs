@@ -34,14 +34,14 @@ macro_rules! out {
 static PROMPT_ON: AtomicBool = AtomicBool::new(false);
 /// Cursor position in the line being typed (characters from its start).
 static PROMPT_CURSOR: AtomicUsize = AtomicUsize::new(0);
-static PROMPT: Mutex<RefCell<heapless::String<{ crate::cli::MAX_INPUT }>>> =
+static PROMPT_TEXT: Mutex<RefCell<heapless::String<{ crate::cli::MAX_INPUT }>>> =
     Mutex::new(RefCell::new(heapless::String::new()));
 /// Question shown instead of `cli` while the `burst` wizard runs.
 static PROMPT_LABEL: Mutex<RefCell<Option<heapless::String<48>>>> = Mutex::new(RefCell::new(None));
 
 /// The current `verbose` level (`workshop_core::config::Verbosity` as a number).
 static VERBOSITY: AtomicU8 = AtomicU8::new(0);
-/// The live line: the last frame event, redrawn in place just above the prompt (verbosity 0).
+/// The live line: the last frame event, redrawn in place just above the prompt (verbosity 1).
 static LIVE: Mutex<RefCell<Option<heapless::String<512>>>> = Mutex::new(RefCell::new(None));
 
 /// Prints formatted text on the serial console (the prompt and the live line are serial only).
@@ -57,10 +57,15 @@ pub fn set_verbosity(level: workshop_core::config::Verbosity) {
     }
 }
 
-/// Frames go to the live line: verbosity 0, and the serial console is on (an RTT viewer has no
+/// Frames go to the live line: verbosity 1, and the serial console is on (an RTT viewer has no
 /// editable prompt to keep the line under, so it gets every line).
 fn live_mode() -> bool {
-    VERBOSITY.load(Ordering::Relaxed) == 0 && crate::rtt_console::serial_on()
+    VERBOSITY.load(Ordering::Relaxed) == 1 && crate::rtt_console::serial_on()
+}
+
+/// Verbosity 0: only replies to what you typed, and faults, are printed.
+fn silent() -> bool {
+    VERBOSITY.load(Ordering::Relaxed) == 0
 }
 
 /// Shows `text` as the live line, replacing the previous one: the prompt block (live line, then
@@ -103,15 +108,15 @@ pub fn prompt_draw() {
         // Copy, then print outside the critical section: printing can take a while,
         // and interrupts (UART RX at 5 Mbaud) must keep running meanwhile.
         let (text, label) =
-            critical_section::with(|cs| (PROMPT.borrow_ref(cs).clone(), PROMPT_LABEL.borrow_ref(cs).clone()));
+            critical_section::with(|cs| (PROMPT_TEXT.borrow_ref(cs).clone(), PROMPT_LABEL.borrow_ref(cs).clone()));
         // The live line first, above the prompt; no auto-wrap, so a long line is cut, not wrapped
         // onto a second row (which the erase above wouldn't know about).
         if let Some(live) = critical_section::with(|cs| LIVE.borrow_ref(cs).clone()) {
             raw(format_args!("\x1b[?7l{live}\x1b[?7h\n"));
         }
         match label {
-            Some(q) => esp_println::print!("\x1b[1;33m{q} ›\x1b[0m {text}"),
-            None => esp_println::print!("\x1b[1;35mcli ›\x1b[0m {text}"),
+            Some(q) => esp_println::print!("{BOLD}{WARN}{q} ›{RST} {text}"),
+            None => esp_println::print!("{BOLD}{PROMPT}cli ›{RST} {text}"),
         }
         // Put the terminal cursor where the editor's cursor is (ESC [ n D = n left).
         let back = text.len().saturating_sub(PROMPT_CURSOR.load(Ordering::Relaxed));
@@ -138,7 +143,7 @@ pub fn prompt_label(question: Option<&str>) {
 pub fn prompt_set(text: &str, cursor: usize) {
     PROMPT_CURSOR.store(cursor, Ordering::Relaxed);
     critical_section::with(|cs| {
-        let mut p = PROMPT.borrow_ref_mut(cs);
+        let mut p = PROMPT_TEXT.borrow_ref_mut(cs);
         p.clear();
         let _ = p.push_str(text);
     });
@@ -146,22 +151,70 @@ pub fn prompt_set(text: &str, cursor: usize) {
     prompt_draw();
 }
 
-const RST: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const RED: &str = "\x1b[31m";
-const GREEN: &str = "\x1b[32m";
-const YELLOW: &str = "\x1b[33m";
-const CYAN: &str = "\x1b[36m";
-const GRAY: &str = "\x1b[90m";
-/// Black on yellow badge for button events.
-const EVT_BADGE: &str = "\x1b[30;43m";
-/// Black on gray badge for periodic data.
-const DAT_BADGE: &str = "\x1b[30;47m";
-/// Black on magenta badge for link control frames (baud handshake, echo).
-const LNK_BADGE: &str = "\x1b[30;45m";
-const MAGENTA: &str = "\x1b[35m";
-const BLUE: &str = "\x1b[34m";
+use workshop_core::theme::{BOLD, FAINT, RST, roles::*};
+
+// --- Pieces that carry their own color ------------------------------------------------------------------
+
+/// `TX ▶` or `RX ◀`, in the direction's color.
+struct Arrow(bool);
+
+impl core::fmt::Display for Arrow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 { write!(f, "{TX}TX ▶{RST}") } else { write!(f, "{RX}RX ◀{RST}") }
+    }
+}
+
+/// `← TX` or `← RX`: which direction the previous `DAT` went.
+struct Previous(Dir);
+
+impl core::fmt::Display for Previous {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            Dir::Tx => write!(f, "{TX}← TX{RST}"),
+            Dir::Rx => write!(f, "{RX}← RX{RST}"),
+        }
+    }
+}
+
+/// A bold marker, in the `ok` color when `.0` is true (the first text), else in the `error` color (the second):
+/// `● UP` / `● DOWN`, `✓` / `✗`.
+struct Mark(bool, &'static str, &'static str);
+
+impl core::fmt::Display for Mark {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 { write!(f, "{BOLD}{OK}{}{RST}", self.1) } else { write!(f, "{BOLD}{ERROR}{}{RST}", self.2) }
+    }
+}
+
+/// The button state in a `DAT` line.
+struct Pressed(bool);
+
+impl core::fmt::Display for Pressed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 { write!(f, "{WARN}● pressed {RST}") } else { write!(f, "{DIM}○ released{RST}") }
+    }
+}
+
+/// The edge in an `EVT` line.
+struct EdgeMark(Edge);
+
+impl core::fmt::Display for EdgeMark {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            Edge::Falling => write!(f, "{BOLD}{WARN}▼ press  {RST}"),
+            Edge::Rising => write!(f, "{BOLD}{ACCENT}▲ release{RST}"),
+        }
+    }
+}
+
+/// The `▶` before the pattern in use (`list`).
+struct Cursor(bool);
+
+impl core::fmt::Display for Cursor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 { write!(f, "{BOLD}{PROMPT}▶{RST}") } else { f.write_str(" ") }
+    }
+}
 
 /// Link counters shown in the periodic status line.
 #[derive(Default)]
@@ -206,11 +259,11 @@ const LABEL: usize = 10;
 
 fn card_top(title: &str) {
     // "╭─ title " then fill: 3 chars + title + 1 space already used.
-    out!("{CYAN}╭─ {BOLD}{title}{RST}{CYAN} {:─<w$}╮{RST}", "", w = BOX - 3 - title.chars().count());
+    out!("{ACCENT}╭─ {BOLD}{title}{RST}{ACCENT} {:─<w$}╮{RST}", "", w = BOX - 3 - title.chars().count());
 }
 
 fn card_split(title: &str) {
-    out!("{CYAN}├─ {BOLD}{title}{RST}{CYAN} {:─<w$}┤{RST}", "", w = BOX - 3 - title.chars().count());
+    out!("{ACCENT}├─ {BOLD}{title}{RST}{ACCENT} {:─<w$}┤{RST}", "", w = BOX - 3 - title.chars().count());
 }
 
 /// One `label  value` row. `value` must be plain text (no ANSI codes), since padding
@@ -225,7 +278,7 @@ fn card_row(label: &str, args: core::fmt::Arguments<'_>) {
         value.truncate(cut);
         let _ = value.push('…');
     }
-    out!("{CYAN}│{RST}  {GRAY}{label:<LABEL$}{RST}{value:<w$}{CYAN}│{RST}");
+    out!("{ACCENT}│{RST}  {DIM}{label:<LABEL$}{RST}{value:<w$}{ACCENT}│{RST}");
 }
 
 /// Prints `items` (separated by " · ") on as many rows as needed to fit the card.
@@ -358,7 +411,7 @@ pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo, sys: &SystemInfo) {
     card_split("cli");
     card_row("port", format_args!("USB Serial/JTAG (this console)"));
     card_row("usage", format_args!("type `help` then Enter"));
-    out!("{CYAN}╰{:─<BOX$}╯{RST}", "");
+    out!("{ACCENT}╰{:─<BOX$}╯{RST}", "");
     out!();
 }
 
@@ -400,29 +453,30 @@ fn pad_visible<const N: usize>(s: &mut heapless::String<N>, width: usize) {
 ///    15.002 TX ▶  EVT  #00005          ▼ press    key 0123456789ABCDEF  3 edges
 /// ```
 fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str, stats: &Stats) {
+    if silent() {
+        return;
+    }
+    let extra = extra.trim_start();
     use core::fmt::Write;
     let (s, ms) = stamp(now_ms);
-    let dir = if tx { "\x1b[36mTX ▶\x1b[0m" } else { "\x1b[32mRX ◀\x1b[0m" };
+    let dir = Arrow(tx);
     let from = if tx { "" } else { frame.node };
-    let badge = match frame.payload {
-        Payload::Data { .. } => DAT_BADGE,
-        Payload::Event { .. } => EVT_BADGE,
-        Payload::Baud { .. } | Payload::Echo { .. } => LNK_BADGE,
-        Payload::Burst { .. } => "",
+    let badge: &dyn core::fmt::Display = match frame.payload {
+        Payload::Data { .. } => &DAT,
+        Payload::Event { .. } => &EVT,
+        Payload::Baud { .. } | Payload::Echo { .. } => &LNK,
+        Payload::Burst { .. } => &"",
     };
     let mut body: heapless::String<96> = heapless::String::new();
     let kind = match frame.payload {
         Payload::Data { pressed, events, .. } => {
-            let btn = if pressed { "\x1b[33m● pressed\x1b[0m " } else { "\x1b[90m○ released\x1b[0m" };
-            let _ = write!(body, "{GRAY}btn{RST} {btn}  {GRAY}event{RST} {events:>5}");
+            let btn = Pressed(pressed);
+            let _ = write!(body, "{DIM}btn{RST} {btn} │ {DIM}event{RST} {events:>4}");
             "DAT"
         }
         Payload::Event { edge, key } => {
-            let edge = match edge {
-                Edge::Falling => "\x1b[1;33m▼ press  \x1b[0m",
-                Edge::Rising => "\x1b[1;36m▲ release\x1b[0m",
-            };
-            let _ = write!(body, "{edge}  {GRAY}key{RST} {BOLD}{key:016X}{RST}");
+            let edge = EdgeMark(edge);
+            let _ = write!(body, "{edge}  {DIM}key{RST} {BOLD}{key:016X}{RST}");
             "EVT"
         }
         Payload::Baud { baud, ack } => {
@@ -430,7 +484,7 @@ fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str, stats: &Sta
             "BAU"
         }
         Payload::Echo { echo_seq } => {
-            let _ = write!(body, "{GRAY}echo of{RST} #{echo_seq:05}");
+            let _ = write!(body, "{DIM}echo of{RST} #{echo_seq:05}");
             "ECH"
         }
         Payload::Burst { index, count } => {
@@ -445,16 +499,19 @@ fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str, stats: &Sta
     let mut line: heapless::String<512> = heapless::String::new();
     let _ = write!(
         line,
-        "{GRAY}{s:>6}.{ms:03}{RST} {dir} {badge} {kind} {RST} {GRAY}#{:05}{RST} {YELLOW}{from:<NODE_W$}{RST} {body}{extra}",
+        "{TIME}{s:>6}.{ms:03}{RST} {dir} {badge} {kind} {RST} {DIM}#{:05}{RST} {NODE}{from:<NODE_W$}{RST} {SEP}│{RST} {body}",
         frame.seq
     );
+    if !extra.is_empty() {
+        let _ = write!(line, " {SEP}│{RST} {extra}");
+    }
     if live {
         // The counters stay on the live line, so nothing needs the periodic stats line.
-        let _ = write!(line, "  {GRAY}│ tx {} rx {}{RST} ", stats.tx, stats.rx);
+        let _ = write!(line, "  {DIM}│ tx {} rx {}{RST} ", stats.tx, stats.rx);
         if stats.lost > 0 || stats.bad > 0 {
-            let _ = write!(line, "{RED}lost {} bad {}{RST}", stats.lost, stats.bad);
+            let _ = write!(line, "{ERROR}lost {} bad {}{RST}", stats.lost, stats.bad);
         } else {
-            let _ = write!(line, "{GRAY}lost 0{RST}");
+            let _ = write!(line, "{DIM}lost 0{RST}");
         }
         live_set(&line);
     } else {
@@ -466,15 +523,12 @@ fn frame_line(now_ms: u64, tx: bool, frame: &Frame<'_>, extra: &str, stats: &Sta
 /// measured from when each frame ended on the wire (µs resolution). The number is
 /// right-aligned, so the decimal points line up.
 fn push_delta(extra: &mut heapless::String<96>, d: DatDelta) {
-    let prev = match d.prev {
-        Dir::Tx => "\x1b[36m← TX\x1b[0m",
-        Dir::Rx => "\x1b[32m← RX\x1b[0m",
-    };
+    let prev = Previous(d.prev);
     let us = d.delta_us.unsigned_abs();
     let mut num: heapless::String<16> = heapless::String::new();
     let sign = if d.delta_us < 0 { "-" } else { "" };
     let _ = core::fmt::Write::write_fmt(&mut num, format_args!("{sign}{}.{:03}", us / 1000, us % 1000));
-    let _ = core::fmt::Write::write_fmt(extra, format_args!("  {GRAY}Δ{RST} {BOLD}{num:>9}{RST} {GRAY}ms{RST} {prev}"));
+    let _ = core::fmt::Write::write_fmt(extra, format_args!("  {DIM}Δ{RST} {BOLD}{num:>9}{RST} {DIM}ms{RST} {prev}"));
 }
 
 /// A sent frame; `button`: for an `EVT`, which button and the interrupts behind
@@ -485,9 +539,9 @@ pub fn sent(now_ms: u64, frame: &Frame<'_>, button: Option<(&str, u32)>, delta: 
         push_delta(&mut extra, d);
     }
     if let Some((name, n)) = button {
-        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {CYAN}{name}{RST}"));
+        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {ACCENT}{name}{RST}"));
         if n > 1 {
-            let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {DIM}{n} edges{RST}"));
+            let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {FAINT}{n} edges{RST}"));
         }
     }
     frame_line(now_ms, true, frame, &extra, stats);
@@ -501,35 +555,41 @@ pub fn received(now_ms: u64, frame: &Frame<'_>, rtt_us: Option<u64>, delta: Opti
         push_delta(&mut extra, d);
     }
     if let Some(rtt) = rtt_us {
-        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {GRAY}rtt{RST} {BOLD}{}{RST}", Us(rtt)));
+        let _ = core::fmt::Write::write_fmt(&mut extra, format_args!("  {DIM}rtt{RST} {BOLD}{}{RST}", Us(rtt)));
     }
     frame_line(now_ms, false, frame, &extra, stats);
 }
 
 pub fn bounce_ignored(now_ms: u64, button: &str, raw_edges: u32) {
     let (s, ms) = stamp(now_ms);
-    out!("{GRAY}{s:>6}.{ms:03}   ·  {button}: bounce ignored ({raw_edges} edge(s), level unchanged){RST}");
+    out!("{TIME}{s:>6}.{ms:03}   ·  {button}: bounce ignored ({raw_edges} edge(s), level unchanged){RST}");
 }
 
 pub fn lost(now_ms: u64, count: u32) {
+    if silent() {
+        return;
+    }
     let (s, ms) = stamp(now_ms);
-    out!("{GRAY}{s:>6}.{ms:03}{RST} {RED}RX ⚠  {count} frame(s) lost{RST}");
+    out!("{TIME}{s:>6}.{ms:03}{RST} {ERROR}RX ⚠  {count} frame(s) lost{RST}");
 }
 
 pub fn peer_restarted(now_ms: u64, node: &str) {
+    if silent() {
+        return;
+    }
     let (s, ms) = stamp(now_ms);
-    out!("{GRAY}{s:>6}.{ms:03}{RST} {YELLOW}RX ↻  {node} restarted (sequence reset){RST}");
+    out!("{TIME}{s:>6}.{ms:03}{RST} {WARN}RX ↻  {node} restarted (sequence reset){RST}");
 }
 
 pub fn rx_error(now_ms: u64, err: ParseError, raw: &[u8]) {
     let (s, ms) = stamp(now_ms);
     match err {
         ParseError::Checksum { expected, received } => out!(
-            "{GRAY}{s:>6}.{ms:03}{RST} {RED}RX ✗  bad checksum{RST} {GRAY}(got 0x{received:02X}, expected 0x{expected:02X}){RST} {DIM}{}{RST}",
+            "{TIME}{s:>6}.{ms:03}{RST} {ERROR}RX ✗  bad checksum{RST} {DIM}(got 0x{received:02X}, expected 0x{expected:02X}){RST} {FAINT}{}{RST}",
             Raw(raw)
         ),
         ParseError::Malformed | ParseError::BadField => {
-            out!("{GRAY}{s:>6}.{ms:03}{RST} {RED}RX ✗  invalid frame{RST} {DIM}{}{RST}", Raw(raw))
+            out!("{TIME}{s:>6}.{ms:03}{RST} {ERROR}RX ✗  invalid frame{RST} {FAINT}{}{RST}", Raw(raw))
         }
     }
 }
@@ -556,7 +616,7 @@ impl core::fmt::Display for Raw<'_> {
 
 pub fn uart_error(now_ms: u64, what: &str) {
     let (s, ms) = stamp(now_ms);
-    out!("{GRAY}{s:>6}.{ms:03}{RST} {RED}UART ✗  {what}{RST}");
+    out!("{TIME}{s:>6}.{ms:03}{RST} {ERROR}UART ✗  {what}{RST}");
 }
 
 /// Microseconds as milliseconds with two decimals: `4082` -> `4.08`.
@@ -581,7 +641,7 @@ pub fn status(now_ms: u64, stats: &Stats, link_up: bool, baud: u32, rtt: Option<
     let (s, _) = stamp(now_ms);
     // `─  485s ─ tx   242 · rx   242 · lost  0 · bad  0 ─ ● UP   5M   ─ rtt  0.18 /  0.21 /  0.40 ms`
     // Fixed-width fields: successive lines line up, and nothing shifts when a counter grows a digit.
-    let link = if link_up { "\x1b[1;32m● UP  \x1b[0m" } else { "\x1b[1;31m● DOWN\x1b[0m" };
+    let link = Mark(link_up, "● UP  ", "● DOWN");
     // `5M`, `921k`, `1200`: the long form is in `baud` and the boot card.
     let speed: heapless::String<8> = if baud.is_multiple_of(1_000_000) {
         cell(format_args!("{}M", baud / 1_000_000))
@@ -593,7 +653,7 @@ pub fn status(now_ms: u64, stats: &Stats, link_up: bool, baud: u32, rtt: Option<
     let mut line: heapless::String<256> = heapless::String::new();
     let _ = write!(
         line,
-        "{GRAY}─ {s:>4}s ─ tx {:>5} · rx {:>5} · lost {:>2} · bad {:>2} ─{RST} {link} {MAGENTA}{:<4}{RST}",
+        "{DIM}─ {s:>4}s ─ tx {:>5} · rx {:>5} · lost {:>2} · bad {:>2} ─{RST} {link} {LINK}{:<4}{RST}",
         stats.tx, stats.rx, stats.lost, stats.bad, &*speed
     );
     if let Some(r) = rtt {
@@ -602,7 +662,7 @@ pub fn status(now_ms: u64, stats: &Stats, link_up: bool, baud: u32, rtt: Option<
             (cell(Ms(r.min_us)), cell(Ms(r.avg_us)), cell(Ms(r.max_us)));
         let _ = write!(
             line,
-            " {GRAY}─ rtt{RST} {BOLD}{:>5}{RST} {GRAY}/{RST} {:>5} {GRAY}/{RST} {:>7} {GRAY}ms{RST}",
+            " {DIM}─ rtt{RST} {BOLD}{:>5}{RST} {DIM}/{RST} {:>5} {DIM}/{RST} {:>7} {DIM}ms{RST}",
             &*min, &*avg, &*max
         );
     }
@@ -635,14 +695,17 @@ impl core::fmt::Display for Bps {
 
 /// A link event (baud handshake, revert...), in magenta.
 pub fn link_event(now_ms: u64, args: core::fmt::Arguments<'_>) {
+    if silent() {
+        return;
+    }
     let (s, ms) = stamp(now_ms);
-    out!("{GRAY}{s:>6}.{ms:03}{RST} {MAGENTA}LINK ⇄  {args}{RST}");
+    out!("{TIME}{s:>6}.{ms:03}{RST} {LINK}LINK ⇄  {args}{RST}");
 }
 
 /// `baud` alone: current speed and what it allows.
 pub fn baud_info(current: u32, boot: u32) {
     out!(
-        "  {BOLD}link{RST} {} {GRAY}· 8N1 · {} max · boot speed {}{RST}",
+        "  {BOLD}link{RST} {} {DIM}· 8N1 · {} max · boot speed {}{RST}",
         Baud(current),
         Bps(u64::from(current) / 10),
         Baud(boot)
@@ -652,10 +715,10 @@ pub fn baud_info(current: u32, boot: u32) {
 pub fn burst_start(now_ms: u64, id: u32, count: u32, rate_hz: f32) {
     let (s, ms) = stamp(now_ms);
     if rate_hz == 0.0 {
-        out!("{GRAY}{s:>6}.{ms:03}{RST} {CYAN}TX ▶{RST} {BOLD}burst #{id}{RST}: {count} frames back to back…");
+        out!("{TIME}{s:>6}.{ms:03}{RST} {TX}TX ▶{RST} {BOLD}burst #{id}{RST}: {count} frames back to back…");
     } else {
         out!(
-            "{GRAY}{s:>6}.{ms:03}{RST} {CYAN}TX ▶{RST} {BOLD}burst #{id}{RST}: {count} frames at {} (one every {})…",
+            "{TIME}{s:>6}.{ms:03}{RST} {TX}TX ▶{RST} {BOLD}burst #{id}{RST}: {count} frames at {} (one every {})…",
             Freq(rate_hz),
             Period(1000.0 / rate_hz)
         );
@@ -695,22 +758,22 @@ impl core::fmt::Display for Bytes {
 pub fn burst_sent(now_ms: u64, id: u32, frames: u32, t: &Throughput, baud: u32) {
     let (s, ms) = stamp(now_ms);
     out!(
-        "{GRAY}{s:>6}.{ms:03}{RST} {CYAN}TX ▶{RST} {BOLD}burst #{id}{RST} sent: {frames} frames, {}",
+        "{TIME}{s:>6}.{ms:03}{RST} {TX}TX ▶{RST} {BOLD}burst #{id}{RST} sent: {frames} frames, {}",
         throughput(t, baud)
     );
 }
 
 pub fn burst_received(now_ms: u64, node: &str, id: u32, r: &BurstSummary, baud: u32) {
     let (s, ms) = stamp(now_ms);
-    let verdict = if r.lost == 0 && r.bad == 0 { "\x1b[1;32m✓\x1b[0m" } else { "\x1b[1;31m✗\x1b[0m" };
+    let verdict = Mark(r.lost == 0 && r.bad == 0, "✓", "✗");
     out!(
-        "{GRAY}{s:>6}.{ms:03}{RST} {GREEN}RX ◀{RST} {verdict} {BOLD}burst #{id}{RST} from {YELLOW}{node}{RST}: {}/{} frames · {} lost · {} bad",
+        "{TIME}{s:>6}.{ms:03}{RST} {RX}RX ◀{RST} {verdict} {BOLD}burst #{id}{RST} from {NODE}{node}{RST}: {}/{} frames · {} lost · {} bad",
         r.received,
         r.count,
         r.lost,
         r.bad
     );
-    out!("{GRAY}                    {RST}{}", throughput(&r.throughput, baud));
+    out!("{DIM}                    {RST}{}", throughput(&r.throughput, baud));
 }
 
 /// Prints a `width`-character color swatch of `pattern` and returns its width.
@@ -729,28 +792,28 @@ fn card_swatch_row(label: &str, pattern: &fx::Pattern, args: core::fmt::Argument
     let mut value: heapless::String<128> = heapless::String::new();
     let _ = core::fmt::Write::write_fmt(&mut value, args);
     prompt_clear();
-    crate::con_print!("{CYAN}│{RST}  {GRAY}{label:<LABEL$}{RST}");
+    crate::con_print!("{ACCENT}│{RST}  {DIM}{label:<LABEL$}{RST}");
     let used = swatch(pattern, 16);
-    crate::con_println!(" {value:<w$}{CYAN}│{RST}", w = BOX - 2 - LABEL - used - 1);
+    crate::con_println!(" {value:<w$}{ACCENT}│{RST}", w = BOX - 2 - LABEL - used - 1);
     prompt_draw();
 }
 
 /// Echo of an answer to a `burst` question (empty = the default was taken).
 pub fn cli_answer(question: &str, answer: &str) {
     let answer = if answer.is_empty() { "(default)" } else { answer };
-    out!("{BOLD}{YELLOW}{question} ›{RST} {answer}");
+    out!("{BOLD}{WARN}{question} ›{RST} {answer}");
 }
 
 pub fn cli_echo(line: &str) {
-    out!("{BOLD}\x1b[35m›{RST} {line}");
+    out!("{BOLD}{PROMPT}›{RST} {line}");
 }
 
 pub fn cli_error(args: core::fmt::Arguments<'_>) {
-    out!("  {RED}✗ {args}{RST}");
+    out!("  {ERROR}✗ {args}{RST}");
 }
 
 pub fn cli_ok(args: core::fmt::Arguments<'_>) {
-    out!("  {GREEN}✓{RST} {args}");
+    out!("  {OK}✓{RST} {args}");
 }
 
 /// `help` (no topic): every command, grouped, from the table in `cli`.
@@ -762,7 +825,7 @@ pub fn cli_help(t: &str, cfg: &NodeConfig, defaults: &NodeConfig) {
         help_key(t, k, cfg, defaults);
     } else if cfg.read_only().contains(&t) {
         out!(
-            "  {BOLD}{t}{RST} {GRAY}—{RST} read-only: set in firmware/uart/presets/*.toml or config::shared, then rebuild"
+            "  {BOLD}{t}{RST} {DIM}—{RST} read-only: set in firmware/uart/presets/*.toml or config::shared, then rebuild"
         );
     } else {
         cli_error(format_args!("no help for '{t}' (try `help`)"));
@@ -784,25 +847,44 @@ pub fn help_step(step: cli::HelpStep) {
     match step {
         cli::HelpStep::Section(n) => help_section(n),
         cli::HelpStep::Footer => {
-            out!("  {GRAY}`help <command>` or `help <key>` for details{RST}");
-            out!("  {GRAY}← → edit · ↑ ↓ history · Home/End · Ctrl+U clears · Ctrl+C quits espflash{RST}");
+            out!("  {DIM}`help <command>` or `help <key>` for details{RST}");
+            out!("  {DIM}← → edit · ↑ ↓ history · Home/End · Ctrl+U clears · Ctrl+C quits espflash{RST}");
         }
     }
 }
 
 fn help_section(n: usize) {
     let Some(&(group, title)) = HELP_GROUPS.get(n) else { return };
-    // Usage column as wide as the longest usage of any section, so summaries line up across them.
-    let usage_w = cli::COMMANDS
-        .iter()
-        .filter(|c| c.on(config::LinkKind::Uart))
-        .map(|c| c.usage.chars().count())
-        .max()
-        .unwrap_or(0)
-        + 2;
+    // The name column as wide as the longest `name (aliases)` of any section, so summaries line up across them. Not the
+    // usage: some are 60 characters long and would push every line past the width of the terminal (`help <command>`
+    // has the usage).
+    let name_w =
+        cli::COMMANDS.iter().filter(|c| c.on(config::LinkKind::Uart)).map(cli::CmdHelp::label_width).max().unwrap_or(0)
+            + 2;
     out!("  {BOLD}{title}{RST}");
     for c in cli::COMMANDS.iter().filter(|c| c.group == group && c.on(config::LinkKind::Uart)) {
-        out!("    {CYAN}{:<usage_w$}{RST}{GRAY}{}{RST}", c.usage, c.summary);
+        out!("    {}{SEP}│{RST} {DIM}{}{RST}", CommandLabel(c, name_w), c.summary);
+    }
+}
+
+/// `name (alias, alias)` padded to `.1` columns: the name in the accent color, the aliases dim.
+struct CommandLabel<'a>(&'a cli::CmdHelp, usize);
+
+impl core::fmt::Display for CommandLabel<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let c = self.0;
+        write!(f, "{ACCENT}{}{RST}", c.name)?;
+        if !c.aliases.is_empty() {
+            write!(f, "{DIM} (")?;
+            for (i, a) in c.aliases.iter().enumerate() {
+                write!(f, "{}{a}", if i == 0 { "" } else { ", " })?;
+            }
+            write!(f, "){RST}")?;
+        }
+        for _ in c.label_width()..self.1 {
+            f.write_str(" ")?;
+        }
+        Ok(())
     }
 }
 
@@ -810,21 +892,21 @@ fn help_section(n: usize) {
 const HELP_LABEL: usize = 10;
 
 fn help_command(c: &cli::CmdHelp) {
-    out!("  {BOLD}{}{RST} {GRAY}—{RST} {}", c.name, c.summary);
-    out!("    {GRAY}{:<HELP_LABEL$}{RST}{CYAN}{}{RST}", "usage", c.usage);
+    out!("  {BOLD}{}{RST} {DIM}—{RST} {}", c.name, c.summary);
+    out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {ACCENT}{}{RST}", "usage", c.usage);
     if !c.aliases.is_empty() {
         let mut aliases: heapless::String<32> = heapless::String::new();
         for (i, a) in c.aliases.iter().enumerate() {
             let _ = aliases.push_str(if i == 0 { "" } else { ", " });
             let _ = aliases.push_str(a);
         }
-        out!("    {GRAY}{:<HELP_LABEL$}{RST}{aliases}", "aliases");
+        out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {aliases}", "aliases");
     }
     for (i, line) in c.details.iter().enumerate() {
-        out!("    {GRAY}{:<HELP_LABEL$}{RST}{line}", if i == 0 { "details" } else { "" });
+        out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {line}", if i == 0 { "details" } else { "" });
     }
     for (i, ex) in c.examples.iter().enumerate() {
-        out!("    {GRAY}{:<HELP_LABEL$}{RST}{CYAN}{ex}{RST}", if i == 0 { "examples" } else { "" });
+        out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {ACCENT}{ex}{RST}", if i == 0 { "examples" } else { "" });
     }
     if c.name == "set" {
         for (row, chunk) in config::KEYS.chunks(4).enumerate() {
@@ -833,7 +915,7 @@ fn help_command(c: &cli::CmdHelp) {
                 let _ = keys.push_str(if i == 0 { "" } else { " · " });
                 let _ = keys.push_str(name);
             }
-            out!("    {GRAY}{:<HELP_LABEL$}{RST}{keys}", if row == 0 { "keys" } else { "" });
+            out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {keys}", if row == 0 { "keys" } else { "" });
         }
     }
 }
@@ -841,14 +923,14 @@ fn help_command(c: &cli::CmdHelp) {
 fn help_key(name: &str, k: config::Key, cfg: &NodeConfig, defaults: &NodeConfig) {
     let (what, values) = k.describe();
     let (now, build) = (cfg.value(k), defaults.value(k));
-    out!("  {BOLD}{name}{RST} {GRAY}—{RST} {what}");
-    out!("    {GRAY}{:<HELP_LABEL$}{RST}{values}", "values");
+    out!("  {BOLD}{name}{RST} {DIM}—{RST} {what}");
+    out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {values}", "values");
     if now == build {
-        out!("    {GRAY}{:<HELP_LABEL$}{RST}{now}", "current");
+        out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {now}", "current");
     } else {
-        out!("    {GRAY}{:<HELP_LABEL$}{RST}{YELLOW}{now}{RST}   {GRAY}(build {build}){RST}", "current");
+        out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {WARN}{now}{RST}   {DIM}(build {build}){RST}", "current");
     }
-    out!("    {GRAY}{:<HELP_LABEL$}{RST}{CYAN}set {name} <value>{RST}", "change");
+    out!("    {DIM}{:<HELP_LABEL$}{RST}{SEP}│{RST} {ACCENT}set {name} <value>{RST}", "change");
 }
 
 // --- Verbose output ----------------------------------------------------------
@@ -861,8 +943,8 @@ pub fn wire(line: &[u8], delta_ms: Option<u64>) {
     // The XOR checksum is the 2 hex digits after `*`.
     let cs = text.rsplit_once('*').map_or("??", |(_, cs)| cs);
     match delta_ms {
-        Some(d) => out!("{GRAY}             wire {DIM}{text}{RST}{GRAY}  cs 0x{cs}  {size} B  +{d} ms{RST}"),
-        None => out!("{GRAY}             wire {DIM}{text}{RST}{GRAY}  cs 0x{cs}  {size} B{RST}"),
+        Some(d) => out!("{DIM}             wire {FAINT}{text}{RST}{DIM}  cs 0x{cs}  {size} B  +{d} ms{RST}"),
+        None => out!("{DIM}             wire {FAINT}{text}{RST}{DIM}  cs 0x{cs}  {size} B{RST}"),
     }
 }
 
@@ -874,7 +956,7 @@ pub fn link_counters(c: &crate::link::Counters, peer_period_us: Option<u32>) {
     };
     //   link   tx 9.0 kB · rx 7.1 kB · RX buffer peak 33/2048 · peer DAT period 2.5 s
     out!(
-        "{GRAY}  link{RST}  tx {} · rx {} · RX buffer peak {}/{} · peer DAT period {}",
+        "{DIM}  link{RST}  tx {} · rx {} · RX buffer peak {}/{} · peer DAT period {}",
         Bytes(c.tx_bytes.into()),
         Bytes(c.rx_bytes.into()),
         c.rx_peak,
@@ -887,7 +969,7 @@ pub fn link_counters(c: &crate::link::Counters, peer_period_us: Option<u32>) {
 pub fn cli_config(cfg: &NodeConfig, defaults: &NodeConfig) {
     let p = cfg.pins;
     let u = cfg.uart();
-    out!("  {BOLD}{:<22}{:<16}{RST}{GRAY}build value{RST}", "key", "value");
+    out!("  {BOLD}{:<22}{RST}{SEP}│{RST} {BOLD}{:<16}{RST}{SEP}│{RST} {DIM}build value{RST}", "key", "value");
     let fixed: [(&str, u32); 7] = [
         ("name", 0),
         ("pins.uart_tx", u.tx.into()),
@@ -899,18 +981,23 @@ pub fn cli_config(cfg: &NodeConfig, defaults: &NodeConfig) {
     ];
     for (key, n) in fixed {
         if key == "name" {
-            out!("  {GRAY}{key:<22}{:<16}read-only (rebuild){RST}", cfg.name);
+            out!(
+                "  {DIM}{key:<22}{RST}{SEP}│{RST} {DIM}{:<16}{RST}{SEP}│{RST} {DIM}read-only (rebuild){RST}",
+                cfg.name
+            );
         } else {
-            out!("  {GRAY}{key:<22}{n:<16}read-only (rebuild){RST}");
+            out!("  {DIM}{key:<22}{RST}{SEP}│{RST} {DIM}{n:<16}{RST}{SEP}│{RST} {DIM}read-only (rebuild){RST}");
         }
     }
     for (key, k) in config::KEYS {
         let now = cfg.value(k);
         let build = defaults.value(k);
         if now == build {
-            out!("  {CYAN}{key:<22}{RST}{now:<16}");
+            out!("  {ACCENT}{key:<22}{RST}{SEP}│{RST} {now:<16}{SEP}│{RST}");
         } else {
-            out!("  {CYAN}{key:<22}{RST}{BOLD}{YELLOW}{now:<16}{RST}{GRAY}{build}  (changed){RST}");
+            out!(
+                "  {ACCENT}{key:<22}{RST}{SEP}│{RST} {BOLD}{WARN}{now:<16}{RST}{SEP}│{RST} {DIM}{build}  (changed){RST}"
+            );
         }
     }
 }
@@ -918,11 +1005,11 @@ pub fn cli_config(cfg: &NodeConfig, defaults: &NodeConfig) {
 pub fn cli_list(current: usize) {
     out!("  {BOLD}patterns{RST}");
     for (i, p) in fx::PATTERNS.iter().enumerate() {
-        let mark = if i == current { "\x1b[1;35m▶\x1b[0m" } else { " " };
+        let mark = Cursor(i == current);
         prompt_clear();
-        crate::con_print!("  {mark} {GRAY}{}{RST} {BOLD}{:<7}{RST} ", i + 1, p.name);
+        crate::con_print!("  {mark} {DIM}{}{RST} {BOLD}{:<7}{RST} ", i + 1, p.name);
         swatch(p, 16);
-        crate::con_println!("  {GRAY}{}{RST}", p.description);
+        crate::con_println!("  {DIM}{}{RST}", p.description);
         prompt_draw();
     }
 }
@@ -932,7 +1019,7 @@ pub fn cli_status(led: &fx::Settings, output: crate::led::RGB8, leds: &ExtLeds) 
     crate::con_print!("  {BOLD}LED{RST}  ");
     swatch(led.pattern(), 16);
     crate::con_println!(
-        "  {BOLD}{}{RST} {GRAY}·{RST} {} {GRAY}·{RST} cycle {} {GRAY}·{RST} {}%",
+        "  {BOLD}{}{RST} {DIM}·{RST} {} {DIM}·{RST} cycle {} {DIM}·{RST} {}%",
         led.pattern().name,
         Freq(led.freq_hz),
         Period(led.cycle_ms),
@@ -946,15 +1033,15 @@ pub fn cli_status(led: &fx::Settings, output: crate::led::RGB8, leds: &ExtLeds) 
             format_args!("{}#{:02X}{:02X}{:02X}", if i == 0 { "" } else { " " }, c.r, c.g, c.b),
         );
     }
-    out!("       {GRAY}keys{RST}  {keys}");
+    out!("       {DIM}keys{RST}  {keys}");
     out!(
-        "       {GRAY}out{RST}   #{:02X}{:02X}{:02X}  {GRAY}(sent to the LED now, after brightness + gamma){RST}",
+        "       {DIM}out{RST}   #{:02X}{:02X}{:02X}  {DIM}(sent to the LED now, after brightness + gamma){RST}",
         output.r,
         output.g,
         output.b
     );
     for i in 0..2 {
-        out!("  {BOLD}LED{}{RST} {GRAY}GPIO{}{RST}  {}", i + 1, leds.pins[i], leds.modes[i]);
+        out!("  {BOLD}LED{}{RST} {DIM}GPIO{}{RST}  {}", i + 1, leds.pins[i], leds.modes[i]);
     }
 }
 
@@ -962,9 +1049,12 @@ pub fn cli_status(led: &fx::Settings, output: crate::led::RGB8, leds: &ExtLeds) 
 
 /// A line about the address space protocol: `rx` when it is the peer asking (or answering), else us.
 pub fn space_event(now_ms: u64, rx: bool, args: core::fmt::Arguments<'_>) {
+    if silent() {
+        return;
+    }
     let (s, ms) = stamp(now_ms);
-    let dir = if rx { "\x1b[32mRX ◀\x1b[0m" } else { "\x1b[36mTX ▶\x1b[0m" };
-    out!("{GRAY}{s:>6}.{ms:03}{RST} {dir} {LNK_BADGE} UA {RST} {args}");
+    let dir = Arrow(!rx);
+    out!("{TIME}{s:>6}.{ms:03}{RST} {dir} {LNK} UA {RST} {args}");
 }
 
 /// What a request from the peer says, for the console.
@@ -975,19 +1065,19 @@ impl core::fmt::Display for SpaceRequest<'_> {
         use workshop_core::space::{Body, path_string};
         let who = self.0;
         match self.1 {
-            Body::Browse { id, index } => write!(f, "{YELLOW}{who}{RST} browses {} #{index}", path_string(*id)),
-            Body::Read { id } => write!(f, "{YELLOW}{who}{RST} reads {}", path_string(*id)),
+            Body::Browse { id, index } => write!(f, "{NODE}{who}{RST} browses {} #{index}", path_string(*id)),
+            Body::Read { id } => write!(f, "{NODE}{who}{RST} reads {}", path_string(*id)),
             Body::Write { id, value } => {
-                write!(f, "{YELLOW}{who}{RST} writes {} = {BOLD}{value}{RST}", path_string(*id))
+                write!(f, "{NODE}{who}{RST} writes {} = {BOLD}{value}{RST}", path_string(*id))
             }
             Body::Subscribe { id, interval_ms: 0 } if *id == workshop_core::space::NONE => {
-                write!(f, "{YELLOW}{who}{RST} stops watching everything")
+                write!(f, "{NODE}{who}{RST} stops watching everything")
             }
             Body::Subscribe { id, interval_ms: 0 } => {
-                write!(f, "{YELLOW}{who}{RST} stops watching {}", path_string(*id))
+                write!(f, "{NODE}{who}{RST} stops watching {}", path_string(*id))
             }
             Body::Subscribe { id, interval_ms } => {
-                write!(f, "{YELLOW}{who}{RST} watches {} every {}", path_string(*id), Period(*interval_ms as f32))
+                write!(f, "{NODE}{who}{RST} watches {} every {}", path_string(*id), Period(*interval_ms as f32))
             }
             _ => Ok(()),
         }
@@ -997,7 +1087,7 @@ impl core::fmt::Display for SpaceRequest<'_> {
 /// One node of a browse, as a list line.
 pub fn space_tree_head(path: &str, depth: u8) {
     if depth > 1 {
-        out!("  {BOLD}{path}{RST} {GRAY}· {depth} levels{RST}");
+        out!("  {BOLD}{path}{RST} {DIM}· {depth} levels{RST}");
     } else {
         out!("  {BOLD}{path}{RST}");
     }
@@ -1013,16 +1103,20 @@ pub fn space_tree_entry(e: &workshop_core::space::TreeEntry) {
     let mut used = 0;
     let _ = line.push_str("  ");
     for j in 0..e.level {
-        let _ = line.push_str(if e.guides >> j & 1 == 1 { "\x1b[90m│   \x1b[0m" } else { "    " });
+        if e.guides >> j & 1 == 1 {
+            let _ = write!(line, "{SEP}│   {RST}");
+        } else {
+            let _ = line.push_str("    ");
+        }
         used += 4;
     }
-    let _ = write!(line, "{GRAY}{}{RST}", if e.last { "└── " } else { "├── " });
+    let _ = write!(line, "{DIM}{}{RST}", if e.last { "└── " } else { "├── " });
     used += 4 + e.name.chars().count();
     if e.is_object() {
-        let _ = write!(line, "{BOLD}{BLUE}{}/{RST}", e.name);
+        let _ = write!(line, "{BOLD}{INFO}{}/{RST}", e.name);
         used += 1;
     } else {
-        let _ = write!(line, "{CYAN}{}{RST}", e.name);
+        let _ = write!(line, "{ACCENT}{}{RST}", e.name);
     }
     let pad = TREE_NAME_COL.saturating_sub(used);
     if e.is_object() {
@@ -1033,8 +1127,8 @@ pub fn space_tree_entry(e: &workshop_core::space::TreeEntry) {
             b'U' => "u32",
             _ => "text",
         };
-        let (access, color) = if e.kind[2] == b'W' { ("rw", YELLOW) } else { ("ro", GRAY) };
-        out!("{line}{:pad$} {GRAY}{ty:<5}{RST}{color}{access}{RST}", "");
+        let (access, color) = if e.kind[2] == b'W' { ("rw", WARN) } else { ("ro", DIM) };
+        out!("{line}{:pad$} {DIM}{ty:<5}{RST}{color}{access}{RST}", "");
     }
 }
 
@@ -1042,13 +1136,13 @@ pub fn space_tree_entry(e: &workshop_core::space::TreeEntry) {
 pub fn space_tree_foot(objects: u16, variables: u16) {
     if objects + variables > 0 {
         let s = |n: u16| if n == 1 { "" } else { "s" };
-        out!("  {GRAY}{objects} object{}, {variables} variable{}{RST}", s(objects), s(variables));
+        out!("  {DIM}{objects} object{}, {variables} variable{}{RST}", s(objects), s(variables));
     }
 }
 
 /// A browsed node that has nothing under it.
 pub fn space_tree_empty(path: &str) {
-    out!("  {GRAY}{path} has no children{RST}");
+    out!("  {DIM}{path} has no children{RST}");
 }
 
 /// Width of the path column of a value line.
@@ -1060,7 +1154,7 @@ struct PathCell<'a>(&'a str, usize);
 impl core::fmt::Display for PathCell<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let (branch, leaf) = self.0.rsplit_once('/').map_or(("", self.0), |(b, l)| (&self.0[..=b.len()], l));
-        write!(f, "{GRAY}{branch}{RST}{CYAN}{leaf}{RST}")?;
+        write!(f, "{DIM}{branch}{RST}{ACCENT}{leaf}{RST}")?;
         for _ in self.0.chars().count()..self.1 {
             f.write_str(" ")?;
         }
@@ -1072,11 +1166,11 @@ impl core::fmt::Display for PathCell<'_> {
 pub fn space_value(path: &str, status: workshop_core::space::Status, value: &str) {
     let cell = PathCell(path, VALUE_NAME_COL);
     if status == workshop_core::space::Status::Good {
-        out!("  {cell} {GRAY}={RST} {BOLD}{value}{RST}");
+        out!("  {cell} {DIM}={RST} {BOLD}{value}{RST}");
     } else if value.is_empty() {
-        out!("  {cell} {RED}✗ {status}{RST}");
+        out!("  {cell} {ERROR}✗ {status}{RST}");
     } else {
         // A refused write: the status, and the value that stayed.
-        out!("  {cell} {RED}✗ {status}{RST} {GRAY}(still {value}){RST}");
+        out!("  {cell} {ERROR}✗ {status}{RST} {DIM}(still {value}){RST}");
     }
 }

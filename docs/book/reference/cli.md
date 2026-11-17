@@ -11,7 +11,7 @@ Changes are applied immediately and lost on reboot.
 |---|---|---|
 | `config` | `cfg`, `get` | all settings: current value, build value, read-only ones |
 | `set <key> <value>` | `s` | change a setting, applied immediately |
-| `reset [key]` |  | back to the build value (one key, or all) |
+| `reset [key]` | `r` | back to the build value (one key, or all) |
 
 ### `config`
 
@@ -62,7 +62,7 @@ reset
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `verbose [0|1|2|live|frames|wire]` | `v` | how much the console prints (= set verbose) |
+| `verbose [0|1|2|3|silent|live|frames|wire]` | `v` | how much the console prints (= set verbose) |
 | `pattern <name|1-5>` | `p` | RGB LED pattern (= set rgb.pattern) |
 | `next` | `n` | next RGB LED pattern |
 | `freq <Hz|period>` | `f` | RGB LED refresh rate (= set rgb.freq_hz) |
@@ -73,12 +73,15 @@ reset
 ### `verbose`
 
 ```text
-0 live    one line, updated in place, with the last frame sent or received and
+0 silent  only what you ask for (replies, burst results) and what is wrong
+          (bad frames, frames not sent): no live line, no frames, no link events
+1 live    one line, updated in place, with the last frame sent or received and
           the counters. Lost frames, link events, bursts and errors still scroll.
-1 frames  every frame on its own line, and the periodic stats line
-2 wire    frames plus, for each, the raw line, its checksum and size, the time
-          since the peer's previous frame, ignored button bounces and counters
-`verbose` alone goes to the next level (wire goes back to live).
+2 frames  every frame on its own line, and the periodic stats line
+3 wire    frames plus what is behind each: the time since the peer's previous frame,
+          ignored button bounces and counters (UART: also the raw line, checksum
+          and size; on Ethernet the raw bytes are `trace`'s)
+`verbose` alone goes to the next level: live, frames, wire, silent, and round again.
 ```
 
 Examples:
@@ -86,8 +89,8 @@ Examples:
 ```text
 verbose
 verbose frames
-verbose 0
-verbose wire
+verbose silent
+verbose 3
 ```
 
 ### `pattern`
@@ -181,10 +184,10 @@ led 2 blink 2.5Hz
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `baud [rate]` |  | show the link speed, or switch both nodes to a new one |
-| `burst [count [rate|max]]` |  | send a burst of frames and measure the link |
+| `baud [rate]` | `bd` | show the link speed, or switch both nodes to a new one |
+| `burst [count [rate|max]]` | `bs` | send a burst of frames and measure the link |
 | `tx <periodic [period]|on-rx|quiet>` |  | when this node transmits (= set tx_mode) |
-| `period <period|freq>` |  | DAT period (= set data_period_ms) |
+| `period <period|freq>` | `pd` | DAT period (= set data_period_ms) |
 
 ### `baud`
 
@@ -266,8 +269,8 @@ period 4Hz
 | `browse [path] [depth]` | `br`, `tree` | list what the peer has, as a tree: its address space |
 | `read <path>` | `rd` | read one of the peer's variables |
 | `write <path> <value>` | `wr` | write one of the peer's variables |
-| `watch <path> [interval]` |  | the peer reports a variable whenever it changes |
-| `unwatch [path]` |  | stop watching one variable, or all of them |
+| `watch <path> [interval]` | `wa` | the peer reports a variable whenever it changes |
+| `unwatch [path]` | `uw` | stop watching one variable, or all of them |
 
 ### `browse`
 
@@ -350,7 +353,7 @@ unwatch
 
 | Command | Aliases | Summary |
 |---|---|---|
-| `info` | `about`, `boot` | the boot card again: link, node, build, chip, LEDs |
+| `info` | `about`, `boot`, `i` | the boot card again: link, node, build, chip, LEDs |
 | `list` | `ls` | RGB patterns with a color preview |
 | `status` | `st` | current state of the RGB LED and breadboard LEDs |
 | `help [command|key]` | `h`, `?` | this list, or details on one command or setting |
@@ -401,8 +404,8 @@ help data_period_ms
 | Command | Aliases | Summary |
 |---|---|---|
 | `save` | `w` | keep the current settings across reboots (in flash) |
-| `forget` |  | erase the saved settings (next boot: build config) |
-| `reboot` | `restart` | restart the chip (software reset) |
+| `forget` | `fg` | erase the saved settings (next boot: build config) |
+| `reboot` | `restart`, `rb` | restart the chip (software reset) |
 
 ### `save`
 
@@ -422,7 +425,8 @@ save
 ### `forget`
 
 ```text
-The current settings stay as they are until the next reboot; `reset` then `reboot` to go back now.
+The current settings stay as they are until the next reboot;
+`reset` then `reboot` to go back now.
 ```
 
 Examples:
@@ -434,7 +438,8 @@ forget
 ### `reboot`
 
 ```text
-Settings not saved with `save` are lost. The boot card then shows a software reset (`CoreSw`).
+Settings not saved with `save` are lost.
+The boot card then shows a software reset (`CoreSw`).
 ```
 
 Examples:

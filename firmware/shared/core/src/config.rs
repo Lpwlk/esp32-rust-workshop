@@ -28,6 +28,7 @@ use core::fmt;
 
 use crate::fx;
 pub use crate::net::{NetLink, TcpRole, Transport};
+pub use crate::theme::{Role, Theme};
 use crate::units::{Num, parse_freq_hz, parse_period_ms};
 
 /// `ensure!(cond, "msg")`: return `Err("msg")` unless `cond` (usable in `const fn`).
@@ -210,35 +211,44 @@ impl fmt::Display for TxMode {
 /// Levels are ordered: each one shows everything the previous one does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Verbosity {
-    /// `0`: one **live line**, updated in place, with the last frame event (sent or received) and the
+    /// `0`: **nothing but what you ask for and what is wrong**: CLI replies, burst results, and faults (bad
+    /// frames, frames that couldn't be sent, console output dropped). No live line, no frames, no link
+    /// events, no loss counts.
+    Silent,
+    /// `1`: one **live line**, updated in place, with the last frame event (sent or received) and the
     /// counters. Only what needs attention scrolls: lost or bad frames, link events, burst results,
     /// CLI replies and errors.
     Live,
-    /// `1`: every frame on its own line, and the periodic stats line.
+    /// `2`: every frame on its own line, and the periodic stats line.
     Frames,
-    /// `2`: frames plus the raw line on the wire, its checksum and size, ignored button bounces and
-    /// the link counters.
+    /// `3`: frames plus what is behind each: timing (time since the peer's previous frame, how long it
+    /// waited in a queue), ignored button bounces and the link counters. On the UART link also the raw
+    /// line, its checksum and its size; on Ethernet those belong to `trace`.
     Wire,
 }
 
 impl Verbosity {
-    /// The next level, `Wire` going back to `Live`: what `verbose` alone does.
+    /// The next level, `Wire` wrapping round to `Silent` and `Silent` to `Live`: what `verbose` alone does,
+    /// so one key walks through all four.
     pub const fn next(self) -> Verbosity {
         match self {
+            Verbosity::Silent => Verbosity::Live,
+            Verbosity::Wire => Verbosity::Silent,
             Verbosity::Live => Verbosity::Frames,
             Verbosity::Frames => Verbosity::Wire,
-            Verbosity::Wire => Verbosity::Live,
         }
     }
 
-    /// Parses `0`/`live`, `1`/`frames`, `2`/`wire`, and the old spellings: `on`, `true`, `yes`
-    /// (= `wire`) and `off`, `false`, `no` (= `live`).
+    /// Parses `0`/`silent`, `1`/`live`, `2`/`frames`, `3`/`wire`, and the spellings `on`, `true`, `yes`
+    /// (= `wire`), `off`, `false`, `no` (= `silent`) and `quiet` (= `live`, the quiet level that existed
+    /// before `silent`).
     pub fn parse(text: &str) -> Result<Verbosity, SetError> {
         match text {
-            "0" | "live" | "quiet" | "off" | "false" | "no" => Ok(Verbosity::Live),
-            "1" | "frames" => Ok(Verbosity::Frames),
-            "2" | "wire" | "raw" | "on" | "true" | "yes" => Ok(Verbosity::Wire),
-            _ => Err(SetError::BadValue("0 live, 1 frames or 2 wire (or `next`)")),
+            "0" | "silent" | "off" | "false" | "no" | "none" => Ok(Verbosity::Silent),
+            "1" | "live" | "quiet" => Ok(Verbosity::Live),
+            "2" | "frames" => Ok(Verbosity::Frames),
+            "3" | "wire" | "raw" | "on" | "true" | "yes" => Ok(Verbosity::Wire),
+            _ => Err(SetError::BadValue("0 silent, 1 live, 2 frames or 3 wire (or `next`)")),
         }
     }
 }
@@ -246,12 +256,247 @@ impl Verbosity {
 impl fmt::Display for Verbosity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad(match self {
+            Verbosity::Silent => "silent",
             Verbosity::Live => "live",
             Verbosity::Frames => "frames",
             Verbosity::Wire => "wire",
         })
     }
 }
+
+/// What the network trace prints: `trace` in the CLI, presets and saved settings.
+///
+/// The Ethernet firmware only (the UART link has no network frames). Levels are ordered like
+/// [`Verbosity`]'s: each one shows everything the previous one does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Trace {
+    /// `0`: nothing. The driver doesn't even copy the frames.
+    Off,
+    /// `1`: one line per **control** frame: ARP, ICMP, TCP `SYN`/`FIN`/`RST`, and what can't be
+    /// decoded. The connection's life, without the data in it.
+    Events,
+    /// `2`: every frame, decoded layer by layer (Ethernet, IPv4, UDP/TCP, then the node's own
+    /// frame), and the first `trace_bytes` bytes of the raw frame as a hex dump.
+    Frames,
+}
+
+impl Trace {
+    /// The next level, `Frames` going back to `Off`: what `trace` alone does.
+    pub const fn next(self) -> Trace {
+        match self {
+            Trace::Off => Trace::Events,
+            Trace::Events => Trace::Frames,
+            Trace::Frames => Trace::Off,
+        }
+    }
+
+    /// Parses `0`/`off`, `1`/`events`, `2`/`frames`, and `on` (= `frames`).
+    pub fn parse(text: &str) -> Result<Trace, SetError> {
+        match text {
+            "0" | "off" | "false" | "no" => Ok(Trace::Off),
+            "1" | "events" | "event" => Ok(Trace::Events),
+            "2" | "frames" | "frame" | "on" | "true" | "yes" => Ok(Trace::Frames),
+            _ => Err(SetError::BadValue("0 off, 1 events or 2 frames (or `next`)")),
+        }
+    }
+}
+
+impl fmt::Display for Trace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(match self {
+            Trace::Off => "off",
+            Trace::Events => "events",
+            Trace::Frames => "frames",
+        })
+    }
+}
+
+/// How the network trace lays a frame out. `trace_view` in the CLI, presets and saved settings; the CLI
+/// shortcut is `trace compact`, `trace layers` or `trace inside-out`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceView {
+    /// One line per frame: direction, protocol, who to whom, the flags, and the node's own frame if it
+    /// carries one. No layers, no dump.
+    Compact,
+    /// A header line, then the layers from the cable inwards: Ethernet, IPv4, UDP or TCP, the node's own
+    /// frame, then the raw bytes.
+    Layers,
+    /// A header line, then the node's own frame first and the layers back out to the cable: what you
+    /// were looking for first, the envelope after.
+    InsideOut,
+}
+
+impl TraceView {
+    /// Parses `compact`, `layers` and `inside-out` (and their short spellings).
+    pub fn parse(text: &str) -> Result<TraceView, SetError> {
+        match text {
+            "compact" | "c" | "short" | "line" => Ok(TraceView::Compact),
+            "layers" | "l" | "full" | "outside-in" => Ok(TraceView::Layers),
+            "inside-out" | "insideout" | "io" | "reverse" | "app" => Ok(TraceView::InsideOut),
+            _ => Err(SetError::BadValue("compact, layers or inside-out")),
+        }
+    }
+}
+
+impl fmt::Display for TraceView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(match self {
+            TraceView::Compact => "compact",
+            TraceView::Layers => "layers",
+            TraceView::InsideOut => "inside-out",
+        })
+    }
+}
+
+/// The traffic dashboard under the network trace: `trace_dash` in the CLI (`dash`), presets and saved settings.
+/// It is a few lines at the bottom of the console, above the prompt, redrawn in place like the live line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceDash {
+    /// Not shown.
+    Off,
+    /// One line: receive and send as two short bar graphs, with their rates.
+    Mini,
+    /// Two lines: a bar graph each for receive and send, with rate, frames per second, peak and link use.
+    Normal,
+    /// Four lines: a header with the scale, both graphs, and the totals.
+    Full,
+}
+
+/// What the dashboard draws: `trace_dash_view` in the CLI (`dash bars`, `dash chart`, `dash mix`), presets and
+/// saved settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DashView {
+    /// A small bar graph per direction: the shape of the traffic over the window, and its rate.
+    Bars,
+    /// The traffic as a time series: bit rate over the window, taller plots with a time axis, and beside them
+    /// frames per second, the average frame size, the peak and the use of the link.
+    Chart,
+    /// The chart, and under it the protocols that went by ranked as horizontal bars on colored backgrounds.
+    Mix,
+}
+
+impl DashView {
+    /// The next view, `Mix` going back to `Bars`: what `dash` alone does.
+    pub const fn next(self) -> DashView {
+        match self {
+            DashView::Bars => DashView::Chart,
+            DashView::Chart => DashView::Mix,
+            DashView::Mix => DashView::Bars,
+        }
+    }
+
+    /// Parses `bars`, `chart` and `mix` (and short spellings). `Err` for anything else, so that `dash` can tell a
+    /// view from a size.
+    pub fn parse(text: &str) -> Result<DashView, SetError> {
+        match text {
+            "bars" | "bar" | "b" | "spark" => Ok(DashView::Bars),
+            "chart" | "graph" | "plot" | "c" => Ok(DashView::Chart),
+            "mix" | "protocols" | "proto" | "m" => Ok(DashView::Mix),
+            _ => Err(SetError::BadValue("bars, chart or mix (or `next`)")),
+        }
+    }
+}
+
+impl fmt::Display for DashView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(match self {
+            DashView::Bars => "bars",
+            DashView::Chart => "chart",
+            DashView::Mix => "mix",
+        })
+    }
+}
+
+impl TraceDash {
+    /// The next size, `Full` going back to `Off`: what `dash` alone does.
+    pub const fn next(self) -> TraceDash {
+        match self {
+            TraceDash::Off => TraceDash::Mini,
+            TraceDash::Mini => TraceDash::Normal,
+            TraceDash::Normal => TraceDash::Full,
+            TraceDash::Full => TraceDash::Off,
+        }
+    }
+
+    /// Parses `0`/`off`, `1`/`mini`, `2`/`normal`, `3`/`full`.
+    pub fn parse(text: &str) -> Result<TraceDash, SetError> {
+        match text {
+            "0" | "off" | "false" | "no" | "none" => Ok(TraceDash::Off),
+            "1" | "mini" | "small" | "s" => Ok(TraceDash::Mini),
+            "2" | "normal" | "on" | "true" | "yes" | "n" => Ok(TraceDash::Normal),
+            "3" | "full" | "big" | "f" => Ok(TraceDash::Full),
+            _ => Err(SetError::BadValue("0 off, 1 mini, 2 normal or 3 full (or `next`)")),
+        }
+    }
+
+    /// Lines of the console it takes in `view`: a thin rule that sets it apart from the output above, then its rows.
+    pub const fn rows(self, view: DashView) -> usize {
+        match (view, self) {
+            (_, TraceDash::Off) => 0,
+            (DashView::Bars, TraceDash::Mini) => 1 + 1,
+            (DashView::Bars, TraceDash::Normal) => 2 + 1,
+            (DashView::Bars, TraceDash::Full) => 4 + 1,
+            (DashView::Chart, TraceDash::Mini) => 2 + 1,
+            (DashView::Chart, TraceDash::Normal) => 5 + 1,
+            (DashView::Chart, TraceDash::Full) => 7 + 1,
+            (DashView::Mix, TraceDash::Mini) => 3 + 1,
+            (DashView::Mix, TraceDash::Normal) => 8 + 1,
+            (DashView::Mix, TraceDash::Full) => 13 + 1,
+        }
+    }
+
+    /// Columns of each graph in `view` (each one is a slice of the window).
+    pub const fn columns(self, view: DashView) -> usize {
+        match (view, self) {
+            (_, TraceDash::Off) => 0,
+            (DashView::Bars, TraceDash::Mini) => 12,
+            (_, TraceDash::Mini) => 24,
+            (_, TraceDash::Normal) => 40,
+            (_, TraceDash::Full) => 60,
+        }
+    }
+}
+
+impl fmt::Display for TraceDash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(match self {
+            TraceDash::Off => "off",
+            TraceDash::Mini => "mini",
+            TraceDash::Normal => "normal",
+            TraceDash::Full => "full",
+        })
+    }
+}
+
+/// The most lines the dashboard takes (its rows, and the rule above them).
+pub const DASH_MAX_ROWS: usize = 14;
+
+/// `on` or `off`.
+fn f_bool(out: &mut impl fmt::Write, value: bool) -> fmt::Result {
+    out.write_str(if value { "on" } else { "off" })
+}
+
+/// Shortest and longest time the dashboard's graphs cover, seconds.
+pub const TRACE_WINDOW_RANGE: (u16, u16) = (2, 3600);
+
+/// Parses a window: `30`, `30s`, `2min`, `2m`, in seconds.
+fn parse_window_s(text: &str) -> Option<u16> {
+    let (number, unit) = match text.find(|c: char| !c.is_ascii_digit()) {
+        Some(i) => (&text[..i], text[i..].trim()),
+        None => (text, ""),
+    };
+    let n: u32 = number.parse().ok()?;
+    let seconds = match unit {
+        "" | "s" | "sec" => n,
+        "m" | "min" => n.checked_mul(60)?,
+        _ => return None,
+    };
+    u16::try_from(seconds).ok()
+}
+
+/// Most raw bytes of a frame the trace can show (and the driver keeps): `trace_bytes` goes from 0 to this.
+/// It covers the headers of any frame (Ethernet, IPv4 and TCP with all its options take at most 134).
+pub const TRACE_BYTES_MAX: u16 = 256;
 
 /// Where the console output (frames, stats, CLI replies) goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,6 +585,22 @@ pub struct NodeConfig {
     pub burst: BurstConfig,
     /// Where the console output goes (USB serial, RTT or both).
     pub console: Console,
+    /// What the network trace prints (Ethernet firmware only).
+    pub trace: Trace,
+    /// Raw bytes of each traced frame shown as a hex dump, 0-[`TRACE_BYTES_MAX`].
+    pub trace_bytes: u16,
+    /// How a traced frame is laid out.
+    pub trace_view: TraceView,
+    /// The traffic dashboard shown while the trace is on.
+    pub trace_dash: TraceDash,
+    /// What the dashboard draws.
+    pub trace_dash_view: DashView,
+    /// Time the dashboard's graphs cover, seconds ([`TRACE_WINDOW_RANGE`]).
+    pub trace_window_s: u16,
+    /// The compact trace writes the addresses of this node's subnet short (`.12` for `192.168.77.12`).
+    pub trace_short_ip: bool,
+    /// Colors of the console, by role. Fixed at build time (`[colors]` in a preset).
+    pub colors: Theme,
 }
 
 impl NodeConfig {
@@ -360,6 +621,14 @@ impl NodeConfig {
         tx_mode: TxMode::Periodic,
         burst: BurstConfig { count: 1000, rate_hz: 0.0 },
         console: Console::Auto,
+        trace: Trace::Off,
+        trace_bytes: 32,
+        trace_view: TraceView::Layers,
+        trace_dash: TraceDash::Normal,
+        trace_dash_view: DashView::Bars,
+        trace_window_s: 30,
+        trace_short_ip: false,
+        colors: Theme::DEFAULT,
     };
 
     /// Starting point of every **Ethernet** node config: the same settings, the link is
@@ -515,10 +784,17 @@ pub enum Key {
     BurstCount,
     BurstRate,
     Console,
+    Trace,
+    TraceBytes,
+    TraceView,
+    TraceDash,
+    TraceDashView,
+    TraceWindow,
+    TraceShortIp,
 }
 
 /// CLI name of each runtime setting, in the order `config` lists them.
-pub const KEYS: [(&str, Key); 16] = [
+pub const KEYS: [(&str, Key); 23] = [
     ("data_period_ms", Key::DataPeriod),
     ("status_period_ms", Key::StatusPeriod),
     ("link_timeout_periods", Key::LinkTimeoutPeriods),
@@ -535,6 +811,13 @@ pub const KEYS: [(&str, Key); 16] = [
     ("burst.count", Key::BurstCount),
     ("burst.rate_hz", Key::BurstRate),
     ("console", Key::Console),
+    ("trace", Key::Trace),
+    ("trace_bytes", Key::TraceBytes),
+    ("trace_view", Key::TraceView),
+    ("trace_dash", Key::TraceDash),
+    ("trace_dash_view", Key::TraceDashView),
+    ("trace_window_s", Key::TraceWindow),
+    ("trace_short_ip", Key::TraceShortIp),
 ];
 
 /// Settings that exist but are fixed at build time on a **UART** node: pins are already wired
@@ -596,15 +879,35 @@ impl Key {
             Key::RgbCycle => ("duration of one fade loop (lower = faster)", "200-60000 ms, or a frequency"),
             Key::RgbBrightness => ("RGB LED brightness, %", "0-100"),
             Key::Led1 | Key::Led2 => ("breadboard LED mode", "off on blink [period|freq] button peer link rx tx"),
-            Key::Verbose => {
-                ("console detail: a live line, every frame, or the raw wire", "0 live, 1 frames, 2 wire (or next)")
-            }
+            Key::Verbose => (
+                "console detail: nothing, a live line, every frame, or the details behind each",
+                "0 silent, 1 live, 2 frames, 3 wire (or next)",
+            ),
             Key::TxMode => ("when this node sends frames on its own", "periodic [period|freq], on-rx, quiet"),
             Key::BurstCount => ("frames per burst (default of `burst`)", "1-100000"),
             Key::BurstRate => ("burst rate, frames/s (default of `burst`)", "0.1-20000 Hz, or max (= 0, back to back)"),
             Key::Console => {
                 ("where the console output goes (rtt, both: build with --features rtt)", "auto serial rtt both")
             }
+            Key::Trace => (
+                "network trace (Ethernet firmware): control frames, or every frame decoded layer by layer",
+                "0 off, 1 events, 2 frames (or next)",
+            ),
+            Key::TraceBytes => ("network trace: raw bytes of each frame shown as a hex dump", "0-256 (0 = no dump)"),
+            Key::TraceView => (
+                "network trace: how a frame is laid out, on one line, layer by layer, or the node's frame first",
+                "compact, layers, inside-out",
+            ),
+            Key::TraceDash => (
+                "network trace: the traffic dashboard above the prompt (bar graphs of what is sent and received)",
+                "0 off, 1 mini, 2 normal, 3 full (or next)",
+            ),
+            Key::TraceDashView => (
+                "network trace: what the dashboard draws (small bars, a time-series chart, the chart and the protocol ranking)",
+                "bars, chart, mix (or next)",
+            ),
+            Key::TraceWindow => ("network trace: time the dashboard's graphs cover", "2-3600 s (30, 30s, 2min)"),
+            Key::TraceShortIp => ("network trace, compact view: write this subnet's addresses short (.12)", "on, off"),
         }
     }
 }
@@ -645,7 +948,7 @@ impl NodeConfig {
     /// [`Self::set`], with the whole-config validation optional (presets apply many settings
     /// in a row, then validate once: the in-between states needn't be valid).
     fn set_impl(&mut self, key: &str, value: &str, check: bool) -> Result<Key, SetError> {
-        if self.read_only().contains(&key) {
+        if self.read_only().contains(&key) || key.starts_with("colors.") {
             return Err(SetError::ReadOnly);
         }
         let key = Key::from_name(key).ok_or(SetError::UnknownKey)?;
@@ -717,6 +1020,35 @@ impl NodeConfig {
                 }
             }
             Key::Verbose => new.verbose = if value == "next" { self.verbose.next() } else { Verbosity::parse(value)? },
+            Key::Trace => new.trace = if value == "next" { self.trace.next() } else { Trace::parse(value)? },
+            Key::TraceBytes => {
+                new.trace_bytes = u16::try_from(number()?)
+                    .ok()
+                    .filter(|n| *n <= TRACE_BYTES_MAX)
+                    .ok_or(SetError::Invalid("`trace_bytes` must be 0-256"))?;
+            }
+            Key::TraceView => new.trace_view = TraceView::parse(value)?,
+            Key::TraceDash => {
+                new.trace_dash = if value == "next" { self.trace_dash.next() } else { TraceDash::parse(value)? }
+            }
+            Key::TraceShortIp => {
+                new.trace_short_ip = match value {
+                    "on" | "true" | "yes" | "1" => true,
+                    "off" | "false" | "no" | "0" => false,
+                    _ => return Err(SetError::BadValue("on or off")),
+                }
+            }
+            Key::TraceDashView => {
+                new.trace_dash_view =
+                    if value == "next" { self.trace_dash_view.next() } else { DashView::parse(value)? }
+            }
+            Key::TraceWindow => {
+                let seconds = parse_window_s(value).ok_or(SetError::BadValue("seconds: 30, 30s, 2min"))?;
+                if !(TRACE_WINDOW_RANGE.0..=TRACE_WINDOW_RANGE.1).contains(&seconds) {
+                    return Err(SetError::Invalid("`trace_window_s` must be 2-3600 seconds"));
+                }
+                new.trace_window_s = seconds;
+            }
         }
         if check {
             new.validate().map_err(SetError::Invalid)?;
@@ -772,6 +1104,9 @@ impl NodeConfig {
                 Link::Net(n) => n.set(k, value).map_err(SetError::Invalid)?,
                 Link::Uart(_) => return Err(SetError::Invalid("`net.*` only exists on an Ethernet node")),
             },
+            k if k.starts_with("colors.") => {
+                new.colors.set(&k["colors.".len()..], value).map_err(SetError::Invalid)?;
+            }
             "name" => return Err(SetError::Invalid("`name` is set with `set_name`")),
             _ => return self.set_impl(key, value, false).map(|_| ()),
         }
@@ -848,6 +1183,7 @@ impl NodeConfig {
             out,
             "    verbose: Verbosity::{},",
             match self.verbose {
+                Verbosity::Silent => "Silent",
                 Verbosity::Live => "Live",
                 Verbosity::Frames => "Frames",
                 Verbosity::Wire => "Wire",
@@ -873,6 +1209,49 @@ impl NodeConfig {
                 Console::Both => "Both",
             }
         )?;
+        writeln!(
+            out,
+            "    trace: Trace::{},",
+            match self.trace {
+                Trace::Off => "Off",
+                Trace::Events => "Events",
+                Trace::Frames => "Frames",
+            }
+        )?;
+        writeln!(out, "    trace_bytes: {},", self.trace_bytes)?;
+        writeln!(
+            out,
+            "    trace_view: TraceView::{},",
+            match self.trace_view {
+                TraceView::Compact => "Compact",
+                TraceView::Layers => "Layers",
+                TraceView::InsideOut => "InsideOut",
+            }
+        )?;
+        writeln!(
+            out,
+            "    trace_dash: TraceDash::{},",
+            match self.trace_dash {
+                TraceDash::Off => "Off",
+                TraceDash::Mini => "Mini",
+                TraceDash::Normal => "Normal",
+                TraceDash::Full => "Full",
+            }
+        )?;
+        writeln!(
+            out,
+            "    trace_dash_view: DashView::{},",
+            match self.trace_dash_view {
+                DashView::Bars => "Bars",
+                DashView::Chart => "Chart",
+                DashView::Mix => "Mix",
+            }
+        )?;
+        writeln!(out, "    trace_window_s: {},", self.trace_window_s)?;
+        writeln!(out, "    trace_short_ip: {},", self.trace_short_ip)?;
+        write!(out, "    colors: ")?;
+        self.colors.write_rust(out)?;
+        writeln!(out, ",")?;
         write!(out, "}}")
     }
 
@@ -895,6 +1274,13 @@ impl NodeConfig {
             Key::BurstCount => write!(out, "{}", self.burst.count),
             Key::BurstRate => write!(out, "{}", Num(self.burst.rate_hz)),
             Key::Console => write!(out, "{}", self.console),
+            Key::Trace => write!(out, "{}", self.trace),
+            Key::TraceBytes => write!(out, "{}", self.trace_bytes),
+            Key::TraceView => write!(out, "{}", self.trace_view),
+            Key::TraceDash => write!(out, "{}", self.trace_dash),
+            Key::TraceDashView => write!(out, "{}", self.trace_dash_view),
+            Key::TraceWindow => write!(out, "{}", self.trace_window_s),
+            Key::TraceShortIp => f_bool(out, self.trace_short_ip),
         }
     }
 
@@ -1082,13 +1468,16 @@ mod tests {
     fn verbose_accepts_common_spellings() {
         let mut cfg = D;
         for (text, level) in [
-            ("0", Verbosity::Live),
+            ("0", Verbosity::Silent),
+            ("silent", Verbosity::Silent),
+            ("off", Verbosity::Silent),
+            ("false", Verbosity::Silent),
+            ("1", Verbosity::Live),
             ("live", Verbosity::Live),
-            ("off", Verbosity::Live),
-            ("false", Verbosity::Live),
-            ("1", Verbosity::Frames),
+            ("quiet", Verbosity::Live),
+            ("2", Verbosity::Frames),
             ("frames", Verbosity::Frames),
-            ("2", Verbosity::Wire),
+            ("3", Verbosity::Wire),
             ("wire", Verbosity::Wire),
             ("on", Verbosity::Wire),
             ("yes", Verbosity::Wire),
@@ -1096,7 +1485,7 @@ mod tests {
             assert!(cfg.set("verbose", text).is_ok(), "{text}");
             assert_eq!(cfg.verbose, level, "{text}");
         }
-        assert!(cfg.set("verbose", "3").is_err());
+        assert!(cfg.set("verbose", "4").is_err());
         assert!(cfg.set("verbose", "maybe").is_err());
     }
 
@@ -1105,12 +1494,139 @@ mod tests {
         let mut cfg = D;
         assert_eq!(cfg.verbose, Verbosity::Live, "the default is the quiet live line");
         let mut seen = std::vec::Vec::new();
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert!(cfg.set("verbose", "next").is_ok());
             seen.push(cfg.verbose);
         }
-        assert_eq!(seen, [Verbosity::Frames, Verbosity::Wire, Verbosity::Live, Verbosity::Frames]);
-        assert!(Verbosity::Live < Verbosity::Frames && Verbosity::Frames < Verbosity::Wire);
+        assert_eq!(
+            seen,
+            [Verbosity::Frames, Verbosity::Wire, Verbosity::Silent, Verbosity::Live, Verbosity::Frames],
+            "all four levels, and round again"
+        );
+        assert!(Verbosity::Silent < Verbosity::Live && Verbosity::Live < Verbosity::Frames);
+        assert!(Verbosity::Frames < Verbosity::Wire);
+    }
+
+    #[test]
+    fn silent_is_part_of_the_cycle() {
+        let mut cfg = NodeConfig { verbose: Verbosity::Wire, ..D };
+        assert!(cfg.set("verbose", "next").is_ok());
+        assert_eq!(cfg.verbose, Verbosity::Silent, "past the last level, the quietest");
+        assert!(cfg.set("verbose", "next").is_ok());
+        assert_eq!(cfg.verbose, Verbosity::Live, "and one more brings the console back");
+    }
+
+    #[test]
+    fn trace_view_names() {
+        let mut cfg = D;
+        assert_eq!(cfg.trace_view, TraceView::Layers);
+        for (text, view) in [
+            ("compact", TraceView::Compact),
+            ("c", TraceView::Compact),
+            ("layers", TraceView::Layers),
+            ("inside-out", TraceView::InsideOut),
+            ("insideout", TraceView::InsideOut),
+        ] {
+            assert_eq!(cfg.set("trace_view", text), Ok(Key::TraceView), "{text}");
+            assert_eq!(cfg.trace_view, view, "{text}");
+        }
+        assert!(matches!(cfg.set("trace_view", "pretty"), Err(SetError::BadValue(_))));
+    }
+
+    #[test]
+    fn trace_dash_sizes_and_window() {
+        let mut cfg = D;
+        assert_eq!((cfg.trace_dash, cfg.trace_window_s), (TraceDash::Normal, 30));
+        for (text, size) in
+            [("off", TraceDash::Off), ("1", TraceDash::Mini), ("normal", TraceDash::Normal), ("full", TraceDash::Full)]
+        {
+            assert_eq!(cfg.set("trace_dash", text), Ok(Key::TraceDash), "{text}");
+            assert_eq!(cfg.trace_dash, size, "{text}");
+        }
+        assert!(matches!(cfg.set("trace_dash", "huge"), Err(SetError::BadValue(_))));
+        let mut seen = std::vec::Vec::new();
+        for _ in 0..4 {
+            assert!(cfg.set("trace_dash", "next").is_ok());
+            seen.push(cfg.trace_dash);
+        }
+        assert_eq!(seen, [TraceDash::Off, TraceDash::Mini, TraceDash::Normal, TraceDash::Full]);
+        for view in [DashView::Bars, DashView::Chart, DashView::Mix] {
+            let rows: std::vec::Vec<usize> = [TraceDash::Off, TraceDash::Mini, TraceDash::Normal, TraceDash::Full]
+                .iter()
+                .map(|d| d.rows(view))
+                .collect();
+            assert_eq!(rows[0], 0);
+            assert!(rows.windows(2).all(|w| w[0] < w[1]), "{view}: bigger sizes take more lines: {rows:?}");
+            assert!(*rows.last().unwrap() <= DASH_MAX_ROWS, "{view}");
+            assert!(TraceDash::Full.columns(view) <= crate::traffic::MAX_COLUMNS);
+            assert_eq!(TraceDash::Off.columns(view), 0);
+        }
+        // Each view adds to the one before.
+        assert!(TraceDash::Normal.rows(DashView::Bars) < TraceDash::Normal.rows(DashView::Chart));
+        assert!(TraceDash::Normal.rows(DashView::Chart) < TraceDash::Normal.rows(DashView::Mix));
+
+        for (text, seconds) in
+            [("30", 30), ("30s", 30), ("2min", 120), ("2m", 120), ("1 min", 60), ("3600", 3600), ("2", 2)]
+        {
+            assert_eq!(cfg.set("trace_window_s", text), Ok(Key::TraceWindow), "{text}");
+            assert_eq!(cfg.trace_window_s, seconds, "{text}");
+        }
+        let kept = cfg;
+        for bad in ["1", "3601", "61min", "0", "-5", "fast", "1.5s", "5h"] {
+            assert!(cfg.set("trace_window_s", bad).is_err(), "{bad}");
+        }
+        assert_eq!(cfg, kept, "a refused value changes nothing");
+    }
+
+    #[test]
+    fn short_addresses_are_a_switch_that_is_off() {
+        let mut cfg = D;
+        assert!(!cfg.trace_short_ip, "full addresses unless asked");
+        for (text, value) in [("on", true), ("off", false), ("yes", true), ("no", false), ("1", true), ("0", false)] {
+            assert_eq!(cfg.set("trace_short_ip", text), Ok(Key::TraceShortIp), "{text}");
+            assert_eq!(cfg.trace_short_ip, value, "{text}");
+        }
+        assert!(matches!(cfg.set("trace_short_ip", "maybe"), Err(SetError::BadValue(_))));
+        cfg.set("trace_short_ip", "on").unwrap();
+        assert_eq!(cfg.value(Key::TraceShortIp).as_str(), "on");
+        let mut src = std::string::String::new();
+        cfg.write_rust(&mut src).unwrap();
+        assert!(src.contains("trace_short_ip: true,"), "{src}");
+    }
+
+    #[test]
+    fn dash_views_cycle_and_parse() {
+        let mut cfg = D;
+        assert_eq!(cfg.trace_dash_view, DashView::Bars, "the original look is the default");
+        let mut seen = std::vec::Vec::new();
+        for _ in 0..4 {
+            assert!(cfg.set("trace_dash_view", "next").is_ok());
+            seen.push(cfg.trace_dash_view);
+        }
+        assert_eq!(seen, [DashView::Chart, DashView::Mix, DashView::Bars, DashView::Chart]);
+        for (text, view) in
+            [("bars", DashView::Bars), ("chart", DashView::Chart), ("graph", DashView::Chart), ("mix", DashView::Mix)]
+        {
+            assert_eq!(cfg.set("trace_dash_view", text), Ok(Key::TraceDashView), "{text}");
+            assert_eq!(cfg.trace_dash_view, view, "{text}");
+        }
+        assert!(matches!(cfg.set("trace_dash_view", "full"), Err(SetError::BadValue(_))), "a size is not a view");
+    }
+
+    #[test]
+    fn colors_are_build_time_only() {
+        let mut cfg = D;
+        assert_eq!(cfg.set("colors.tx", "31"), Err(SetError::ReadOnly), "not a runtime setting");
+        assert_eq!(cfg.set_build("colors.tx", "1;31"), Ok(()));
+        assert_eq!(cfg.colors.value("tx"), Some("1;31"));
+        assert!(matches!(cfg.set_build("colors.tx", "red"), Err(SetError::Invalid(_))));
+        assert!(matches!(cfg.set_build("colors.nope", "31"), Err(SetError::Invalid(_))));
+        assert_eq!(cfg.colors.value("tx"), Some("1;31"), "a refused value changes nothing");
+        // The generated source carries only the difference, and names the types it needs.
+        let mut src = std::string::String::new();
+        cfg.write_rust(&mut src).unwrap();
+        assert!(src.contains("colors: Theme::DEFAULT.with(Role::Tx, \"1;31\"),"), "{src}");
+        assert!(src.contains("trace_view: TraceView::Layers,"), "{src}");
     }
 
     /// `config` prints `value(k)`; `set k <that>` must give the same config back.
@@ -1123,6 +1639,47 @@ mod tests {
             assert_eq!(cfg.set(name, &text), Ok(key), "{name} = {text}");
             assert_eq!(cfg, before, "{name} = {text}");
         }
+    }
+
+    #[test]
+    fn trace_accepts_levels_and_cycles() {
+        let mut cfg = D;
+        assert_eq!(cfg.trace, Trace::Off, "off by default: the driver copies nothing");
+        for (text, level) in [
+            ("0", Trace::Off),
+            ("events", Trace::Events),
+            ("1", Trace::Events),
+            ("frames", Trace::Frames),
+            ("2", Trace::Frames),
+            ("on", Trace::Frames),
+            ("off", Trace::Off),
+        ] {
+            assert_eq!(cfg.set("trace", text), Ok(Key::Trace), "{text}");
+            assert_eq!(cfg.trace, level, "{text}");
+        }
+        assert!(matches!(cfg.set("trace", "3"), Err(SetError::BadValue(_))));
+        let mut seen = std::vec::Vec::new();
+        for _ in 0..4 {
+            assert!(cfg.set("trace", "next").is_ok());
+            seen.push(cfg.trace);
+        }
+        assert_eq!(seen, [Trace::Events, Trace::Frames, Trace::Off, Trace::Events]);
+        assert!(Trace::Off < Trace::Events && Trace::Events < Trace::Frames);
+    }
+
+    #[test]
+    fn trace_bytes_range() {
+        let mut cfg = D;
+        assert_eq!(cfg.trace_bytes, 32);
+        for n in [0u16, 1, 64, TRACE_BYTES_MAX] {
+            assert_eq!(cfg.set("trace_bytes", &n.to_string()), Ok(Key::TraceBytes));
+            assert_eq!(cfg.trace_bytes, n);
+        }
+        let kept = cfg;
+        assert!(matches!(cfg.set("trace_bytes", "257"), Err(SetError::Invalid(_))));
+        assert!(matches!(cfg.set("trace_bytes", "70000"), Err(SetError::Invalid(_))));
+        assert!(matches!(cfg.set("trace_bytes", "lots"), Err(SetError::BadValue(_))));
+        assert_eq!(cfg, kept, "a refused value changes nothing");
     }
 
     #[test]
@@ -1171,6 +1728,13 @@ mod tests {
                 tx_mode: TxMode::Quiet,
                 burst: BurstConfig { count: 9, rate_hz: 0.5 },
                 console: Console::Rtt,
+                trace: Trace::Frames,
+                trace_bytes: 99,
+                trace_view: TraceView::InsideOut,
+                trace_dash: TraceDash::Full,
+                trace_dash_view: DashView::Mix,
+                trace_window_s: 90,
+                trace_short_ip: true,
                 ..D
             };
             assert!(changed.set(name, &other.value(key)).is_ok());

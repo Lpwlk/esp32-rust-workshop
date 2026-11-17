@@ -233,6 +233,7 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
     let rng = Rng::new();
     let fx = fx::Animator::new(fx_settings(&cfg.rgb));
 
+    workshop_core::theme::activate(&defaults.colors);
     term::set_verbosity(cfg.verbose);
     term::boot_card(&cfg, &chip_info(&rng), &system_info(&cfg, defaults, boot_load));
     let cli = cli::Cli::new(peripherals.USB_DEVICE);
@@ -961,6 +962,9 @@ impl Node {
             Command::Link => term::cli_error(format_args!(
                 "`link` is for the Ethernet app: this firmware has a UART link (see `baud`)"
             )),
+            Command::Gen(_) => {
+                term::cli_error(format_args!("`gen` needs the Ethernet firmware: a UART link has `burst`"))
+            }
             Command::Baud(None) => term::baud_info(self.baud.current(), self.baud.boot()),
             Command::Baud(Some(baud)) => match self.baud.request(baud, now_us()) {
                 Ok(()) => {

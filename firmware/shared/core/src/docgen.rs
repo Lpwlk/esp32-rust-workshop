@@ -128,6 +128,16 @@ pub fn config_reference(out: &mut impl Write, kind: LinkKind) -> fmt::Result {
             }
         }
     }
+    out.write_str("\n## Colors (`[colors]` in a preset)\n\n")?;
+    out.write_str(
+        "Build time only: the console names a role, the build chooses its color. A value is the SGR parameters of an ANSI\n\
+         escape code, numbers separated by `;` (`\"31\"` red, `\"1;33\"` bold yellow, `\"38;5;208\"` 256-color,\n\
+         `\"38;2;255;128;0\"` RGB), or `\"\"` for no color.\n\n",
+    )?;
+    out.write_str("| Key | What it colors | Default |\n|---|---|---|\n")?;
+    for (name, _, default, what) in crate::theme::ROLES {
+        writeln!(out, "| `colors.{name}` | {what} | `{default}` |")?;
+    }
     Ok(())
 }
 

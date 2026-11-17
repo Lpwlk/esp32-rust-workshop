@@ -36,7 +36,8 @@ pattern = "ocean"
 ```
 
 - **Keys** are the ones of `set <key> <value>` in the CLI, plus the build-time ones: `name`, `[pins]`
-  and, on Ethernet, `[net]`. Sections are `pins`, `net`, `rgb` and `burst`.
+  and, on Ethernet, `[net]`; the colors of the console are `[colors]` (build-time too, see
+  [Colors](console.md#colors)). Sections are `pins`, `net`, `rgb`, `burst` and `colors`.
 - **Values** are what the CLI accepts: numbers, booleans, and strings with units
   (`"2.5Hz"`, `"250ms"`, `"blink 200"`).
 - **Order doesn't matter**, with one rule: an explicit `data_period_ms` wins over a period written in

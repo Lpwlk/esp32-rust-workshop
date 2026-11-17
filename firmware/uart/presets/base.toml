@@ -9,7 +9,7 @@
 #   cargo presets check                  load and validate every preset
 #
 # Everything here is also available at run time in the CLI (`set <key> <value>`), except the
-# build-time settings: `name` and the pins.
+# build-time settings: `name`, the pins and the [colors].
 # =============================================================================================
 
 # Name sent in every frame: 1-12 printable characters, none of `,` `*` `$` or space.
@@ -64,16 +64,28 @@ led2 = "rx"
 #   "quiet"             nothing on its own (button events only)
 tx_mode = "periodic"
 
-# How much the console prints (and `verbose` in the CLI: `verbose` alone goes to the next level):
-#   "live" (0)    ONE line, updated in place, with the last frame sent or received and the counters.
+# How much the console prints (and `verbose` in the CLI: `verbose` alone goes to the next level, round and round):
+#   "silent" (0)  nothing but what you ask for (CLI replies, burst results) and what is wrong (bad frames,
+#                 frames that couldn't be sent)
+#   "live" (1)    ONE line, updated in place, with the last frame sent or received and the counters.
 #                 Lost frames, link events, bursts and errors still scroll as lines.
-#   "frames" (1)  every frame on its own line, and the periodic stats line
-#   "wire" (2)    frames plus the raw line, checksum and size of each, ignored button bounces, counters
+#   "frames" (2)  every frame on its own line, and the periodic stats line
+#   "wire" (3)    frames plus the raw line, checksum and size of each, ignored button bounces, counters
 verbose = "live"
 
 # Where the console goes: "auto" (USB serial, plus RTT in a build with --features rtt),
 # "serial", "rtt" or "both" (the last two need the `rtt` feature).
 console = "auto"
+
+# Network trace (`trace`, `trace_bytes`): Ethernet only. A UART link has no network frames, so these
+# are accepted and do nothing; they exist so a preset and saved settings read the same on both apps.
+trace = "off"
+trace_bytes = 32
+trace_view = "layers"
+trace_dash = "normal"
+trace_dash_view = "bars"
+trace_window_s = 30
+trace_short_ip = false
 
 # ---------------------------------------------------------------------------------------------
 # Sections. In TOML every key written after a [section] header belongs to that section, so the
@@ -111,3 +123,65 @@ brightness = 40
 count   = 1000
 # Frames per second: 0.1-20000, or 0 = back to back, as fast as the link allows
 rate_hz = 0
+
+# Colors of the console, by role: a value is the SGR parameters of an ANSI escape code, numbers separated by `;`
+# ("31" red, "1;33" bold yellow, "38;5;208" 256-color orange, "38;2;255;128;0" RGB, "" no color). Fixed at
+# build time: they are not runtime settings, `set` can't change them. Bold and faint are not roles: the
+# console adds them itself where they help. The `mix_*` roles are backgrounds ("30;44" is black on blue): the
+# bars of the dashboard's protocol ranking are spaces painted with them, and the text on a bar uses the
+# foreground.
+[colors]
+# The time stamp at the start of a line.
+time      = "90"
+# Labels and secondary text.
+dim       = "90"
+# The `│` between the columns of a line.
+sep       = "90"
+# The `TX ▶` arrow, and what was sent.
+tx        = "36"
+# The `RX ◀` arrow, and what was received.
+rx        = "32"
+# Node names, and the peer's.
+node      = "33"
+# Good news: link up, checks passed.
+ok        = "32"
+# Things to look at: lost frames, control frames.
+warn      = "33"
+# Errors, bad checksums, link down.
+error     = "31"
+# Frames of the cards, names of settings and commands.
+accent    = "36"
+# Ordinary data frames in the trace.
+info      = "34"
+# The `cli ›` prompt and the echo of what you typed.
+prompt    = "35"
+# Link events and the negotiated speed.
+link      = "35"
+# The `DAT` badge (periodic data).
+dat       = "30;47"
+# The `EVT` badge (button events).
+evt       = "30;43"
+# The `ECH`/`BAU` badge (link control).
+lnk       = "30;45"
+# Trace: the Ethernet layer.
+eth       = "34"
+# Trace: the IPv4 and ARP layers.
+ip        = "35"
+# Trace: the UDP, TCP and ICMP layer.
+transport = "36"
+# Trace: the node's own frames inside the packet.
+app       = "33"
+# Trace: the hex dump.
+raw       = "90"
+# Dashboard protocol ranking: the UDP bar (a background).
+mix_udp   = "30;44"
+# Dashboard protocol ranking: the TCP bar.
+mix_tcp   = "30;42"
+# Dashboard protocol ranking: the ARP bar.
+mix_arp   = "30;43"
+# Dashboard protocol ranking: the ICMP bar.
+mix_icmp  = "30;45"
+# Dashboard protocol ranking: other IPv4 protocols.
+mix_ip    = "30;46"
+# Dashboard protocol ranking: everything else.
+mix_other = "30;100"

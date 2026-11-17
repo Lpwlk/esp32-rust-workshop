@@ -17,7 +17,7 @@
 //! ```
 //!
 //! Keys are the ones of `set <key> <value>` in the CLI (runtime settings), plus the build-time
-//! ones (`name`, `pins.*`, `net.*`); a `[table]` is the part of the key before the dot.
+//! ones (`name`, `pins.*`, `net.*`, `colors.*`); a `[table]` is the part of the key before the dot.
 //! Values are the text the CLI accepts, so units work (`"2.5Hz"`, `"blink 200ms"`), numbers
 //! and booleans may be written naturally (`brightness = 40`, `verbose = 1`).
 //!
@@ -155,7 +155,7 @@ fn chain(dir: &Path, name: &str) -> Result<Vec<Layer>, Error> {
 
 /// `key = value` pairs of a table, with `[tables]` flattened into `table.key`.
 fn flatten(path: &Path, table: &toml::Table) -> Result<Vec<(String, String)>, Error> {
-    const TABLES: [&str; 4] = ["pins", "rgb", "burst", "net"];
+    const TABLES: [&str; 5] = ["pins", "rgb", "burst", "net", "colors"];
     let mut out = Vec::new();
     let scalar = |key: &str, value: &toml::Value| -> Result<String, Error> {
         Ok(match value {
@@ -214,7 +214,7 @@ fn apply(config: &mut NodeConfig, path: &Path, pairs: Vec<(String, String)>) -> 
         };
         config.set_build(&key, &value).map_err(|e| match e {
             SetError::UnknownKey => at(format!(
-                "unknown setting{hint}. Runtime settings: {}; build-time: name, pins.*, net.* (see docs/book/reference/)",
+                "unknown setting{hint}. Runtime settings: {}; build-time: name, pins.*, net.*, colors.* (see docs/book/reference/)",
                 workshop_core::config::KEYS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
             )),
             SetError::ReadOnly => at("read-only".into()),
@@ -305,6 +305,9 @@ pub fn describe(config: &NodeConfig) -> Vec<(String, String)> {
     for (name, key) in workshop_core::config::KEYS {
         rows.push((name.to_owned(), config.value(Key::from_name(name).unwrap_or(key)).to_string()));
     }
+    for (name, _, _, _) in workshop_core::theme::ROLES {
+        rows.push((format!("colors.{name}"), config.colors.value(name).unwrap_or_default().to_owned()));
+    }
     rows
 }
 
@@ -365,7 +368,7 @@ mod tests {
                 ("typo", "led3 = \"on\"\n"),
                 ("badvalue", "[rgb]\nbrightness = 170\n"),
                 ("badtype", "led1 = [1, 2]\n"),
-                ("section", "[colors]\nred = 1\n"),
+                ("section", "[sounds]\nred = 1\n"),
                 ("uartkey", "[pins]\nuart_tx = 5\n"),
                 ("phy", "[pins]\nled1 = 9\n"),
                 ("subnet", "[net]\npeer = \"10.9.9.9\"\n"),
@@ -386,7 +389,7 @@ mod tests {
         );
         assert!(msg("badvalue", App::Ethernet).contains("`rgb.brightness`"));
         assert!(msg("badtype", App::Ethernet).contains("`led1` must be a string"));
-        assert!(msg("section", App::Ethernet).contains("unknown section [colors]"));
+        assert!(msg("section", App::Ethernet).contains("unknown section [sounds]"));
         assert!(msg("uartkey", App::Ethernet).contains("only exist on a UART node"));
         assert!(msg("phy", App::Ethernet).contains("GPIO5-19"), "{}", msg("phy", App::Ethernet));
         assert!(msg("subnet", App::Ethernet).contains("not in the subnet"));
@@ -408,6 +411,31 @@ mod tests {
         assert!(text.contains("name: \"node-Z\""));
         assert!(text.contains("transport: Transport::Tcp"));
         assert!(text.trim_end().ends_with('}'));
+    }
+
+    #[test]
+    fn colors_are_a_build_time_section() {
+        let dir = folder(
+            "colors",
+            &[
+                ("c", "name = \"node-Z\"\n[colors]\ntx = \"1;36\"\nnode = \"38;5;208\"\n"),
+                ("bad", "[colors]\ntx = \"cyan\"\n"),
+                ("typo", "[colors]\ntxx = \"31\"\n"),
+            ],
+        );
+        let preset = load(&dir, "c", App::Ethernet).unwrap();
+        assert_eq!(preset.config.colors.value("tx"), Some("1;36"));
+        assert_eq!(preset.config.colors.value("rx"), Some("32"), "the rest is the default");
+        // Both apps take it, and the compiler gets exactly the difference.
+        assert!(load(&dir, "c", App::Uart).is_ok());
+        let text = rust_source(&preset);
+        assert!(
+            text.contains("colors: Theme::DEFAULT.with(Role::Tx, \"1;36\").with(Role::Node, \"38;5;208\"),"),
+            "{text}"
+        );
+        let msg = |name: &str| load(&dir, name, App::Ethernet).unwrap_err().0;
+        assert!(msg("bad").contains("`colors.tx`") && msg("bad").contains("numbers separated"), "{}", msg("bad"));
+        assert!(msg("typo").contains("`colors.txx`") && msg("typo").contains("unknown color"), "{}", msg("typo"));
     }
 
     // --- The presets shipped in the repository -------------------------------------------------

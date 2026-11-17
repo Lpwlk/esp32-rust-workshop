@@ -139,7 +139,12 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
     let rgb_led = led::Led::new(p.RMT, p.GPIO60);
     let fx = fx::Animator::new(fx_settings(&cfg.rgb));
 
+    workshop_core::theme::activate(&defaults.colors);
     term::set_verbosity(cfg.verbose);
+    term::set_local(&net_cfg);
+    term::set_short_ip(cfg.trace_short_ip);
+    trace::set_dash(cfg.trace_window_s, cfg.trace_dash.columns(cfg.trace_dash_view));
+    trace::set_level(cfg.trace);
     term::boot_card(&cfg, &chip_info(&rng), &system_info(&cfg, defaults, boot_load));
     let cli = cli::Cli::new(usb_rx);
 
@@ -164,6 +169,7 @@ pub fn run(defaults: &'static NodeConfig) -> ! {
         subs: Subscriptions::new(),
         browse: None,
         help: None,
+        deferred: None,
         rtt: RttTracker::new(),
         burst_id: 0,
         burst_tx: None,
@@ -242,6 +248,7 @@ impl TxToken for EthTx<'_> {
         let mut frame = [0u8; 1536];
         let len = len.min(frame.len());
         let result = f(&mut frame[..len]);
+        crate::trace::tap(true, &frame[..len]);
         // A full TX ring drops the frame: TCP resends it, UDP counts it as lost, like on a real wire.
         let _ = self.0.transmit(&frame[..len]);
         result
@@ -264,6 +271,9 @@ impl Device for EthDevice {
         };
         self.eth.pop_rx();
         self.rx_len = len;
+        if len > 0 {
+            crate::trace::tap(false, &self.rx[..len]);
+        }
         (len > 0).then(|| (EthRx(&self.rx[..len]), EthTx(&mut self.eth)))
     }
 
@@ -343,7 +353,12 @@ fn start_ethernet(p: net::PhyPeripherals) -> Eth {
     .expect("Ethernet init failed")
 }
 
-static SOCKETS: StaticCell<[SocketStorage<'static>; 2]> = StaticCell::new();
+static SOCKETS: StaticCell<[SocketStorage<'static>; 3]> = StaticCell::new();
+// The traffic generator's socket (`gen`): room for a fast stream in each direction.
+static GEN_RX_META: StaticCell<[udp::PacketMetadata; 64]> = StaticCell::new();
+static GEN_TX_META: StaticCell<[udp::PacketMetadata; 64]> = StaticCell::new();
+static GEN_RX: StaticCell<[u8; 16384]> = StaticCell::new();
+static GEN_TX: StaticCell<[u8; 16384]> = StaticCell::new();
 static UDP_RX_META: StaticCell<[udp::PacketMetadata; 128]> = StaticCell::new();
 static UDP_TX_META: StaticCell<[udp::PacketMetadata; 64]> = StaticCell::new();
 static UDP_RX: StaticCell<[u8; 8192]> = StaticCell::new();
@@ -363,7 +378,7 @@ extern "C" fn net_task(arg: *mut ()) -> ! {
     iface.update_ip_addrs(|addrs| {
         let _ = addrs.push(IpCidr::new(IpAddress::Ipv4(Ipv4Address::from(net.address)), net.prefix_len));
     });
-    let mut sockets = SocketSet::new(&mut SOCKETS.init([SocketStorage::EMPTY; 2])[..]);
+    let mut sockets = SocketSet::new(&mut SOCKETS.init([SocketStorage::EMPTY; 3])[..]);
 
     let mut service: Service = match net.transport {
         Transport::Udp => {
@@ -393,6 +408,24 @@ extern "C" fn net_task(arg: *mut ()) -> ! {
         }
     };
 
+    // The traffic generator: its own UDP socket on `net.port + 1`, to the peer's, whatever carries the node's frames.
+    let gen_handle = {
+        let rx = udp::PacketBuffer::new(
+            &mut GEN_RX_META.init([udp::PacketMetadata::EMPTY; 64])[..],
+            &mut GEN_RX.init([0; 16384])[..],
+        );
+        let tx = udp::PacketBuffer::new(
+            &mut GEN_TX_META.init([udp::PacketMetadata::EMPTY; 64])[..],
+            &mut GEN_TX.init([0; 16384])[..],
+        );
+        let mut socket = udp::Socket::new(rx, tx);
+        socket.bind(net.port + 1).expect("generator UDP port");
+        sockets.add(socket)
+    };
+    let mut gen_peer = peer_endpoint(&net);
+    gen_peer.port = net.port + 1;
+    let mut engine = crate::loadgen::Engine::new();
+
     let mut last_link_ms = 0;
     check_link(&mut device.eth);
     loop {
@@ -404,6 +437,16 @@ extern "C" fn net_task(arg: *mut ()) -> ! {
         // Ingress, then the sockets' turn, then whatever they queued goes out.
         while iface.poll(smol_now(), &mut device, &mut sockets) == PollResult::SocketStateChanged {}
         service.run(&mut sockets, &mut iface, &net, now_ms);
+        {
+            let socket = sockets.get_mut::<udp::Socket>(gen_handle);
+            while let Ok((data, meta)) = socket.recv() {
+                if meta.endpoint.addr == gen_peer.addr {
+                    engine.receive(data, link::now_us());
+                }
+            }
+            engine
+                .poll(link::now_us(), &mut |payload| socket.can_send() && socket.send_slice(payload, gen_peer).is_ok());
+        }
         iface.poll(smol_now(), &mut device, &mut sockets);
         os::yield_now();
     }

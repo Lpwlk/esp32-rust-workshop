@@ -65,7 +65,9 @@ cargo run --release --bin node-a      # then, on the other board: --bin node-b
 The console shows `cable connected: 1 Gbit/s · full duplex`, then, by default, **one status line updated in
 place** (`verbose live`): the elapsed time, the frame counters, the link, the round trip and the last event. `verbose
 frames` prints every frame, `verbose wire` adds the raw frames, checksums and the timing breakdown (see the
-[console](console.md#how-much-the-console-prints-verbose)). In the CLI, `link` replaces `baud`: the cable, what the PHY negotiated, the
+[console](console.md#how-much-the-console-prints-verbose)). `trace events` and `trace frames` go below the node's
+frames, to the network's: ARP, the TCP handshake, every header decoded, and the raw bytes
+([`trace`](console.md#the-network-frames-trace-ethernet-app)). In the CLI, `link` replaces `baud`: the cable, what the PHY negotiated, the
 addresses, the transport, the counters.
 TCP instead of UDP is a preset: `PRESET_NODE_A=node-a-tcp PRESET_NODE_B=node-b-tcp cargo build --release`.
 

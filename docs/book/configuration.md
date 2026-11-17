@@ -197,7 +197,11 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 | change the link speed for good | UART: `shared::BAUD_RATE`, then rebuild **both** nodes |
 | change the link speed now | UART: `baud 1M` (both nodes switch together) |
 | change the addresses or use TCP | Ethernet: `[net]` in the presets of **both** nodes, or `PRESET_NODE_A=node-a-tcp`... |
-| show less (or more) in the console | `verbose live`, `verbose frames`, `verbose wire` |
+| show less (or more) in the console | `verbose silent`, `verbose live`, `verbose frames`, `verbose wire` |
+| see the network frames (Ethernet) | `trace events`, `trace frames`, with `trace compact` / `layers` / `inside-out` and `dump 64` |
+| graph the network traffic (Ethernet) | `dash` (bars, chart, mix), `dash mini` / `normal` / `full` / `off`, `window 2min` (shown while `trace` is on) |
+| fill the network with traffic (Ethernet) | `gen start 2Mbit size=512 for=30s`, then `gen rate 50Mbit`, `gen pause`, `gen stop` |
+| change the colors of the console | `[colors]` in the preset, build time ([Colors](console.md#colors)) |
 | set the peer's LED or setting from here | `write /leds/1 on`, `write /config/verbose frames` |
 | read the console through the probe | build with `--features rtt`, then `set console rtt` |
 | a firmware without flash writes | `--no-default-features --features watchdog` |

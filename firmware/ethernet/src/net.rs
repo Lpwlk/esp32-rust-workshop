@@ -9,7 +9,7 @@
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
-use embassy_net_driver::{Capabilities, Driver, HardwareAddress, LinkState as DriverLink};
+use embassy_net_driver::{Capabilities, Driver, HardwareAddress, LinkState as DriverLink, RxToken, TxToken};
 use embassy_time::{Duration, Timer};
 use esp_hal::{
     Async,
@@ -31,7 +31,7 @@ pub type EthDriver = SpeedTap;
 /// Frame buffers of the EMAC DMA: 32 to receive, 16 to send. A burst arrives faster than the main
 /// loop polls (it also prints), so the receive ring has to absorb what comes in between.
 static DMA: ConstStaticCell<EthernetDmaStorage<32, 16>> = ConstStaticCell::new(EthernetDmaStorage::new());
-static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+static RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
 /// Keeps the PHY's reset line driven high for the life of the firmware.
 static RESET: StaticCell<Output<'static>> = StaticCell::new();
 
@@ -86,20 +86,20 @@ pub struct SpeedTap(Inner);
 
 impl Driver for SpeedTap {
     type RxToken<'a>
-        = <Inner as Driver>::RxToken<'a>
+        = TapRx<<Inner as Driver>::RxToken<'a>>
     where
         Self: 'a;
     type TxToken<'a>
-        = <Inner as Driver>::TxToken<'a>
+        = TapTx<<Inner as Driver>::TxToken<'a>>
     where
         Self: 'a;
 
     fn receive(&mut self, cx: &mut core::task::Context<'_>) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        Driver::receive(&mut self.0, cx)
+        Driver::receive(&mut self.0, cx).map(|(rx, tx)| (TapRx(rx), TapTx(tx)))
     }
 
     fn transmit(&mut self, cx: &mut core::task::Context<'_>) -> Option<Self::TxToken<'_>> {
-        Driver::transmit(&mut self.0, cx)
+        Driver::transmit(&mut self.0, cx).map(TapTx)
     }
 
     fn link_state(&mut self, cx: &mut core::task::Context<'_>) -> DriverLink {
@@ -134,6 +134,31 @@ impl Driver for SpeedTap {
 
     fn hardware_address(&self) -> HardwareAddress {
         Driver::hardware_address(&self.0)
+    }
+}
+
+/// A received frame on its way to the stack: the trace (`crate::trace`) sees it first.
+pub struct TapRx<T>(T);
+
+impl<T: RxToken> RxToken for TapRx<T> {
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, f: F) -> R {
+        self.0.consume(|frame| {
+            crate::trace::tap(false, frame);
+            f(frame)
+        })
+    }
+}
+
+/// A frame the stack is about to send: the trace sees it once the stack has filled it in.
+pub struct TapTx<T>(T);
+
+impl<T: TxToken> TxToken for TapTx<T> {
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, len: usize, f: F) -> R {
+        self.0.consume(len, |frame| {
+            let result = f(frame);
+            crate::trace::tap(true, frame);
+            result
+        })
     }
 }
 

@@ -33,6 +33,10 @@
 //! | [`units`] | periods and frequencies typed in the CLI (decimals, units) |
 //! | [`wire`] | when frames were on the wire; shared TX/RX delta between `DAT` frames |
 //! | [`persist`] | settings saved in flash (CLI `save`): record format, CRC, read back at boot |
+//! | [`dissect`] | Ethernet firmware only: decodes a network frame (Ethernet, ARP, IPv4, ICMP, UDP, TCP, the node's own frames) for `trace` |
+//! | [`theme`] | colors of the console output, by role, chosen at build time (`[colors]` in a preset) |
+//! | [`pktgen`] | Ethernet only: the traffic generator (`gen`): schedule, shapes, sizes; the receiver's loss, order and jitter |
+//! | [`traffic`] | Ethernet only: bytes and frames per time slice, for the trace dashboard's bar graphs |
 //! | [`docgen`] | Markdown reference pages generated from the tables above |
 #![cfg_attr(not(test), no_std)]
 #![warn(missing_docs)]
@@ -42,6 +46,7 @@ pub mod burst;
 pub mod button;
 pub mod cli;
 pub mod config;
+pub mod dissect;
 pub mod docgen;
 pub mod editor;
 pub mod fx;
@@ -49,11 +54,14 @@ pub mod leds;
 pub mod line;
 pub mod net;
 pub mod persist;
+pub mod pktgen;
 pub mod protocol;
 pub mod rtt;
 pub mod seq;
 pub mod space;
 #[doc(hidden)]
 pub mod test_vectors;
+pub mod theme;
+pub mod traffic;
 pub mod units;
 pub mod wire;

@@ -67,8 +67,15 @@ What every node has. Ids below 100 are fixed; `/config` has one variable per run
 | `/config/rgb.brightness` | 108 | variable | text | read-write | RGB LED brightness, % |
 | `/config/led1` | 109 | variable | text | read-write | breadboard LED mode |
 | `/config/led2` | 110 | variable | text | read-write | breadboard LED mode |
-| `/config/verbose` | 111 | variable | text | read-write | console detail: a live line, every frame, or the raw wire |
+| `/config/verbose` | 111 | variable | text | read-write | console detail: nothing, a live line, every frame, or the details behind each |
 | `/config/tx_mode` | 112 | variable | text | read-write | when this node sends frames on its own |
 | `/config/burst.count` | 113 | variable | text | read-write | frames per burst (default of `burst`) |
 | `/config/burst.rate_hz` | 114 | variable | text | read-write | burst rate, frames/s (default of `burst`) |
 | `/config/console` | 115 | variable | text | read-write | where the console output goes (rtt, both: build with --features rtt) |
+| `/config/trace` | 116 | variable | text | read-write | network trace (Ethernet firmware): control frames, or every frame decoded layer by layer |
+| `/config/trace_bytes` | 117 | variable | text | read-write | network trace: raw bytes of each frame shown as a hex dump |
+| `/config/trace_view` | 118 | variable | text | read-write | network trace: how a frame is laid out, on one line, layer by layer, or the node's frame first |
+| `/config/trace_dash` | 119 | variable | text | read-write | network trace: the traffic dashboard above the prompt (bar graphs of what is sent and received) |
+| `/config/trace_dash_view` | 120 | variable | text | read-write | network trace: what the dashboard draws (small bars, a time-series chart, the chart and the protocol ranking) |
+| `/config/trace_window_s` | 121 | variable | text | read-write | network trace: time the dashboard's graphs cover |
+| `/config/trace_short_ip` | 122 | variable | text | read-write | network trace, compact view: write this subnet's addresses short (.12) |

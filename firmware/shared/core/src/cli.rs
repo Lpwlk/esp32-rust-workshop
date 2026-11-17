@@ -26,13 +26,15 @@ use crate::config::{BURST_COUNT_RANGE, BURST_RATE_RANGE, BurstConfig, LinkKind, 
 use crate::units::{Num, parse_freq_hz};
 
 /// Longest command line, in characters.
-pub const MAX_INPUT: usize = 48;
+pub const MAX_INPUT: usize = 96;
 
 /// A parsed command line.
 #[derive(Debug, PartialEq)]
 pub enum Command {
     /// `help`, or `help <command|key>`.
     Help(Option<String<24>>),
+    /// `gen ...`: the traffic generator (Ethernet).
+    Gen(crate::pktgen::GenCmd),
     /// `list`: RGB patterns.
     List,
     /// `status`: LED state.
@@ -110,6 +112,8 @@ pub enum CliError<'a> {
     LedUsage,
     /// A key or value longer than the command buffers.
     TooLong,
+    /// `gen`: what is wrong with the command.
+    Gen(&'static str),
     /// A number argument that doesn't parse or is out of range.
     BadNumber {
         /// What was expected, e.g. `baud rate 1200-5000000`.
@@ -127,6 +131,7 @@ impl fmt::Display for CliError<'_> {
             CliError::SetUsage => f.write_str("usage: set <key> <value>  (see `config` for the keys)"),
             CliError::LedUsage => f.write_str("usage: led <1|2> <off|on|blink [ms]|button|peer|link|rx|tx>"),
             CliError::TooLong => f.write_str("argument too long"),
+            CliError::Gen(why) => write!(f, "gen: {why}"),
             CliError::BadNumber { expected, got } => write!(f, "'{got}': expected {expected}"),
         }
     }
@@ -239,15 +244,15 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
         "status" | "st" => Ok(Command::Status),
         "config" | "cfg" | "get" => Ok(Command::Config),
         "next" | "n" => Ok(Command::NextPattern),
-        "info" | "about" | "boot" => Ok(Command::Info),
+        "info" | "about" | "boot" | "i" => Ok(Command::Info),
         "save" | "w" => Ok(Command::Save),
-        "forget" => Ok(Command::Forget),
-        "reboot" | "restart" => Ok(Command::Reboot),
+        "forget" | "fg" => Ok(Command::Forget),
+        "reboot" | "restart" | "rb" => Ok(Command::Reboot),
         "set" | "s" => match split_first(rest) {
             ("", _) => Err(CliError::SetUsage),
             (key, value) => set(key, value),
         },
-        "reset" => Ok(Command::Reset(topic()?)),
+        "reset" | "r" => Ok(Command::Reset(topic()?)),
         // Shortcuts for the most used keys.
         "pattern" | "p" => set("rgb.pattern", rest),
         "freq" | "f" => set("rgb.freq_hz", rest),
@@ -255,8 +260,23 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
         "bright" | "b" => set("rgb.brightness", rest),
         "verbose" | "v" => set("verbose", if rest.is_empty() { "next" } else { rest }),
         "tx" => set("tx_mode", rest),
-        "period" => set("data_period_ms", rest),
-        "link" | "net" => Ok(Command::Link),
+        "period" | "pd" => set("data_period_ms", rest),
+        // `trace` alone: next level. `trace compact`, `trace layers`, `trace inside-out`: the view. Else the level.
+        "trace" | "t" | "tr" => match rest {
+            "" => set("trace", "next"),
+            view if crate::config::TraceView::parse(view).is_ok() => set("trace_view", view),
+            level => set("trace", level),
+        },
+        "dump" | "d" => set("trace_bytes", rest),
+        "gen" | "g" => crate::pktgen::parse_gen(rest).map(Command::Gen).map_err(CliError::Gen),
+        // `dash` alone: the next view. `dash chart`, `dash mix`, `dash bars`: a view. Else a size.
+        "dash" | "ds" => match rest {
+            "" => set("trace_dash_view", "next"),
+            view if crate::config::DashView::parse(view).is_ok() => set("trace_dash_view", view),
+            size => set("trace_dash", size),
+        },
+        "window" | "win" => set("trace_window_s", rest),
+        "link" | "net" | "lk" => Ok(Command::Link),
         "browse" | "br" | "tree" => browse(rest),
         "read" | "rd" => match rest {
             "" => Err(CliError::MissingValue("path")),
@@ -270,7 +290,7 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
                 value: String::try_from(value).map_err(|_| CliError::TooLong)?,
             }),
         },
-        "watch" => match split_first(rest) {
+        "watch" | "wa" => match split_first(rest) {
             ("", _) => Err(CliError::MissingValue("path")),
             (path, interval) => Ok(Command::Watch {
                 path: path_arg(path)?,
@@ -290,8 +310,8 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
                 },
             }),
         },
-        "unwatch" => Ok(Command::Unwatch(if rest.is_empty() { None } else { Some(path_arg(rest)?) })),
-        "baud" => match rest {
+        "unwatch" | "uw" => Ok(Command::Unwatch(if rest.is_empty() { None } else { Some(path_arg(rest)?) })),
+        "baud" | "bd" => match rest {
             "" => Ok(Command::Baud(None)),
             rate => Ok(Command::Baud(Some(in_range(
                 rate,
@@ -299,7 +319,7 @@ pub fn parse(line: &str) -> Result<Command, CliError<'_>> {
                 "baud rate 1200-5000000 (or 921600, 2M, 500k...)",
             )?))),
         },
-        "burst" => {
+        "burst" | "bs" => {
             let (count, rate) = split_first(rest);
             Ok(Command::Burst {
                 count: if count.is_empty() {
@@ -450,6 +470,15 @@ pub struct CmdHelp {
 }
 
 impl CmdHelp {
+    /// Width, in characters, of `name (alias, alias)`: how `help` lists the command.
+    pub fn label_width(&self) -> usize {
+        if self.aliases.is_empty() {
+            self.name.len()
+        } else {
+            self.name.len() + 3 + self.aliases.iter().map(|a| a.len()).sum::<usize>() + 2 * (self.aliases.len() - 1)
+        }
+    }
+
     /// Whether this command is available on a node with this kind of link.
     pub fn on(&self, kind: LinkKind) -> bool {
         self.only.is_none_or(|only| only == kind)
@@ -494,7 +523,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "reset",
-        aliases: &[],
+        aliases: &["r"],
         usage: "reset [key]",
         summary: "back to the build value (one key, or all)",
         details: &["Without a key, restores every setting changed with `set`."],
@@ -519,11 +548,12 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "forget",
-        aliases: &[],
+        aliases: &["fg"],
         usage: "forget",
         summary: "erase the saved settings (next boot: build config)",
         details: &[
-            "The current settings stay as they are until the next reboot; `reset` then `reboot` to go back now.",
+            "The current settings stay as they are until the next reboot;",
+            "`reset` then `reboot` to go back now.",
         ],
         examples: &["forget"],
         group: Group::System,
@@ -531,10 +561,10 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "reboot",
-        aliases: &["restart"],
+        aliases: &["restart", "rb"],
         usage: "reboot",
         summary: "restart the chip (software reset)",
-        details: &["Settings not saved with `save` are lost. The boot card then shows a software reset (`CoreSw`)."],
+        details: &["Settings not saved with `save` are lost.", "The boot card then shows a software reset (`CoreSw`)."],
         examples: &["reboot"],
         group: Group::System,
         only: None,
@@ -542,17 +572,20 @@ pub static COMMANDS: &[CmdHelp] = &[
     CmdHelp {
         name: "verbose",
         aliases: &["v"],
-        usage: "verbose [0|1|2|live|frames|wire]",
+        usage: "verbose [0|1|2|3|silent|live|frames|wire]",
         summary: "how much the console prints (= set verbose)",
         details: &[
-            "0 live    one line, updated in place, with the last frame sent or received and",
+            "0 silent  only what you ask for (replies, burst results) and what is wrong",
+            "          (bad frames, frames not sent): no live line, no frames, no link events",
+            "1 live    one line, updated in place, with the last frame sent or received and",
             "          the counters. Lost frames, link events, bursts and errors still scroll.",
-            "1 frames  every frame on its own line, and the periodic stats line",
-            "2 wire    frames plus, for each, the raw line, its checksum and size, the time",
-            "          since the peer's previous frame, ignored button bounces and counters",
-            "`verbose` alone goes to the next level (wire goes back to live).",
+            "2 frames  every frame on its own line, and the periodic stats line",
+            "3 wire    frames plus what is behind each: the time since the peer's previous frame,",
+            "          ignored button bounces and counters (UART: also the raw line, checksum",
+            "          and size; on Ethernet the raw bytes are `trace`'s)",
+            "`verbose` alone goes to the next level: live, frames, wire, silent, and round again.",
         ],
-        examples: &["verbose", "verbose frames", "verbose 0", "verbose wire"],
+        examples: &["verbose", "verbose frames", "verbose silent", "verbose 3"],
         group: Group::Shortcuts,
         only: None,
     },
@@ -632,7 +665,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "baud",
-        aliases: &[],
+        aliases: &["bd"],
         usage: "baud [rate]",
         summary: "show the link speed, or switch both nodes to a new one",
         details: &[
@@ -648,7 +681,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "link",
-        aliases: &["net"],
+        aliases: &["net", "lk"],
         usage: "link",
         summary: "the Ethernet link: cable, speed, addresses, transport, counters",
         details: &[
@@ -657,6 +690,98 @@ pub static COMMANDS: &[CmdHelp] = &[
             "addresses are fixed at build time (presets/*.toml); `baud` is the UART equivalent.",
         ],
         examples: &["link"],
+        group: Group::Link,
+        only: Some(LinkKind::Net),
+    },
+    CmdHelp {
+        name: "trace",
+        aliases: &["t", "tr"],
+        usage: "trace [0|1|2|off|events|frames|compact|layers|inside-out]",
+        summary: "decode the network frames on the port (= set trace, or trace_view)",
+        details: &[
+            "0 off     nothing (the driver doesn't even copy the frames)",
+            "1 events  one line per control frame: ARP, ICMP, TCP SYN/FIN/RST, the undecodable",
+            "2 frames  every frame decoded, checksums checked, and `dump` bytes as a hex dump",
+            "`trace` alone goes to the next level (frames goes back to off).",
+            "Independent of `verbose`. How a frame is laid out (= set trace_view):",
+            "compact     one line per frame: who to whom, flags, the node's frame",
+            "layers      a header line, then Ethernet, IPv4, UDP/TCP, the node's frame, raw bytes",
+            "inside-out  the node's frame first, then the layers back out to the cable",
+        ],
+        examples: &["trace", "trace events", "trace frames", "trace compact", "trace inside-out", "t 0"],
+        group: Group::Link,
+        only: Some(LinkKind::Net),
+    },
+    CmdHelp {
+        name: "dash",
+        aliases: &["ds"],
+        usage: "dash [bars|chart|mix | off|mini|normal|full]",
+        summary: "the traffic dashboard under the trace (= set trace_dash[_view])",
+        details: &[
+            "Graphs of what is received and sent, at the bottom of the console above the",
+            "prompt, redrawn in place. Shown while `trace` is on. A view, and a size:",
+            "bars   a small bar graph per direction, with its rate (default)",
+            "chart  the traffic as a time series: bit rate over the window with a time axis,",
+            "       and beside it frames per second, average frame size, peak, link use",
+            "mix    the chart, and under it the protocols that went by as horizontal bars",
+            "off | mini | normal | full   how many lines (0 off, 1 mini, 2 normal, 3 full)",
+            "`dash` alone goes to the next view; `dash next` to the next size.",
+            "`window` sets the time the graphs cover.",
+        ],
+        examples: &["dash", "dash chart", "dash mix", "dash full", "dash off"],
+        group: Group::Link,
+        only: Some(LinkKind::Net),
+    },
+    CmdHelp {
+        name: "gen",
+        aliases: &["g"],
+        usage: "gen [start|stop|pause|resume|rate|size|shape|for|count] ...",
+        summary: "traffic generator: UDP datagrams to the peer, finely controlled",
+        details: &[
+            "gen start [rate] [size] [shape] [time]   in any order; the rest stays as it was",
+            "gen rate R | size S | shape P | for T | count N | stop | pause | resume | status",
+            "R rate: 5000 (datagrams/s), 5kpps, or on the wire 2Mbit, 500kbit, 1Gbit.",
+            "  With a shape it is the FLOOR.",
+            "S size of the payload: 512B, 64-1400 (random), imix (7 small, 4 medium, 1 large)",
+            "T time: 30s, 2min, forever, auto. Default auto: as long as the shape (one cycle),",
+            "  10 s at least.",
+            "P shape (it has a colon): the second value is the PEAK, the last is one CYCLE,",
+            "  not the length of the stream:",
+            "  sine:3Mbit:20s  cosine:...  triangle:...  saw:...  square:...",
+            "  ramp:3Mbit:30s  steps:3Mbit:5:30s  pulse:200ms:800ms  random",
+            "A wave repeats for as long as the stream runs: add `forever` (or a time).",
+        ],
+        examples: &[
+            "gen start 2Mbit 512B 30s",
+            "gen start 200kbit triangle:2Mbit:10s forever",
+            "gen start 200kbit sine:2Mbit:20s forever",
+            "gen start 5000 imix",
+            "gen rate 50Mbit",
+            "gen stop",
+        ],
+        group: Group::Link,
+        only: Some(LinkKind::Net),
+    },
+    CmdHelp {
+        name: "window",
+        aliases: &["win"],
+        usage: "window <2-3600 seconds>",
+        summary: "the time the dashboard's graphs cover (= set trace_window_s)",
+        details: &[
+            "Each column of a graph is a slice of it: 30 s over 40 columns is 750 ms a column.",
+            "Seconds, or with a unit: 30, 30s, 2min. Changing it starts the graphs over.",
+        ],
+        examples: &["window 30", "window 2min", "win 10s"],
+        group: Group::Link,
+        only: Some(LinkKind::Net),
+    },
+    CmdHelp {
+        name: "dump",
+        aliases: &["d"],
+        usage: "dump <0-256>",
+        summary: "raw bytes of each traced frame as a hex dump (= set trace_bytes)",
+        details: &["0 shows no dump. The headers of any frame fit in 134 bytes;", "a frame is cut after 256."],
+        examples: &["dump 64", "d 0", "dump 256"],
         group: Group::Link,
         only: Some(LinkKind::Net),
     },
@@ -711,7 +836,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "watch",
-        aliases: &[],
+        aliases: &["wa"],
         usage: "watch <path> [interval]",
         summary: "the peer reports a variable whenever it changes",
         details: &[
@@ -725,7 +850,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "unwatch",
-        aliases: &[],
+        aliases: &["uw"],
         usage: "unwatch [path]",
         summary: "stop watching one variable, or all of them",
         details: &[],
@@ -735,7 +860,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "burst",
-        aliases: &[],
+        aliases: &["bs"],
         usage: "burst [count [rate|max]]",
         summary: "send a burst of frames and measure the link",
         details: &[
@@ -768,7 +893,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "period",
-        aliases: &[],
+        aliases: &["pd"],
         usage: "period <period|freq>",
         summary: "DAT period (= set data_period_ms)",
         details: &[
@@ -781,7 +906,7 @@ pub static COMMANDS: &[CmdHelp] = &[
     },
     CmdHelp {
         name: "info",
-        aliases: &["about", "boot"],
+        aliases: &["about", "boot", "i"],
         usage: "info",
         summary: "the boot card again: link, node, build, chip, LEDs",
         details: &["Shows the current settings (those changed with `set` included)."],
@@ -1068,6 +1193,67 @@ mod tests {
     }
 
     #[test]
+    fn trace_takes_a_level_or_a_view() {
+        let set = |key: &str, value: &str| {
+            Ok(Command::Set { key: key.try_into().unwrap(), value: value.try_into().unwrap() })
+        };
+        assert_eq!(parse("trace"), set("trace", "next"));
+        assert_eq!(parse("t events"), set("trace", "events"));
+        assert_eq!(parse("tr 2"), set("trace", "2"));
+        for view in ["compact", "layers", "inside-out"] {
+            assert_eq!(parse(&std::format!("trace {view}")), set("trace_view", view));
+        }
+        assert_eq!(parse("dump 64"), set("trace_bytes", "64"));
+        assert_eq!(parse("d 0"), set("trace_bytes", "0"));
+        assert_eq!(parse("dash"), set("trace_dash_view", "next"));
+        assert_eq!(parse("ds chart"), set("trace_dash_view", "chart"));
+        assert_eq!(parse("dash mix"), set("trace_dash_view", "mix"));
+        assert_eq!(parse("dash full"), set("trace_dash", "full"));
+        assert_eq!(parse("dash next"), set("trace_dash", "next"));
+        assert_eq!(parse("ds off"), set("trace_dash", "off"));
+        assert_eq!(parse("window 2min"), set("trace_window_s", "2min"));
+        assert_eq!(parse("win 10"), set("trace_window_s", "10"));
+    }
+
+    #[test]
+    fn short_names_exist_for_the_longer_commands() {
+        for (short, long) in [
+            ("r", "reset"),
+            ("fg", "forget"),
+            ("rb", "reboot"),
+            ("bd", "baud"),
+            ("wa /x", "watch /x"),
+            ("uw", "unwatch"),
+            ("bs", "burst"),
+            ("pd 1s", "period 1s"),
+            ("i", "info"),
+            ("lk", "link"),
+            ("h", "help"),
+        ] {
+            assert_eq!(parse(short), parse(long), "`{short}` is `{long}`");
+        }
+    }
+
+    /// The pages of `help` have to fit a terminal of 100 columns: a line that wraps loses its columns (and, with a live
+    /// line or a dashboard under it, the prompt block gets redrawn over a wrapped row). `help` lists a command as
+    /// `    name (aliases)  │ summary`; `help <command>` as `    label     │ line`.
+    #[test]
+    fn the_help_pages_fit_a_terminal_of_100_columns() {
+        const WIDTH: usize = 100;
+        let label_w = COMMANDS.iter().map(CmdHelp::label_width).max().unwrap() + 2;
+        for c in COMMANDS {
+            let overview = 4 + label_w + 2 + c.summary.chars().count();
+            assert!(overview <= WIDTH, "`help` line of {}: {overview} columns: {}", c.name, c.summary);
+            let page = |text: &str| 4 + 10 + 2 + text.chars().count();
+            assert!(page(c.usage) <= WIDTH, "usage of {}: {}", c.name, c.usage);
+            for line in c.details.iter().chain(c.examples) {
+                assert!(page(line) <= WIDTH, "`help {}`: {} columns: {line}", c.name, page(line));
+            }
+        }
+        assert!(label_w <= 26, "the name column is {label_w} wide");
+    }
+
+    #[test]
     fn every_documented_name_is_a_command() {
         for c in COMMANDS {
             for name in core::iter::once(&c.name).chain(c.aliases) {
@@ -1076,7 +1262,7 @@ mod tests {
                 // `help <topic>` looks commands up first: a name may only shadow a
                 // setting it is the shortcut of (`verbose`).
                 if Key::from_name(name).is_some() || READ_ONLY_UART.contains(name) || READ_ONLY_NET.contains(name) {
-                    let alone = if matches!(*name, "verbose" | "v") { "next" } else { "on" };
+                    let alone = if matches!(*name, "verbose" | "v" | "trace" | "t" | "tr") { "next" } else { "on" };
                     assert_eq!(parse(name), Ok(set_cmd(name, alone)), "`{name}` shadows a setting");
                 }
             }

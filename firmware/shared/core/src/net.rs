@@ -138,7 +138,7 @@ pub struct NetLink {
 }
 
 /// Ports the firmware accepts: not the well-known ones.
-pub const PORT_RANGE: (u16, u16) = (1024, 65535);
+pub const PORT_RANGE: (u16, u16) = (1024, 65534);
 /// Speeds accepted by [`NetLink::max_speed`].
 pub const SPEEDS: [u16; 2] = [100, 1000];
 
@@ -182,8 +182,8 @@ impl NetLink {
         {
             return Err("config: `net.address` and `net.peer` can't be the network or broadcast address");
         }
-        if self.port < PORT_RANGE.0 {
-            return Err("config: `net.port` must be 1024-65535");
+        if self.port < PORT_RANGE.0 || self.port > PORT_RANGE.1 {
+            return Err("config: `net.port` must be 1024-65534 (the traffic generator uses the next port)");
         }
         if self.max_speed != SPEEDS[0] && self.max_speed != SPEEDS[1] {
             return Err("config: `net.max_speed` must be 100 or 1000");
@@ -206,7 +206,7 @@ impl NetLink {
             "net.address" => self.address = Addr::parse(value).ok_or("`net.address`: expected an IPv4 address")?.0,
             "net.peer" => self.peer = Addr::parse(value).ok_or("`net.peer`: expected an IPv4 address")?.0,
             "net.prefix_len" => self.prefix_len = value.parse().map_err(|_| "`net.prefix_len`: expected 8-30")?,
-            "net.port" => self.port = value.parse().map_err(|_| "`net.port`: expected 1024-65535")?,
+            "net.port" => self.port = value.parse().map_err(|_| "`net.port`: expected 1024-65534")?,
             "net.tcp_role" => {
                 self.tcp_role = match value {
                     "server" => TcpRole::Server,
@@ -242,7 +242,7 @@ pub const NET_KEYS: [(&str, &str, &str); 7] = [
     ("net.address", "this node's static IPv4 address (no DHCP)", "a.b.c.d"),
     ("net.prefix_len", "subnet size (24 = 255.255.255.0)", "8-30"),
     ("net.peer", "the other node's address, same subnet", "a.b.c.d"),
-    ("net.port", "port of the frames (UDP, or TCP server), same on both nodes", "1024-65535"),
+    ("net.port", "port of the frames (UDP, or TCP server), same on both nodes; `gen` uses the next one", "1024-65534"),
     ("net.tcp_role", "TCP only: who opens the connection", "server, client"),
     ("net.max_speed", "fastest link speed allowed, Mbit/s (1000 needs the MPLL at 500 MHz)", "100, 1000"),
 ];
@@ -272,6 +272,8 @@ mod tests {
         assert!(bad(&|n| n.prefix_len = 31).is_err());
         assert!(bad(&|n| n.prefix_len = 7).is_err());
         assert!(bad(&|n| n.port = 80).is_err());
+        assert!(bad(&|n| n.port = 65535).is_err(), "the generator needs port + 1");
+        assert_eq!(bad(&|n| n.port = 65534), Ok(()));
         assert!(bad(&|n| n.max_speed = 10).is_err());
         assert_eq!(bad(&|n| (n.prefix_len, n.peer) = (16, [192, 168, 99, 5])), Ok(()));
     }

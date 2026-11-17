@@ -7,7 +7,7 @@
 //! is describing (and their timestamps). So:
 //!
 //! ```text
-//!   term::out!(...) ──▶ PIPE (8 KB, never blocks, drops when full) ──▶ console_task ──▶ USB
+//!   term::out!(...) ──▶ PIPE (16 KB, never blocks, drops when full) ──▶ console_task ──▶ USB
 //! ```
 //!
 //! The pipe takes bytes from anywhere ([`print`]), the task writes them to the USB FIFO a byte at
@@ -22,14 +22,40 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pipe::Pipe};
 use embassy_time::{Duration, Timer};
 use esp_hal::{Blocking, usb::usb_serial_jtag::UsbSerialJtagTx};
 
-/// Room for about 30 frame lines, or the whole boot card.
-const PIPE_SIZE: usize = 8192;
+/// Room for about 60 frame lines, or the whole boot card. The pipe never blocks and drops what doesn't fit, in the
+/// middle of whatever was being written: so the answer to a command needs room for all of it (see [`REPLY_ROOM`]),
+/// and this is twice what the longest one (a `help` page, a dashboard redrawn after each of its lines) takes.
+const PIPE_SIZE: usize = 16384;
+
+/// Room the console must have before a long answer (`help`, `config`, `link`...) starts, and that everything else
+/// (the trace, the dashboard) leaves free for it: the longest answer is about 4 KB, and the prompt block drawn
+/// after it (live line, a dashboard of up to 14 rows) up to 4 KB more.
+pub const REPLY_ROOM: usize = 8192;
 static PIPE: Pipe<CriticalSectionRawMutex, PIPE_SIZE> = Pipe::new();
 /// Bytes that didn't fit (the terminal isn't keeping up, or nobody is reading).
 static DROPPED: AtomicU32 = AtomicU32::new(0);
 
+/// Lines (newlines) written to the console since boot.
+static LINES: AtomicU32 = AtomicU32::new(0);
+
+/// How many lines have been printed since boot: the console uses it to tell that the terminal's screen is full.
+pub fn lines_printed() -> u32 {
+    LINES.load(Ordering::Relaxed)
+}
+
+/// Whether the console has room for the whole of a long answer (see [`REPLY_ROOM`]).
+pub fn has_room_for_reply() -> bool {
+    free() >= REPLY_ROOM
+}
+
+/// Bytes the console pipe has room for right now (the network trace prints only while there is plenty).
+pub fn free() -> usize {
+    PIPE.free_capacity()
+}
+
 /// Queues `text` for the console. Never blocks; what doesn't fit is dropped and counted.
 pub fn write_str(text: &str) {
+    LINES.fetch_add(text.bytes().filter(|b| *b == b'\n').count() as u32, Ordering::Relaxed);
     let mut rest = text.as_bytes();
     while !rest.is_empty() {
         match PIPE.try_write(rest) {

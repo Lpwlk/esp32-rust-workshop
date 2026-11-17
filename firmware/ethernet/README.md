@@ -21,7 +21,8 @@ Cable the two RJ45 ports together (a straight cat5e cable is enough: the PHYs de
 type). Both consoles show `cable connected: 1 Gbit/s · full duplex`, then the frames. `help` lists
 the CLI; `link` shows the cable, the negotiated speed, the addresses and the counters. By default the console
 is one status line updated in place; `verbose frames` and `verbose wire` print every frame (and the raw frames,
-checksums and timing breakdown). `write /leds/1 on` and `read /stats/rx` use the peer's UA-lite address space
+checksums and timing breakdown); `trace events` and `trace frames` show the network's own frames (ARP, TCP
+handshake, every header decoded, `dump 64` for 64 raw bytes of each). `dash` draws bar graphs, a time-series chart or the protocol ranking of the traffic under the trace, and `gen start 2Mbit size=512 for=30s` fills the network with a controlled load. `write /leds/1 on` and `read /stats/rx` use the peer's UA-lite address space
 ([`protocols.md`](../docs/book/protocols.md)).
 
 | Want | Do |

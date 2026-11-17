@@ -155,7 +155,7 @@ Type in the console; the prompt `cli ›` stays on the last line.
 help                  every command
 pattern ocean         RGB LED pattern
 period 1Hz            one DAT frame per second
-verbose [0|1|2]       live line, every frame, raw frames on the wire
+verbose [0|1|2|3]     nothing, live line, every frame, the details behind each
 save                  keep the changes after a reboot
 ```
 

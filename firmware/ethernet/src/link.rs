@@ -258,3 +258,39 @@ pub async fn tcp_task(stack: Stack<'static>, net: NetLink) -> ! {
         Timer::after(Duration::from_millis(200)).await;
     }
 }
+
+/// The traffic generator (`gen`): its own UDP socket on `net.port + 1`, to the peer's. Whatever the node's frames
+/// travel on, the generator's datagrams are UDP. The task wakes every 0.5 ms while a stream is being sent or
+/// received, and every 10 ms otherwise.
+#[embassy_executor::task]
+pub async fn gen_task(stack: Stack<'static>, net: NetLink) -> ! {
+    let mut rx_meta = [PacketMetadata::EMPTY; 64];
+    let mut rx_buf = [0u8; 16384];
+    let mut tx_meta = [PacketMetadata::EMPTY; 64];
+    let mut tx_buf = [0u8; 16384];
+    let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    socket.bind(net.port + 1).expect("generator UDP port");
+    let mut peer = peer_endpoint(&net);
+    peer.port = net.port + 1;
+
+    let mut engine = crate::loadgen::Engine::new();
+    let mut datagram = [0u8; 1536];
+    loop {
+        let nap = if engine.is_busy() { 500 } else { 10_000 };
+        if let Either::First(Ok((n, meta))) =
+            select(socket.recv_from(&mut datagram), Timer::after(Duration::from_micros(nap))).await
+            && meta.endpoint.addr == peer.addr
+        {
+            engine.receive(&datagram[..n], now_us());
+        }
+        // Whatever is waiting in the socket, then what is due: a datagram the socket has no room for now stays due.
+        while let core::task::Poll::Ready(Ok((n, meta))) = embassy_futures::poll_once(socket.recv_from(&mut datagram)) {
+            if meta.endpoint.addr == peer.addr {
+                engine.receive(&datagram[..n], now_us());
+            }
+        }
+        engine.poll(now_us(), &mut |payload| {
+            matches!(embassy_futures::poll_once(socket.send_to(payload, peer)), core::task::Poll::Ready(Ok(())))
+        });
+    }
+}
