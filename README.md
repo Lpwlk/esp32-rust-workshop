@@ -67,6 +67,20 @@ python3 scripts/dev.py --app uart flash a -m       # the same for the UART app
 python3 scripts/dev.py check                       # everything CI checks, locally
 ```
 
+## A third app: the ADC to your computer
+
+One board samples an analog pin (up to 83 kS/s, with the ESP32-S31's continuous ADC and DMA) and streams it over
+Ethernet to your computer, which draws a live spectrum in the browser (Plotly). Folder
+[`firmware/adc-stream/`](firmware/adc-stream), computer side [`tools/adc-fft/`](tools/adc-fft).
+
+```sh
+python3 scripts/dev.py --app adc flash a -m  # node A's board (or b)
+python3 scripts/dev.py fft                   # the page (or `fft --demo` without a board)
+```
+
+`dev.py` flashes any of the three firmwares from the repository root, with `--app eth` (default), `--app uart`
+or `--app adc`: no need to `cd` into a firmware folder.
+
 ## What it looks like (Ethernet)
 
 Every scene below is a real recording of two boards, made by `python3 scripts/record_demos.py`.

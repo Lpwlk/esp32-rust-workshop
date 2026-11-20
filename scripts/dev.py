@@ -4,8 +4,16 @@
     python3 scripts/dev.py setup                 # once: .venv (Python 3.13) + requirements
     python3 scripts/dev.py doctor                # tools, Rust target, boards: what's missing
 
-  Boards (node = a | b). These work on the Ethernet app unless you pass `--app uart`:
-    python3 scripts/dev.py --app uart flash a -m  # the UART app instead (the option goes before the command)
+  Three firmwares, chosen with `--app` (the option goes before the command; nobody needs to `cd` anywhere):
+    eth   board-to-board over Ethernet: nodes a and b (default)        firmware/ethernet/
+    uart  board-to-board over a UART: nodes a and b                    firmware/uart/
+    adc   board-to-computer: the ADC streamed over Ethernet (adc-stream): nodes a or b   firmware/adc-stream/
+
+  Boards (node = a | b, the boards registered with `boards assign`; every app runs on either of them):
+    python3 scripts/dev.py --app uart flash a -m  # the UART app instead
+    python3 scripts/dev.py --app adc flash b -m  # the ADC streamer on node B's board, then its console
+    python3 scripts/dev.py fft                   # the live spectrum page (Plotly) for adc-stream, in the browser
+    python3 scripts/dev.py fft --demo            # the same with a simulated board
     python3 scripts/dev.py boards                # plugged boards: MAC, port, probe, node
     python3 scripts/dev.py boards assign a 6C:1A # this board is node A (remembered)
     python3 scripts/dev.py build [a|b]           # firmware, release (both by default)
@@ -50,6 +58,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
+TOOLS = ROOT / "tools"
+FFT_TOOL = TOOLS / "adc-fft" / "adc_fft.py"
 VENV = ROOT / ".venv"
 VENV_BIN = VENV / ("Scripts" if os.name == "nt" else "bin")
 VENV_PY = VENV_BIN / "python"
@@ -61,7 +71,7 @@ COMMIT_TYPES = ["feat", "fix", "chore", "refactor", "test", "docs"]
 # Firmware (see Cargo.toml and .cargo/config.toml).
 CHIP = "esp32s31"
 TARGET = "riscv32imafc-unknown-none-elf"
-NODES = ("a", "b")
+NODES = ("a", "b")  # the board-to-board apps
 
 
 def in_venv() -> bool:
@@ -141,12 +151,13 @@ def format_code(check: bool) -> None:
     from devlib import live, log, run
 
     live(["cargo", "fmt", "--all"] + (["--", "--check"] if check else []))
-    # firmware/ethernet is its own Cargo workspace: `--all` at the root doesn't reach it.
-    live(["cargo", "fmt"] + (["--", "--check"] if check else []), cwd=APP_DIRS["eth"])
+    # firmware/ethernet and firmware/adc-stream are their own Cargo workspaces: `--all` at the root doesn't reach them.
+    for app in OWN_WORKSPACES:
+        live(["cargo", "fmt"] + (["--", "--check"] if check else []), cwd=APP_DIRS[app])
     run(
         [str(VENV_BIN / "black"), "--line-length", "100"]
         + (["--check"] if check else [])
-        + [str(SCRIPTS.relative_to(ROOT))]
+        + [str(SCRIPTS.relative_to(ROOT)), str(TOOLS.relative_to(ROOT))]
     )
     log.info("✓ formatted" if not check else "✓ already formatted")
 
@@ -157,18 +168,39 @@ def format_code(check: bool) -> None:
 
 
 # Which firmware the build / flash / monitor commands work on: `--app eth` (firmware/ethernet/, the
-# Ethernet app: its own Cargo workspace; the default) or `--app uart` (firmware/uart/, a member of the
-# root workspace). `--preset NAME` builds that preset (firmware/<app>/presets/NAME.toml) instead of
-# node-a / node-b.
+# Ethernet app: its own Cargo workspace; the default), `--app uart` (firmware/uart/, a member of the
+# root workspace) or `--app adc` (firmware/adc-stream/: a node's board streaming its ADC to a computer;
+# its own Cargo workspace). `--preset NAME` builds that preset (firmware/<app>/presets/NAME.toml) instead
+# of node-a / node-b (the apps with presets).
 APP = "eth"
 PRESET: str | None = None
-APP_DIRS = {"uart": ROOT / "firmware" / "uart", "eth": ROOT / "firmware" / "ethernet"}
-# The UART app is a member of the root workspace (one `target/` at the root); the Ethernet app is its own.
-TARGET_DIRS = {"uart": ROOT / "target", "eth": ROOT / "firmware" / "ethernet" / "target"}
+APP_DIRS = {
+    "uart": ROOT / "firmware" / "uart",
+    "eth": ROOT / "firmware" / "ethernet",
+    "adc": ROOT / "firmware" / "adc-stream",
+}
+# The UART app is a member of the root workspace (one `target/` at the root); the others are their own.
+TARGET_DIRS = {
+    "uart": ROOT / "target",
+    "eth": ROOT / "firmware" / "ethernet" / "target",
+    "adc": ROOT / "firmware" / "adc-stream" / "target",
+}
+# The firmware's own Cargo workspaces (`cargo ... --all` at the root doesn't reach them).
+OWN_WORKSPACES = ("eth", "adc")
 
 
 def app_dir() -> Path:
     return APP_DIRS[APP]
+
+
+def app_nodes() -> tuple[str, ...]:
+    """The nodes of the chosen app: every app runs on either board (adc-stream is one binary for both)."""
+    return NODES
+
+
+def bin_name(node: str) -> str:
+    """The Cargo binary of a node."""
+    return "adc-stream" if APP == "adc" else f"node-{node}"
 
 
 def preset_env() -> dict[str, str] | None:
@@ -176,7 +208,7 @@ def preset_env() -> dict[str, str] | None:
 
 
 def elf(node: str, release: bool = True) -> Path:
-    return TARGET_DIRS[APP] / TARGET / ("release" if release else "debug") / f"node-{node}"
+    return TARGET_DIRS[APP] / TARGET / ("release" if release else "debug") / bin_name(node)
 
 
 def board_for(node: str | None, selector: str | None):
@@ -232,13 +264,16 @@ def boards_assign(node: str, selector: str) -> None:
 
 
 def cargo_build(nodes: list[str], rtt: bool, release: bool) -> None:
-    from devlib import live
+    from devlib import live, log
 
+    if rtt and APP == "adc":
+        log.error("The RTT console is for the node apps: `--rtt` doesn't apply to adc-stream.")
+        raise SystemExit(1)
     live(
         ["cargo", "build"]
         + (["--release"] if release else [])
         + (["--features", "rtt"] if rtt else [])
-        + [arg for n in nodes for arg in ("--bin", f"node-{n}")],
+        + [arg for b in dict.fromkeys(bin_name(n) for n in nodes) for arg in ("--bin", b)],
         cwd=app_dir(),
         extra_env=preset_env(),
     )
@@ -252,13 +287,16 @@ def memory_usage(nodes: list[str], release: bool) -> None:
     from memsize import report
     from rich.table import Table
 
-    for node in nodes:
+    # adc-stream is one binary for both nodes: show it once.
+    for node in {bin_name(n): n for n in nodes}.values():
         path = elf(node, release)
         if not path.exists():
-            log.warning(f"node-{node}: not built yet (`dev.py build {node}`)")
+            log.warning(f"{bin_name(node)}: not built yet (`dev.py build {node}`)")
             continue
-        last = path.parent / f".memsize-node-{node}.json"
-        table = Table(title=f"node-{node} memory", title_justify="left", box=None, pad_edge=False)
+        last = path.parent / f".memsize-{bin_name(node)}.json"
+        table = Table(
+            title=f"{bin_name(node)} memory", title_justify="left", box=None, pad_edge=False
+        )
         for col in ("Memory region", "Used Size", "Region Size", "%age Used", "Change"):
             table.add_column(col, justify="right")
         for region, used, size, pct, change in report(path, last):
@@ -282,6 +320,12 @@ def flash(node: str, selector: str | None, monitor: bool, rtt: bool, release: bo
 def flash_all(release: bool) -> None:
     from boards import BoardError, resolve
     from devlib import log
+
+    if APP == "adc":
+        log.error(
+            "`flash all` is for the two nodes of the eth / uart apps: the ADC app runs on one board, `dev.py --app adc flash a|b`."
+        )
+        raise SystemExit(1)
 
     try:
         # Both boards first: don't flash A and then find out B isn't there.
@@ -314,8 +358,11 @@ def monitor(node: str | None, selector: str | None) -> None:
 def rtt(node: str, selector: str | None) -> None:
     """RTT console through the probe. Flashing goes through espflash (the probe-rs 0.32
     revision trap, see the Rust guide); cargo-embed only attaches (firmware/uart/Embed.toml)."""
-    from devlib import live
+    from devlib import live, log
 
+    if APP == "adc":
+        log.error("The RTT console is for the node apps, not adc-stream.")
+        raise SystemExit(1)
     board = board_for(node, selector)
     flash(node, board.mac, monitor=False, rtt=True, release=True)
     live(
@@ -393,6 +440,16 @@ def check() -> None:
             "clippy, firmware (Ethernet)",
             "cargo clippy --release -- -D warnings".split(),
             APP_DIRS["eth"],
+        ),
+        ("firmware build (ADC stream)", ["cargo", "build", "--release"], APP_DIRS["adc"]),
+        (
+            "clippy, firmware (ADC stream)",
+            "cargo clippy --release -- -D warnings".split(),
+            APP_DIRS["adc"],
+        ),
+        (
+            "adc-fft self test (receiver, FFT, web server)",
+            [str(VENV_PY), str(FFT_TOOL), "--selftest"],
         ),
     ]
     for i, (name, cmd, *where) in enumerate(steps, 1):
@@ -539,6 +596,26 @@ def git_command(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------------------
 
 
+def check_node(args: argparse.Namespace) -> None:
+    """`flash` and `rtt` need a node; the other commands default to both."""
+    if not hasattr(args, "node") or args.node == "all" or args.command == "boards":
+        return
+    if args.node is None and args.command in ("flash", "rtt"):
+        sys.exit(f"`{args.command}` needs a node: a or b.")
+
+
+def fft(tool_args: list[str]) -> None:
+    """The computer side of adc-stream: a web page with the live spectrum (tools/adc-fft/)."""
+    from devlib import log, stream
+
+    if tool_args[:1] == ["--"]:
+        tool_args = tool_args[1:]
+    log.info(
+        "live spectrum: [path]tools/adc-fft/adc_fft.py[/] (Ctrl+C to stop; `dev.py fft --help` for options)"
+    )
+    stream([str(VENV_PY), "-u", str(FFT_TOOL), *tool_args])
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="dev.py",
@@ -547,9 +624,9 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--app",
-        choices=("uart", "eth"),
+        choices=("uart", "eth", "adc"),
         default="eth",
-        help="firmware that build / size / flash / monitor / rtt work on: eth (default, firmware/ethernet/) or uart (firmware/uart/)",
+        help="firmware that build / size / flash / monitor / erase work on: eth (default, board-to-board over Ethernet), uart (board-to-board over a UART) or adc (adc-stream: one board to a computer)",
     )
     p.add_argument(
         "--preset",
@@ -578,7 +655,7 @@ def parser() -> argparse.ArgumentParser:
     # --- boards and firmware ---
     s = sub.add_parser("boards", help="list plugged boards, or assign them to nodes")
     b = s.add_subparsers(dest="boards_command", metavar="assign")
-    s = b.add_parser("assign", help="remember which board is node A or B")
+    s = b.add_parser("assign", help="remember which board is node A or B (or the ADC board)")
     s.add_argument("node", choices=NODES)
     s.add_argument("board", help="end of its MAC (6C:1A), its port, or # from `boards`")
 
@@ -592,7 +669,12 @@ def parser() -> argparse.ArgumentParser:
     debug_arg(s)
 
     s = sub.add_parser("flash", help="build and flash a node with espflash (or `all`)")
-    s.add_argument("node", choices=[*NODES, "all"], help="a, b, or all (both, no monitor)")
+    s.add_argument(
+        "node",
+        nargs="?",
+        choices=[*NODES, "all"],
+        help="a, b, or all (both, no monitor; not for --app adc)",
+    )
     s.add_argument("--board", metavar="MAC|PORT|#", help="this board instead of the assigned one")
     s.add_argument("-m", "--monitor", action="store_true", help="open the console afterwards")
     s.add_argument("--rtt", action="store_true", help="with the RTT console (feature rtt)")
@@ -606,6 +688,17 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("erase", help="erase a board's whole flash")
     node_arg(s, optional=True)
+
+    # --- the ADC app's computer side ---
+    s = sub.add_parser(
+        "fft",
+        help="live spectrum page for adc-stream (Plotly, in the browser); options go to the tool",
+        description="Starts tools/adc-fft/adc_fft.py in .venv. Everything after `fft` is passed to it: "
+        "`--demo` (simulated board), `--rate 40000`, `--no-browser`, `--http-port 8051`, `--selftest`, `--help`...",
+    )
+    s.add_argument(
+        "tool_args", nargs=argparse.REMAINDER, metavar="...", help="passed to adc_fft.py"
+    )
 
     # --- tests ---
     t = sub.add_parser("test", help="host or on-target tests").add_subparsers(
@@ -662,7 +755,15 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = parser().parse_args()
+    # Everything after `fft` belongs to the tool (argparse would choke on its options).
+    argv = sys.argv[1:]
+    tool_args: list[str] = []
+    if "fft" in argv:
+        i = argv.index("fft")
+        argv, tool_args = argv[: i + 1], argv[i + 1 :]
+    args = parser().parse_args(argv)
+    if args.command == "fft":
+        args.tool_args = tool_args
     if args.command == "setup":
         setup(args.python)
         return
@@ -681,6 +782,7 @@ def main() -> None:
     global APP, PRESET
     APP, PRESET = args.app, args.preset
     release = not getattr(args, "debug", False)
+    check_node(args)
     match args.command:
         case "doctor":
             doctor()
@@ -690,9 +792,11 @@ def main() -> None:
             else:
                 boards_list()
         case "build":
-            cargo_build([args.node] if args.node else list(NODES), args.rtt, release)
+            cargo_build([args.node] if args.node else list(app_nodes()), args.rtt, release)
         case "size":
-            memory_usage([args.node] if args.node else list(NODES), release)
+            memory_usage([args.node] if args.node else list(app_nodes()), release)
+        case "fft":
+            fft(args.tool_args)
         case "flash":
             if args.node == "all":
                 flash_all(release)

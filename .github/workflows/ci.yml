@@ -3,7 +3,8 @@
 # - Every push and pull request: formatting, host tests (including the check that
 #   the generated reference pages match the code, and the TOML presets), firmware
 #   build + clippy for each Cargo feature combination, for the UART app (repository
-#   root) and the Ethernet app (firmware/ethernet/, its own Cargo workspace), site build.
+#   root), the Ethernet app (firmware/ethernet/, its own Cargo workspace) and the ADC streaming
+#   app (firmware/adc-stream/, own workspace; its computer side is tools/adc-fft/), site build.
 #   The Ferrite RTOS: its kernel is tested with the host tests; its ESP32-S31 port
 #   (firmware/ferrite-esp32s31/, own Cargo workspace) is built, with its demo.
 # - Every build: a Flash / RAM table in the job summary (scripts/memsize.py); on
@@ -41,6 +42,8 @@ jobs:
       # firmware/ethernet/ is its own Cargo workspace: `--all` above doesn't reach it.
       - name: rustfmt (Ethernet app)
         run: cd firmware/ethernet && cargo fmt -- --check
+      - name: rustfmt (ADC streaming app)
+        run: cd firmware/adc-stream && cargo fmt -- --check
       # Same for the Ferrite port for the S31 (firmware/ferrite-esp32s31/).
       - name: rustfmt (Ferrite port)
         run: cd firmware/ferrite-esp32s31 && cargo fmt -- --check
@@ -112,6 +115,36 @@ jobs:
         run: PRESET_NODE_A=node-a-tcp PRESET_NODE_B=node-b-tcp cargo build --release --locked ${{ matrix.features.flags }}
       - name: Clippy (Ethernet firmware)
         run: cargo clippy --release --locked ${{ matrix.features.flags }} -- -D warnings
+
+  firmware-adc:
+    name: ADC streaming firmware
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware/adc-stream
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware/adc-stream
+      - name: Build adc-stream
+        run: cargo build --release --locked
+      - name: Clippy (ADC streaming firmware)
+        run: cargo clippy --release --locked -- -D warnings
+
+  adc-fft:
+    name: ADC spectrum tool (tools/adc-fft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install numpy plotly
+      # Receiver, FFT, web server and the page's endpoints, against a simulated board (no hardware).
+      - name: Self test
+        run: python tools/adc-fft/adc_fft.py --selftest
 
   firmware:
     name: Firmware (${{ matrix.features.name }})
