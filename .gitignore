@@ -11,4 +11,5 @@ __pycache__/
 /.boards.json
 /docs/zensical.ci.toml
 /firmware/ethernet/target
+/firmware/adc-stream/target
 /firmware/ferrite-esp32s31/target
