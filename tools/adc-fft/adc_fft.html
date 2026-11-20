@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADC FFT</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f3f3f1;
+    --surface-1: #fcfcfb;
+    --surface-2: #f0efec;
+    --border: #dcdbd6;
+    --grid: #e6e5e0;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a796f;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --term-bg: #121211;
+    --term-text: #d6d5cc;
+    --term-dim: #8d8c82;
+    --term-ok: #4fd04f;
+    --term-warn: #fab219;
+    --term-error: #ff6b6b;
+    --term-board: #6da7ec;
+    --term-host: #d55181;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #121211;
+      --surface-1: #1a1a19;
+      --surface-2: #262625;
+      --border: #383835;
+      --grid: #2c2c2a;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8d8c82;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --term-bg: #0d0d0c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #262625;
+    --border: #383835;
+    --grid: #2c2c2a;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8d8c82;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --term-bg: #0d0d0c;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+
+  header.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header.top h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+  header.top .sub { color: var(--text-muted); font-size: 13px; }
+  header.top .grow { flex: 1; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1);
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .status svg { flex: none; }
+
+  select, button, .btn {
+    font: inherit; color: var(--text-primary); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; min-height: 32px;
+    cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+  }
+  select:hover, button:hover, .btn:hover { background: var(--surface-2); }
+  select:focus-visible, button:focus-visible, .btn:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--series-1); outline-offset: 2px;
+  }
+  button[aria-pressed="true"] { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+  input[type="range"] { accent-color: var(--series-1); width: 120px; min-height: 32px; }
+
+  /* A card, with its controls in a toolbar right under its title: each control sits with the plot it changes. */
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  .card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .card-head h2 { margin: 0; font-size: 14px; font-weight: 650; }
+  .card-head .hint { margin: 0; font-size: 12px; color: var(--text-muted); flex: 1; min-width: 200px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: end; margin: 10px 0 6px; }
+  .group { display: grid; gap: 3px; }
+  .group > .lab { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .acq { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: end; }
+  .acq .grow { flex: 1; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .tile { padding: 10px 14px; }
+  .tile .label { font-size: 12px; color: var(--text-muted); }
+  .tile .value { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; margin-top: 1px; white-space: nowrap; }
+  .tile .value small { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: 4px; }
+  .tile .note { font-size: 12px; color: var(--text-secondary); min-height: 18px; display: flex; align-items: center; gap: 4px; }
+
+  .plot { width: 100%; }
+  #spec { height: 380px; }
+  #scope { height: 250px; }
+  #water { height: 300px; }
+  .cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  td.h { color: var(--text-secondary); }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
+  .hidden { display: none !important; }
+  .foot { color: var(--text-muted); font-size: 12px; }
+
+  /* The board's log: always a dark terminal. */
+  .term-wrap { margin-top: 8px; }
+  .term {
+    background: var(--term-bg); color: var(--term-text); border: 1px solid var(--border); border-radius: 8px;
+    font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; height: 240px; overflow-y: auto;
+    resize: vertical; padding: 8px 10px; min-height: 100px;
+  }
+  .term .l { display: flex; gap: 8px; white-space: pre-wrap; word-break: break-word; }
+  .term .t { color: var(--term-dim); flex: none; min-width: 78px; text-align: right; font-variant-numeric: tabular-nums; }
+  .term .src { flex: none; width: 40px; }
+  .term .src.board { color: var(--term-board); }
+  .term .src.host { color: var(--term-host); }
+  .term .g { flex: none; width: 1ch; }
+  .term .l-ok .g { color: var(--term-ok); }
+  .term .l-warn .g, .term .l-warn .x { color: var(--term-warn); }
+  .term .l-error .g, .term .l-error .x { color: var(--term-error); }
+  .term .l-stat .g, .term .l-stat .x, .term .l-debug .g, .term .l-debug .x { color: var(--term-dim); }
+  .term .l-reply .g { color: var(--term-board); }
+  .term .l-cmd .g, .term .l-cmd .x { color: var(--term-host); }
+  .term.hide-info .l-info, .term.hide-ok .l-ok, .term.hide-warn .l-warn, .term.hide-error .l-error,
+  .term.hide-stat .l-stat, .term.hide-debug .l-debug, .term.hide-host .l-host:not(.l-cmd) { display: none; }
+  .term .none { color: var(--term-dim); }
+  .cmdline { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 4px 10px; background: var(--term-bg);
+    border: 1px solid var(--border); border-radius: 8px; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .cmdline:focus-within { border-color: var(--series-1); }
+  .cmdline .prompt { color: var(--term-host); }
+  .cmdline input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--term-text); font: inherit; padding: 4px 0; }
+  .cmdline input::placeholder { color: var(--term-dim); }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>ADC FFT</h1>
+    <span class="sub" id="boardinfo">live spectrum from the board over Ethernet</span>
+    <span class="grow"></span>
+    <span class="status" id="status" role="status" aria-live="polite"></span>
+    <button id="theme" title="Theme: auto, light, dark" aria-label="Change theme">Theme: auto</button>
+  </header>
+
+  <section class="card acq" aria-label="Acquisition">
+    <div class="group"><span class="lab">Sample rate</span>
+      <select id="rate" aria-label="Sample rate">
+        <option value="5000">5 kS/s</option><option value="10000">10 kS/s</option>
+        <option value="20000">20 kS/s</option><option value="40000">40 kS/s</option>
+        <option value="60000">60 kS/s</option><option value="83333">83.3 kS/s</option>
+      </select></div>
+    <div class="group"><span class="lab">Acquisition</span>
+      <div class="row"><button id="pause" aria-pressed="false">Pause</button></div></div>
+    <div class="group"><span class="lab">Export</span>
+      <div class="row">
+        <a class="btn" href="/api/snapshot.csv?kind=spectrum" download="adc-spectrum.csv">Spectrum CSV</a>
+        <a class="btn" href="/api/snapshot.csv?kind=samples" download="adc-samples.csv">Samples CSV</a>
+      </div></div>
+    <span class="grow"></span>
+    <span class="foot" id="foot">The ADC samples continuously, timed by its own clock and moved by DMA.</span>
+  </section>
+
+  <section class="tiles" aria-label="Readouts">
+    <div class="card tile"><div class="label">Peak frequency</div><div class="value num" id="k-pf">–</div><div class="note" id="n-pf"></div></div>
+    <div class="card tile"><div class="label">Peak level</div><div class="value num" id="k-pl">–</div><div class="note">relative to full scale</div></div>
+    <div class="card tile"><div class="label">AC rms</div><div class="value num" id="k-rms">–</div><div class="note num" id="n-rms"></div></div>
+    <div class="card tile"><div class="label">DC level</div><div class="value num" id="k-dc">–</div><div class="note num" id="n-dc"></div></div>
+    <div class="card tile"><div class="label">SNR (estimate)</div><div class="value num" id="k-snr">–</div><div class="note num" id="n-snr"></div></div>
+    <div class="card tile"><div class="label">THD (estimate)</div><div class="value num" id="k-thd">–</div><div class="note num" id="n-thd"></div></div>
+    <div class="card tile"><div class="label">Noise floor</div><div class="value num" id="k-floor">–</div><div class="note">median of the spectrum</div></div>
+    <div class="card tile"><div class="label">Network</div><div class="value num" id="k-pk">–</div><div class="note num" id="n-loss"></div></div>
+  </section>
+
+  <section class="card" id="c-spec">
+    <div class="card-head">
+      <h2>Spectrum</h2>
+      <p class="hint" id="spec-hint">dB relative to a full-scale sine, DC removed. Drag to zoom, double-click to reset.</p>
+    </div>
+    <div class="toolbar">
+      <div class="group"><span class="lab">FFT length</span>
+        <select id="fft" aria-label="FFT length">
+          <option>1024</option><option>2048</option><option>4096</option>
+          <option>8192</option><option>16384</option><option>32768</option>
+        </select></div>
+      <div class="group"><span class="lab">Window</span>
+        <select id="window" aria-label="Window">
+          <option value="hann">Hann</option><option value="hamming">Hamming</option>
+          <option value="blackman">Blackman</option><option value="flattop">Flat top</option>
+          <option value="rect">Rectangular</option>
+        </select></div>
+      <div class="group"><span class="lab">Averaging</span>
+        <select id="avg" aria-label="Averaging">
+          <option value="1">off</option><option value="2">× 2</option><option value="4">× 4</option>
+          <option value="8">× 8</option><option value="16">× 16</option><option value="32">× 32</option>
+        </select></div>
+      <div class="group"><span class="lab">Frequency axis</span>
+        <div class="row">
+          <select id="range" aria-label="Frequency range">
+            <option value="0">full band</option><option value="100">0 – 100 Hz</option>
+            <option value="500">0 – 500 Hz</option><option value="1000">0 – 1 kHz</option>
+            <option value="5000">0 – 5 kHz</option><option value="10000">0 – 10 kHz</option>
+            <option value="20000">0 – 20 kHz</option>
+          </select>
+          <button id="logx" aria-pressed="false">Log</button>
+        </div></div>
+      <div class="group"><span class="lab">Peaks</span>
+        <div class="row">
+          <button id="hold" aria-pressed="false">Hold</button>
+          <button id="resethold">Reset</button>
+        </div></div>
+      <div class="group"><span class="lab">Reference</span>
+        <div class="row">
+          <button id="refset" title="Keep the current spectrum as a grey trace to compare with">Set</button>
+          <button id="refclear" class="hidden">Clear</button>
+        </div></div>
+      <div class="group"><span class="lab">Harmonics of</span>
+        <select id="harm" aria-label="Harmonic markers">
+          <option value="off">off</option><option value="peak">strongest line</option>
+          <option value="50">50 Hz mains</option><option value="60">60 Hz mains</option>
+        </select></div>
+      <div class="group"><span class="lab">Labels</span>
+        <select id="labels" aria-label="Labelled peaks">
+          <option value="0">none</option><option value="1">strongest</option>
+          <option value="3">top 3</option><option value="5">top 5</option>
+        </select></div>
+      <div class="group"><span class="lab">Floor <b class="num" id="floorv">−100 dB</b></span>
+        <input id="floor" type="range" min="-140" max="-40" step="5" value="-100" aria-label="Floor of the dB scale"></div>
+    </div>
+    <div id="spec" class="plot"></div>
+  </section>
+
+  <section class="cols">
+    <div class="card">
+      <div class="card-head">
+        <h2>Waveform</h2>
+        <p class="hint">ADC codes, mean removed.</p>
+      </div>
+      <div class="toolbar">
+        <div class="group"><span class="lab">Time span</span>
+          <select id="scope_ms" aria-label="Waveform time span">
+            <option value="1">1 ms</option><option value="2">2 ms</option><option value="5">5 ms</option>
+            <option value="10">10 ms</option><option value="20">20 ms</option><option value="50">50 ms</option>
+            <option value="100">100 ms</option><option value="200">200 ms</option><option value="500">500 ms</option>
+          </select></div>
+        <div class="group"><span class="lab">Display</span>
+          <div class="row">
+            <button id="trigger" aria-pressed="false" title="Start the trace at a rising edge, for a steady picture">Trigger</button>
+            <button id="auto" aria-pressed="false">Autoscale</button>
+          </div></div>
+      </div>
+      <div id="scope" class="plot"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Strongest lines</h2>
+        <p class="hint">Full resolution, refined between bins.</p>
+      </div>
+      <div id="lines"></div>
+    </div>
+  </section>
+
+  <section class="card" id="watercard">
+    <div class="card-head">
+      <h2>Waterfall</h2>
+      <p class="hint">Spectrum over time, newest at the top. Brighter (dark theme) or darker (light theme) is stronger.</p>
+    </div>
+    <div class="toolbar">
+      <div class="group"><span class="lab">Time span</span>
+        <select id="wspan" aria-label="Waterfall time span">
+          <option value="6">6 s</option><option value="12">12 s</option>
+          <option value="30">30 s</option><option value="60">1 min</option>
+        </select></div>
+      <div class="group"><span class="lab">Colour floor <b class="num" id="wfloorv">−100 dB</b></span>
+        <input id="wfloor" type="range" min="-140" max="-40" step="5" value="-100" aria-label="Floor of the colour scale"></div>
+      <div class="group"><span class="lab">Display</span>
+        <div class="row"><button id="showwater" aria-pressed="true">Show</button></div></div>
+    </div>
+    <div id="water" class="plot"></div>
+  </section>
+
+  <section class="card" id="logcard">
+    <div class="card-head">
+      <h2>Board log</h2>
+      <p class="hint" id="log-hint">What the board says on its console, and what this tool does. The history of the boot is replayed when you connect.</p>
+    </div>
+    <div class="toolbar">
+      <div class="group"><span class="lab">Show</span>
+        <div class="row">
+          <button data-f="info" aria-pressed="true">Info</button>
+          <button data-f="ok" aria-pressed="true">OK</button>
+          <button data-f="warn" aria-pressed="true">Warnings</button>
+          <button data-f="error" aria-pressed="true">Errors</button>
+          <button data-f="stat" aria-pressed="true">Stats</button>
+          <button data-f="debug" aria-pressed="true" title="the detail lines of verbose mode">Verbose</button>
+          <button data-f="host" aria-pressed="true">This tool</button>
+        </div></div>
+      <div class="group"><span class="lab">Board</span>
+        <div class="row">
+          <button id="verbose" aria-pressed="false" title="One detail line per second: timings, ring level, DMA. Doesn't slow the stream.">Verbose mode</button>
+          <button id="info" title="Chip, build, ADC, network, stream, uptime">Info</button>
+          <button id="reboot" title="Software reset of the board; the stream resumes by itself">Reboot</button>
+        </div></div>
+      <div class="group"><span class="lab">Terminal</span>
+        <div class="row">
+          <button id="follow" aria-pressed="true">Follow</button>
+          <button id="logclear">Clear</button>
+          <button id="logcopy">Copy</button>
+        </div></div>
+    </div>
+    <div class="term-wrap"><div id="term" class="term" role="log" aria-live="off" tabindex="0"></div></div>
+    <form class="cmdline" id="cmdform" autocomplete="off">
+      <span class="prompt">›</span>
+      <input id="cmd" type="text" spellcheck="false" maxlength="64" placeholder="info · verbose [on|off] · reboot · help · clear" aria-label="Command for the board">
+    </form>
+  </section>
+</main>
+
+<script src="/plotly.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const ZERO_CODE = 2198, HALF_SCALE = 4393 - 2198;
+
+// ---- view settings kept in this browser (the sampling settings live on the server) ----------
+const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, wspan: 12, range: 0,
+             harm: "off", labels: 1, f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
+             f_host: true, follow: true };
+try { Object.assign(ui, JSON.parse(localStorage.getItem("adc-ui") || "{}")); } catch (_) {}
+const saveUi = () => { try { localStorage.setItem("adc-ui", JSON.stringify(ui)); } catch (_) {} };
+
+let frame = null, drawn = null, lastSettings = "", cur = {};
+let xsKey = "", xs = [];
+const WATER_ROWS = 120;
+let rows = [], rowsKey = "", lastRowAt = 0, lastLinesAt = 0;
+let ref = null; // a spectrum kept for comparison: {df, y}
+
+// ---- theme --------------------------------------------------------------------------------
+const themes = ["auto", "light", "dark"];
+let theme = "auto";
+try { theme = localStorage.getItem("adc-theme") || "auto"; } catch (_) {}
+function applyTheme() {
+  if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", theme);
+  $("theme").textContent = "Theme: " + theme;
+  drawn = null; // redraw with the new colours
+}
+$("theme").onclick = () => {
+  theme = themes[(themes.indexOf(theme) + 1) % themes.length];
+  try { localStorage.setItem("adc-theme", theme); } catch (_) {}
+  applyTheme();
+};
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawn = null; });
+
+// ---- controls -----------------------------------------------------------------------------
+function post(patch) {
+  fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
+    .catch(() => {});
+}
+// Sampling settings: the server holds them (every page open sees the same).
+$("rate").onchange = (e) => post({ rate: +e.target.value });
+$("fft").onchange = (e) => post({ fft: +e.target.value });
+$("window").onchange = (e) => post({ window: e.target.value });
+$("avg").onchange = (e) => post({ avg: +e.target.value });
+$("scope_ms").onchange = (e) => post({ scope_ms: +e.target.value });
+$("hold").onclick = () => post({ hold: !cur.hold });
+$("trigger").onclick = () => post({ trigger: !cur.trigger });
+$("pause").onclick = () => post({ paused: !cur.paused });
+$("resethold").onclick = () => post({ reset_hold: true });
+
+// View settings: this page only.
+function viewSelect(id, key, numeric, after) {
+  const el = $(id);
+  el.value = String(ui[key]);
+  el.onchange = () => { ui[key] = numeric ? +el.value : el.value; saveUi(); drawn = null; if (after) after(); };
+}
+function viewToggle(id, key, after) {
+  const el = $(id);
+  el.setAttribute("aria-pressed", String(ui[key]));
+  el.onclick = () => {
+    ui[key] = !ui[key]; el.setAttribute("aria-pressed", String(ui[key])); saveUi(); drawn = null;
+    if (after) after();
+  };
+}
+function viewRange(id, key, label) {
+  const el = $(id);
+  el.value = ui[key];
+  const show = () => { $(label).textContent = ui[key].toString().replace("-", "−") + " dB"; };
+  show();
+  el.oninput = () => { ui[key] = +el.value; show(); saveUi(); drawn = null; };
+}
+viewSelect("range", "range", true);
+viewSelect("harm", "harm", false);
+viewSelect("labels", "labels", true);
+viewSelect("wspan", "wspan", true, () => { rows = []; });
+viewToggle("logx", "logx");
+viewToggle("auto", "auto");
+viewToggle("showwater", "water", () => {
+  $("water").classList.toggle("hidden", !ui.water);
+  $("showwater").textContent = ui.water ? "Show" : "Hidden";
+});
+$("water").classList.toggle("hidden", !ui.water);
+$("showwater").textContent = ui.water ? "Show" : "Hidden";
+viewRange("floor", "floor", "floorv");
+viewRange("wfloor", "wfloor", "wfloorv");
+
+$("refset").onclick = () => {
+  if (!frame || !frame.spec) return;
+  ref = { df: frame.spec.df, y: frame.spec.y.slice() };
+  $("refclear").classList.remove("hidden"); drawn = null;
+};
+$("refclear").onclick = () => { ref = null; $("refclear").classList.add("hidden"); drawn = null; };
+
+function applySettings(s) {
+  const json = JSON.stringify(s);
+  if (json === lastSettings) return;
+  lastSettings = json; cur = s;
+  const set = (id, v) => { const el = $(id); if (document.activeElement !== el) el.value = String(v); };
+  set("rate", s.rate); set("fft", s.fft); set("window", s.window); set("avg", s.avg); set("scope_ms", s.scope_ms);
+  $("hold").setAttribute("aria-pressed", String(s.hold));
+  $("trigger").setAttribute("aria-pressed", String(s.trigger));
+  $("pause").setAttribute("aria-pressed", String(s.paused));
+  $("pause").textContent = s.paused ? "Resume" : "Pause";
+}
+
+// ---- formatting ---------------------------------------------------------------------------
+const fmtHz = (hz) => (hz >= 1000 ? (hz / 1000).toFixed(3) + " kHz" : hz.toFixed(1) + " Hz");
+const fmtDb = (db) => db.toFixed(1).replace("-", "−") + " dB";
+const fmtInt = (n) => n.toLocaleString("en-US");
+const fmtDbOrDash = (v) => (v === null || v === undefined ? "–" : fmtDb(v));
+
+// ---- plotly -------------------------------------------------------------------------------
+function baseLayout() {
+  const text = css("--text-secondary"), grid = css("--grid"), surface = css("--surface-2"), ink = css("--text-primary");
+  const axis = { gridcolor: grid, zerolinecolor: grid, linecolor: grid, tickcolor: grid,
+                 tickfont: { color: text, size: 11 }, titlefont: { color: text, size: 12 }, ticks: "outside",
+                 ticklen: 4, automargin: true };
+  return {
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: getComputedStyle(document.body).fontFamily, color: text, size: 12 },
+    margin: { l: 8, r: 12, t: 8, b: 8 },
+    xaxis: { ...axis }, yaxis: { ...axis },
+    hoverlabel: { bgcolor: surface, bordercolor: grid, font: { color: ink, size: 12 } },
+    hovermode: "x",
+  };
+}
+const plotCfg = { displaylogo: false, responsive: true, scrollZoom: false,
+                  modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toImage"] };
+
+function xsFor(len, dfKHz) {
+  const key = len + "|" + dfKHz;
+  if (key !== xsKey) { xsKey = key; xs = Array.from({ length: len }, (_, i) => i * dfKHz); }
+  return xs;
+}
+// Axis position of a frequency (kHz): on a log axis, annotations and shapes want log10 of it.
+const ax = (khz) => (ui.logx ? Math.log10(khz) : khz);
+
+function drawSpectrum(f) {
+  const s1 = css("--series-1"), s2 = css("--series-2"), surface = css("--surface-1"), ink = css("--text-primary");
+  const muted = css("--text-muted");
+  const L = baseLayout();
+  const dfk = f.spec.df / 1000, x = xsFor(f.spec.y.length, dfk), nyq = f.fs / 2000;
+  const hi = ui.range ? Math.min(ui.range / 1000, nyq) : nyq;
+  L.uirevision = `${f.fs}|${ui.logx}|${ui.floor}|${f.settings.fft}|${ui.range}|${theme}`;
+  L.xaxis = { ...L.xaxis, title: { text: "frequency (kHz)" }, type: ui.logx ? "log" : "linear",
+              range: ui.logx ? [Math.log10(Math.max(dfk, hi / 1000)), Math.log10(hi)] : [0, hi] };
+  L.yaxis = { ...L.yaxis, title: { text: "dB re full scale" }, range: [ui.floor, 5] };
+  const refOk = ref && ref.y.length === f.spec.y.length && Math.abs(ref.df - f.spec.df) < 1e-9;
+  L.showlegend = !!(f.settings.hold || refOk);
+  L.legend = { orientation: "h", x: 1, xanchor: "right", y: 1.08, font: { color: css("--text-secondary") } };
+
+  // Peak labels (the server's lines, at full resolution).
+  const top = (f.lines || []).slice(0, ui.labels);
+  L.annotations = top.map((ln, i) => ({
+    x: ax(ln.f / 1000), y: ln.db, xref: "x", yref: "y", showarrow: false, xanchor: "left", xshift: 8,
+    yshift: 14 + (i % 2) * 14,
+    text: fmtHz(ln.f) + " · " + fmtDb(ln.db) + (ln.h > 1 ? ` · ×${ln.h}` : ""),
+    font: { color: ink, size: 12 },
+  }));
+
+  // Harmonic markers: dotted lines at multiples of a fundamental.
+  const f0 = ui.harm === "peak" ? (f.peak ? f.peak.f : 0) : ui.harm === "off" ? 0 : +ui.harm;
+  L.shapes = [];
+  if (f0 > 0) {
+    for (let k = 1; k <= 60 && k * f0 / 1000 <= hi; k++) {
+      const xk = ax(k * f0 / 1000);
+      L.shapes.push({ type: "line", xref: "x", yref: "paper", x0: xk, x1: xk, y0: 0, y1: 1,
+                      line: { color: muted, width: 1, dash: "dot" }, layer: "below" });
+    }
+    if (L.shapes.length) {
+      L.annotations.push({ x: ax(f0 / 1000), y: 1, xref: "x", yref: "paper", yanchor: "bottom", showarrow: false,
+                           text: `f₀ ${fmtHz(f0)}`, font: { color: muted, size: 11 } });
+    }
+  }
+  const pk = f.peak;
+  const traces = [
+    { x, y: f.spec.y, type: "scatter", mode: "lines", name: "Spectrum", line: { color: s1, width: 2 },
+      hovertemplate: "%{x:.3f} kHz · %{y:.1f} dB<extra></extra>" },
+    { x, y: f.spec.hold || [], type: "scatter", mode: "lines", name: "Peak hold",
+      line: { color: s2, width: 1.5 }, visible: f.settings.hold ? true : "legendonly",
+      showlegend: f.settings.hold, hovertemplate: "%{x:.3f} kHz · %{y:.1f} dB<extra>hold</extra>" },
+    { x: refOk ? x : [], y: refOk ? ref.y : [], type: "scatter", mode: "lines", name: "Reference",
+      line: { color: muted, width: 1.5 }, showlegend: refOk,
+      hovertemplate: "%{x:.3f} kHz · %{y:.1f} dB<extra>reference</extra>" },
+    { x: pk ? [pk.f / 1000] : [], y: pk ? [pk.db] : [], type: "scatter", mode: "markers", showlegend: false,
+      marker: { color: s1, size: 9, line: { color: surface, width: 2 } }, hoverinfo: "skip" },
+  ];
+  Plotly.react("spec", traces, L, plotCfg);
+}
+
+function drawScope(f) {
+  const s1 = css("--series-1");
+  const L = baseLayout();
+  const dt = 1000 / f.fs, y = f.scope.y;
+  const t = Array.from({ length: y.length }, (_, i) => i * dt);
+  L.uirevision = `${f.fs}|${ui.auto}|${f.settings.scope_ms}|${theme}`;
+  L.xaxis = { ...L.xaxis, title: { text: "time (ms)" }, range: [0, t[t.length - 1]] };
+  L.yaxis = { ...L.yaxis, title: { text: "ADC code" }, ...(ui.auto ? { autorange: true } : { range: [-HALF_SCALE, HALF_SCALE] }) };
+  Plotly.react("scope", [{ x: t, y, type: "scatter", mode: "lines", line: { color: s1, width: 1.5 },
+                          hovertemplate: "%{x:.3f} ms · %{y:.0f}<extra></extra>" }], L, plotCfg);
+}
+
+function drawWater(f) {
+  const dark = (document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+  // One-hue sequential ramp (blue 100 -> 700); stronger is brighter on dark, darker on light.
+  const ramp = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"];
+  const stops = (dark ? ramp.slice().reverse() : ramp).map((c, i, a) => [i / (a.length - 1), c]);
+  const L = baseLayout();
+  const dfk = f.spec.df / 1000, x = xsFor(f.spec.y.length, dfk), nyq = f.fs / 2000;
+  const hi = ui.range ? Math.min(ui.range / 1000, nyq) : nyq;
+  const every = (ui.wspan * 1000) / WATER_ROWS;
+  const age = rows.map((_, i) => (i * every) / 1000);
+  L.uirevision = `${f.fs}|${ui.logx}|${ui.range}|${theme}`;
+  L.xaxis = { ...L.xaxis, title: { text: "frequency (kHz)" }, type: ui.logx ? "log" : "linear",
+              range: ui.logx ? [Math.log10(Math.max(dfk, hi / 1000)), Math.log10(hi)] : [0, hi] };
+  L.yaxis = { ...L.yaxis, title: { text: "seconds ago" }, autorange: "reversed" };
+  L.hovermode = "closest";
+  Plotly.react("water", [{
+    type: "heatmap", x, y: age, z: rows, zmin: ui.wfloor, zmax: 0, colorscale: stops, zsmooth: false,
+    colorbar: { thickness: 10, len: 0.9, outlinewidth: 0, tickfont: { color: css("--text-secondary"), size: 11 },
+                ticksuffix: " dB" },
+    hovertemplate: "%{x:.2f} kHz · %{y:.1f} s ago<br>%{z:.1f} dB<extra></extra>",
+  }], L, plotCfg);
+}
+
+function drawLines(f) {
+  const lines = f.lines || [];
+  $("lines").innerHTML = lines.length
+    ? "<table><thead><tr><th>Frequency</th><th>Level</th><th>Harmonic</th></tr></thead><tbody>" +
+      lines.map((ln) => `<tr><td>${fmtHz(ln.f)}</td><td>${fmtDb(ln.db)}</td><td class="h">${
+        ln.h === 1 ? "f₀" : ln.h ? "×" + ln.h : "–"}</td></tr>`).join("") + "</tbody></table>"
+    : '<div class="empty">No line stands out from the noise.</div>';
+}
+
+// ---- status and readouts ------------------------------------------------------------------
+function setStatus(f) {
+  const ok = f.status === "streaming", paused = f.settings.paused;
+  const color = paused ? css("--text-muted") : ok ? css("--good") : css("--warning");
+  const icon = paused
+    ? `<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="1" width="3" height="10" rx="1" fill="${color}"/><rect x="7" y="1" width="3" height="10" rx="1" fill="${color}"/></svg>`
+    : ok
+      ? `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6.5l3 3 5-6.5" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+      : `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.2l5.2 9.3H.8z" fill="${color}"/></svg>`;
+  const label = paused ? "Paused" : ok ? `Streaming · ${(f.fs / 1000).toFixed(f.fs % 1000 ? 1 : 0)} kS/s` : "Waiting for the board…";
+  $("status").innerHTML = icon + "<span>" + label + "</span>";
+  const pin = /pin=(\d+)/.exec(f.stats.board || "");
+  if (pin) $("boardinfo").textContent = `GPIO${pin[1]} · board ${f.stats.addr}`;
+  $("verbose").setAttribute("aria-pressed", String(f.stats.verbose === true));
+}
+
+function setTiles(f) {
+  const st = f.stats, n = f.settings.fft, m = f.metrics;
+  if (f.peak) {
+    $("k-pf").textContent = fmtHz(f.peak.f); $("k-pl").textContent = fmtDb(f.peak.db);
+  }
+  $("n-pf").textContent = f.peak ? `bin ${(f.fs / n).toFixed(2)} Hz · ${n} points` : f.filling !== undefined ? `filling the window… ${Math.round(f.filling * 100)}%` : "";
+  if (m) {
+    $("k-rms").innerHTML = m.rms.toFixed(1) + "<small>codes</small>";
+    $("n-rms").textContent = `peak-to-peak ${m.pp.toFixed(0)} codes`;
+    $("k-dc").innerHTML = m.dc.toFixed(0) + "<small>codes</small>";
+    $("n-dc").textContent = `${m.dc - ZERO_CODE >= 0 ? "+" : "−"}${Math.abs(m.dc - ZERO_CODE).toFixed(0)} above the 0 V code (${ZERO_CODE})`;
+    $("k-snr").textContent = fmtDbOrDash(m.snr);
+    $("n-snr").textContent = m.sinad === null ? "needs a clear tone" : `SINAD ${m.sinad.toFixed(1)} dB`;
+    $("k-thd").textContent = fmtDbOrDash(m.thd_db);
+    $("n-thd").textContent = m.thd_db === null ? "no harmonic above the noise" : `${(Math.pow(10, m.thd_db / 20) * 100).toFixed(2)} %`;
+    $("k-floor").textContent = fmtDb(m.floor_db);
+  }
+  $("k-pk").innerHTML = st.pps ? st.pps.toFixed(0) + "<small>datagrams/s</small>" : "–";
+  const bad = st.lost + st.dropped;
+  $("n-loss").innerHTML = bad > 0
+    ? `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2l5.2 9.3H.8z" fill="${css("--warning")}"/></svg><span>${fmtInt(st.lost)} lost · ${fmtInt(st.dropped)} dropped by the board</span>`
+    : `${fmtInt(st.packets)} received · none lost`;
+}
+
+function pushWater(f) {
+  const key = f.spec.y.length + "|" + f.spec.df;
+  if (key !== rowsKey) { rowsKey = key; rows = []; }
+  const now = performance.now();
+  if (now - lastRowAt < (ui.wspan * 1000) / WATER_ROWS) return false;
+  lastRowAt = now;
+  rows.unshift(f.spec.y);
+  if (rows.length > WATER_ROWS) rows.pop();
+  return true;
+}
+
+function render(f, force) {
+  applySettings(f.settings);
+  setStatus(f); setTiles(f);
+  if (!f.spec) return;
+  // Paused: the server repeats the frozen data; only a change of view (theme, axis...) redraws it.
+  if (f.frozen && !force) return;
+  drawSpectrum(f);
+  if (f.scope) drawScope(f);
+  const now = performance.now();
+  if (force || now - lastLinesAt > 300) { lastLinesAt = now; drawLines(f); }
+  const pushed = f.frozen ? false : pushWater(f);
+  if (ui.water && (pushed || force)) drawWater(f);
+}
+
+// ---- the board's log ----------------------------------------------------------------------
+const term = $("term");
+const GLYPH = { info: "·", ok: "✓", warn: "▲", error: "✗", stat: "▪", reply: "›", debug: "◦", cmd: "›" };
+let lastLogIndex = 0, lastRow = null;
+function applyTermFilters() {
+  for (const k of ["info", "ok", "warn", "error", "stat", "debug", "host"]) term.classList.toggle("hide-" + k, !ui["f_" + k]);
+  document.querySelectorAll("[data-f]").forEach((b) => b.setAttribute("aria-pressed", String(ui["f_" + b.dataset.f])));
+  $("follow").setAttribute("aria-pressed", String(ui.follow));
+}
+document.querySelectorAll("[data-f]").forEach((b) => {
+  b.onclick = () => { ui["f_" + b.dataset.f] = !ui["f_" + b.dataset.f]; saveUi(); applyTermFilters(); };
+});
+$("follow").onclick = () => { ui.follow = !ui.follow; saveUi(); applyTermFilters(); if (ui.follow) term.scrollTop = term.scrollHeight; };
+$("logclear").onclick = () => { term.textContent = ""; lastRow = null; };
+$("logcopy").onclick = () => {
+  const text = [...term.children].filter((r) => r.offsetParent !== null).map((r) => r.dataset.plain).join("\n");
+  try { navigator.clipboard.writeText(text); $("log-hint").textContent = "Copied the visible lines."; } catch (_) {}
+};
+// Scrolling up to read stops the following; coming back to the bottom resumes it.
+term.addEventListener("scroll", () => {
+  const atBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 8;
+  if (atBottom !== ui.follow) { ui.follow = atBottom; saveUi(); applyTermFilters(); }
+});
+
+function logTime(e) {
+  if (e.src === "board") return "+" + (e.t / 1000).toFixed(3) + "s";
+  const d = new Date(e.t * 1000);
+  return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0");
+}
+function fillRow(row, e) {
+  row.className = `l l-${e.level} l-${e.src}`;
+  row.dataset.level = e.level; row.dataset.src = e.src;
+  row.dataset.plain = `${logTime(e)} ${e.src} ${GLYPH[e.level] || "·"} ${e.text}`;
+  row.replaceChildren();
+  const cell = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; row.append(s); };
+  cell("t", logTime(e)); cell("src " + e.src, e.src); cell("g", GLYPH[e.level] || "·"); cell("x", e.text);
+}
+function addLogs(list) {
+  for (const e of list) {
+    if (e.i <= lastLogIndex) continue; // already shown (the history and the live lines overlap)
+    lastLogIndex = e.i;
+    // Statistics replace the previous statistics line, like a status line.
+    if (e.level === "stat" && lastRow && lastRow.dataset.level === "stat" && lastRow.dataset.src === e.src && lastRow === term.lastChild) {
+      fillRow(lastRow, e);
+      continue;
+    }
+    const row = document.createElement("div");
+    fillRow(row, e);
+    term.append(row);
+    lastRow = row;
+    while (term.children.length > 800) term.removeChild(term.firstChild);
+  }
+  if (ui.follow) term.scrollTop = term.scrollHeight;
+}
+applyTermFilters();
+
+// ---- commands for the board ----------------------------------------------------------------
+// What is typed goes to the board (info, verbose, reboot, help); the answer comes back in the log.
+function sendCommand(text) {
+  return fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) })
+    .then((r) => r.json()).catch(() => null);
+}
+const typed = []; let typedAt = 0;
+$("cmdform").onsubmit = (e) => {
+  e.preventDefault();
+  const text = $("cmd").value.trim();
+  if (!text) return;
+  $("cmd").value = "";
+  if (typed[typed.length - 1] !== text) typed.push(text);
+  typedAt = typed.length;
+  if (text === "clear") { term.textContent = ""; lastRow = null; return; }
+  if (text === "reboot" && !confirm("Reboot the board? The stream resumes by itself in a few seconds.")) return;
+  sendCommand(text);
+};
+$("cmd").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  e.preventDefault();
+  typedAt = Math.max(0, Math.min(typed.length, typedAt + (e.key === "ArrowUp" ? -1 : 1)));
+  $("cmd").value = typed[typedAt] || "";
+});
+$("verbose").onclick = () => sendCommand("verbose");
+$("info").onclick = () => sendCommand("info");
+$("reboot").onclick = () => { if (confirm("Reboot the board? The stream resumes by itself in a few seconds.")) sendCommand("reboot"); };
+
+// ---- stream -------------------------------------------------------------------------------
+function connect() {
+  const es = new EventSource("/events");
+  es.onmessage = (e) => { frame = JSON.parse(e.data); };
+  es.addEventListener("log", (e) => addLogs(JSON.parse(e.data)));
+  es.onerror = () => { $("status").innerHTML = "<span>Server not reachable, retrying…</span>"; };
+}
+function tick() {
+  if (frame && frame !== drawn) { const force = drawn === null; drawn = frame; render(frame, force); }
+  requestAnimationFrame(tick);
+}
+applyTheme();
+connect();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
