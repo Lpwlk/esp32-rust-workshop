@@ -2,6 +2,6 @@
 rich>=13          # console and logs of dev.py
 pyserial>=3.5     # finds the boards on USB (scripts/boards.py)
 zensical>=0.1     # documentation site
-black>=24         # Python formatting (dev.py format)
+black>=26.10.1         # Python formatting (dev.py format)
 numpy>=2         # FFT of the ADC stream (adc_fft.py)
 plotly>=5        # plotly.min.js, served to the browser by adc_fft.py
