@@ -1,0 +1,1087 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Node dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f3f3f1;
+    --surface-1: #fcfcfb;
+    --surface-2: #f0efec;
+    --border: #dcdbd6;
+    --grid: #e6e5e0;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a796f;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --term-bg: #121211;
+    --term-text: #d6d5cc;
+    --term-dim: #8d8c82;
+    --term-host: #d55181;
+    /* the board's 16 ANSI colours, for a dark terminal */
+    --a0: #1b1b1a; --a1: #ff6b6b; --a2: #4fd04f; --a3: #fab219; --a4: #6da7ec; --a5: #d55181; --a6: #5cc8d6; --a7: #d6d5cc;
+    --a8: #8d8c82; --a9: #ff8c8c; --a10: #7be67b; --a11: #ffd166; --a12: #94bff2; --a13: #e57aa4; --a14: #8ee0ea; --a15: #f4f3ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #121211; --surface-1: #1a1a19; --surface-2: #262625; --border: #383835; --grid: #2c2c2a;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8d8c82;
+      --series-1: #3987e5; --series-2: #d95926; --term-bg: #0d0d0c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #121211; --surface-1: #1a1a19; --surface-2: #262625; --border: #383835; --grid: #2c2c2a;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8d8c82;
+    --series-1: #3987e5; --series-2: #d95926; --term-bg: #0d0d0c;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--page); color: var(--text-primary); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  .num { font-variant-numeric: tabular-nums; }
+  main { max-width: 1480px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .hidden { display: none !important; }
+
+  header.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header.top h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+  header.top .sub { color: var(--text-muted); font-size: 13px; }
+  header.top .grow { flex: 1; }
+  .status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); font-size: 13px; color: var(--text-secondary); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--me, var(--text-muted)); }
+  .status svg { flex: none; }
+
+  select, button, .btn, input[type="text"], input[type="number"] {
+    font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 10px; min-height: 32px;
+  }
+  button, .btn, select { cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  input[type="text"], input[type="number"] { width: 110px; cursor: text; font-variant-numeric: tabular-nums; }
+  select:hover, button:hover, .btn:hover { background: var(--surface-2); }
+  button:disabled { opacity: .5; cursor: default; }
+  :is(select, button, .btn, input, summary):focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+  button[aria-pressed="true"] { border-color: var(--me, var(--series-1)); box-shadow: inset 0 0 0 1px var(--me, var(--series-1)); }
+  button.danger:hover { border-color: var(--critical); }
+  input[type="range"] { --p: 0%; -webkit-appearance: none; appearance: none; width: 150px; height: 6px; min-height: 0; margin: 13px 0; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+    background: linear-gradient(90deg, var(--me, var(--series-1)) var(--p), var(--surface-2) var(--p)); box-shadow: inset 0 0 0 1px var(--border); }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--surface-1); border: 2px solid var(--me, var(--series-1)); box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .12s; }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--surface-1); border: 2px solid var(--me, var(--series-1)); box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+  input[type="range"]::-moz-range-track { background: transparent; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  .card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .card-head h2 { margin: 0; font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+  .card-head .hint { margin: 0; font-size: 12px; color: var(--text-muted); flex: 1; min-width: 200px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: end; margin: 10px 0 6px; }
+  .group { display: grid; gap: 3px; }
+  .group > .lab { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .seg { display: inline-flex; }
+  .seg button { border-radius: 0; margin-left: -1px; }
+  .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+  .seg button:last-child { border-radius: 0 8px 8px 0; }
+  .seg button[aria-pressed="true"] { position: relative; z-index: 1; }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
+  .note { color: var(--text-muted); font-size: 12px; }
+
+  .boards, .cols2, .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .boards, .cols2, .controls { grid-template-columns: minmax(0, 1fr); } }
+  .col { display: grid; gap: 16px; min-width: 0; }
+  .node { border-top: 3px solid var(--me); }
+  .node .card-head h2 { font-size: 15px; }
+  .badge { font-size: 12px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); background: var(--surface-2); }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  @media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .tile { padding: 8px 10px; background: var(--surface-2); border-radius: 8px; min-width: 0; }
+  .tile .label { font-size: 12px; color: var(--text-muted); }
+  .tile .value { font-size: 19px; font-weight: 650; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .value small { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-left: 4px; }
+  .tile .sub { font-size: 12px; color: var(--text-secondary); min-height: 17px; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ico { display: inline-block; vertical-align: -1px; margin-right: 4px; }
+
+  /* the board's console: always a dark terminal */
+  .term { background: var(--term-bg); color: var(--term-text); border: 1px solid var(--border); border-radius: 8px 8px 0 0; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; height: 340px; overflow: auto; resize: vertical; font-size: 12px; padding: 8px 10px; min-height: 100px; }
+  .term .l { white-space: pre; display: flex; gap: 8px; }
+  .term .t { color: var(--term-dim); flex: none; font-variant-numeric: tabular-nums; }
+  .term .x { min-width: 0; }
+  .term .l-host .x { color: var(--term-host); }
+  .term .l-host.l-warn .x { color: var(--a3); }
+  .term .l-host.l-ok .x { color: var(--a2); }
+  .term .l-host.l-error .x { color: var(--a1); }
+  .term.hide-frame .l-frame, .term.hide-stat .l-stat, .term.hide-info .l-info, .term.hide-ok .l-ok, .term.hide-warn .l-warn,
+  .term.hide-error .l-error, .term.hide-cmd .l-cmd, .term.hide-debug .l-debug, .term.hide-host .l-host { display: none; }
+  .term.hide-time .t { display: none; }
+  .livebox { background: var(--term-bg); color: var(--term-text); border: 1px solid var(--border); border-top: 1px dashed var(--border); font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; padding: 4px 10px; min-height: 28px; white-space: pre; overflow: hidden; }
+  .livebox .dim { color: var(--term-dim); }
+  .cmdline { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--term-bg); border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .cmdline:focus-within { border-color: var(--me, var(--series-1)); }
+  .cmdline .prompt { color: var(--a5); white-space: nowrap; font-weight: 600; }
+  .cmdline input { flex: 1; min-width: 0; width: auto; background: transparent; border: 0; outline: 0; color: var(--term-text); font: inherit; padding: 4px 0; }
+  .cmdline input::placeholder { color: var(--term-dim); }
+  .cmdline select { background: transparent; color: var(--term-dim); border: 0; font: inherit; min-height: 24px; padding: 0 4px; }
+  /* ANSI colours */
+  .f0{color:var(--a0)} .f1{color:var(--a1)} .f2{color:var(--a2)} .f3{color:var(--a3)} .f4{color:var(--a4)} .f5{color:var(--a5)} .f6{color:var(--a6)} .f7{color:var(--a7)}
+  .f8{color:var(--a8)} .f9{color:var(--a9)} .f10{color:var(--a10)} .f11{color:var(--a11)} .f12{color:var(--a12)} .f13{color:var(--a13)} .f14{color:var(--a14)} .f15{color:var(--a15)}
+  .b0{background:var(--a0)} .b1{background:var(--a1)} .b2{background:var(--a2)} .b3{background:var(--a3)} .b4{background:var(--a4)} .b5{background:var(--a5)} .b6{background:var(--a6)} .b7{background:var(--a7)}
+  .b8{background:var(--a8)} .b9{background:var(--a9)} .b10{background:var(--a10)} .b11{background:var(--a11)} .b12{background:var(--a12)} .b13{background:var(--a13)} .b14{background:var(--a14)} .b15{background:var(--a15)}
+  .bold { font-weight: 700; } .faint { opacity: .6; }
+
+  .plots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 1000px) { .plots { grid-template-columns: minmax(0, 1fr); } }
+  .plotbox h3 { margin: 0 0 2px; font-size: 13px; font-weight: 650; }
+  .plotbox .hint { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .plot { width: 100%; height: 250px; }
+  .banner { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 10px; margin-top: 8px; border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 8px; background: var(--surface-2); font-size: 13px; color: var(--text-secondary); }
+
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th:first-child, td:first-child, th.l, td.l { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  td.ok { color: var(--good); } td.bad { color: var(--critical); }
+  .scroll { max-height: 320px; overflow: auto; }
+
+  /* Progress bars: a thin rounded track, a fill that eases to its value; status colours come with a word, never alone. */
+  .meter { --p: 0%; position: relative; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
+  .meter > i { position: absolute; inset: 0 auto 0 0; width: var(--p); border-radius: 999px; background: var(--me, var(--series-1));
+               transition: width .5s cubic-bezier(.22, .8, .3, 1), background-color .3s; }
+  .meter.good > i { background: var(--good); } .meter.warn > i { background: var(--warning); } .meter.crit > i { background: var(--critical); }
+  .meter.run > i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent); animation: shimmer 1.4s linear infinite; }
+  .meter.indet > i { width: 36%; animation: indet 1.25s ease-in-out infinite; transition: none; }
+  .meter.mini { display: inline-block; width: 54px; height: 4px; vertical-align: middle; margin-left: 8px; }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  @keyframes indet { from { left: -40%; } to { left: 104%; } }
+  @media (prefers-reduced-motion: reduce) {
+    .meter > i { transition: none; } .meter.run > i::after { animation: none; } .meter.indet > i { animation: none; width: 100%; opacity: .45; }
+  }
+  .meters { display: grid; gap: 8px; margin-top: 10px; }
+  .mrow { display: grid; gap: 4px; }
+  .mrow .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+  .mrow .top b { color: var(--text-primary); font-weight: 600; }
+  .prog { margin-top: 8px; display: grid; gap: 4px; }
+  .prog .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+  .prog.idle { display: none; }
+
+  details.group-box { border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; background: var(--surface-1); }
+  details.group-box > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; font-size: 13px; list-style: none; display: flex; align-items: center; gap: 8px; }
+  details.group-box > summary::before { content: "▸"; color: var(--text-muted); transition: transform .1s; }
+  details.group-box[open] > summary::before { transform: rotate(90deg); }
+  details.group-box > summary .note { font-weight: 400; }
+  details.group-box > .body { padding: 0 12px 12px; }
+  details.group-box .toolbar:first-child { margin-top: 2px; }
+  [data-only] { display: none; }
+  [data-app="eth"] [data-only="eth"], [data-app="uart"] [data-only="uart"] { display: block; }
+  .swatch { width: 52px; height: 10px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); vertical-align: middle; }
+  .patterns button { padding: 4px 8px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13px; }
+  .kv dt { color: var(--text-muted); } .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  td.key { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+  tr.changed td.val { color: var(--warning); font-weight: 650; }
+  tr.ro td { color: var(--text-muted); }
+  td input[type="text"] { width: 130px; min-height: 26px; padding: 2px 8px; }
+  td button { min-height: 26px; padding: 2px 8px; }
+  .tree .ob { color: var(--text-secondary); font-weight: 600; }
+  .tree a, .link { color: var(--series-1); cursor: pointer; text-decoration: none; background: none; border: 0; padding: 0; min-height: 0; font: inherit; display: inline; }
+  .tree a:hover, .link:hover { text-decoration: underline; background: none; }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>Node dashboard</h1>
+    <span class="sub" id="sub">the two boards of the Ethernet and UART apps, as in the serial terminal</span>
+    <span class="grow"></span>
+    <span class="status" id="status" role="status" aria-live="polite"></span>
+    <button id="theme" title="Theme: auto, light, dark" aria-label="Change theme">Theme: auto</button>
+  </header>
+
+  <section class="boards" id="boards"></section>
+
+  <section class="card" id="chartcard">
+    <div class="card-head">
+      <h2>Traffic and link</h2>
+      <p class="hint">Both boards on the same time axis. Drag to zoom, double-click to follow the present again.</p>
+    </div>
+    <div class="toolbar">
+      <div class="group"><span class="lab">Time span</span>
+        <select id="span" aria-label="Time span">
+          <option value="30">30 s</option><option value="120" selected>2 min</option><option value="600">10 min</option><option value="3600">1 h</option>
+        </select></div>
+      <div class="group"><span class="lab">Round-trip axis</span>
+        <div class="row"><button id="logrtt" aria-pressed="false">Log</button></div></div>
+      <div class="group"><span class="lab">Follow</span>
+        <div class="row"><button id="follow" aria-pressed="true">Live</button></div></div>
+    </div>
+    <div id="needs"></div>
+    <div class="plots">
+      <div class="plotbox"><h3>Frames per second</h3><p class="hint">Sent (solid) and received (dashed), from the counters.</p><div id="p-rate" class="plot"></div></div>
+      <div class="plotbox"><h3>Round-trip time</h3><p class="hint">µs between a frame sent and the peer's echo (<code>tx on-rx</code> on the peer, verbose frames).</p><div id="p-rtt" class="plot"></div></div>
+      <div class="plotbox"><h3>Interval between data frames</h3><p class="hint">ms since the previous DAT frame, sent or received (verbose frames).</p><div id="p-delta" class="plot"></div></div>
+      <div class="plotbox"><h3>Link events</h3><p class="hint">Lost and bad frames, link changes, restarts, button edges.</p><div id="p-marks" class="plot"></div></div>
+    </div>
+  </section>
+
+  <section class="cols2" id="results">
+    <div class="card">
+      <div class="card-head"><h2>Burst and traffic generator runs</h2><p class="hint">Each test shows on the sender and on the receiver. Start them from a board's controls.</p></div>
+      <div id="p-tests" class="plot" style="height:220px"></div>
+      <div class="scroll"><table id="tests"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Button events</h2><p class="hint">The jumper, each edge with the 64-bit key the TRNG gave it.</p></div>
+      <div class="scroll"><table id="events"></table></div>
+    </div>
+  </section>
+
+  <section class="controls" id="panels"></section>
+</main>
+
+<template id="tpl-card">
+  <article class="card node" data-r="card">
+    <div class="card-head">
+      <h2><span class="dot"></span><span data-r="title">Node</span></h2>
+      <span class="badge" data-r="app">–</span>
+      <span class="badge" data-r="conn">–</span>
+      <p class="hint" data-r="port"></p>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Link</div><div class="value num" data-r="k-link">–</div><div class="sub" data-r="n-link"></div></div>
+      <div class="tile"><div class="label">Frames sent</div><div class="value num" data-r="k-tx">–</div><div class="sub num" data-r="n-tx"></div></div>
+      <div class="tile"><div class="label">Frames received</div><div class="value num" data-r="k-rx">–</div><div class="sub num" data-r="n-rx"></div></div>
+      <div class="tile"><div class="label">Lost · bad</div><div class="value num" data-r="k-lost">–</div><div class="sub" data-r="n-lost"></div></div>
+      <div class="tile"><div class="label">Round trip</div><div class="value num" data-r="k-rtt">–</div><div class="sub num" data-r="n-rtt"></div></div>
+      <div class="tile"><div class="label">Peer's button</div><div class="value" data-r="k-btn">–</div><div class="sub" data-r="n-btn"></div></div>
+      <div class="tile"><div class="label" data-r="l-x">Peer</div><div class="value num" data-r="k-x">–</div><div class="sub num" data-r="n-x"></div></div>
+      <div class="tile"><div class="label">Board</div><div class="value" data-r="k-board">–</div><div class="sub" data-r="n-board"></div></div>
+    </div>
+    <div class="meters">
+      <div class="mrow" data-r="row-health"><div class="top"><span>Peer silence <small class="note">· the link goes down at the timeout</small></span><b class="num" data-r="v-health">–</b></div><div class="meter" data-r="m-health" role="progressbar" aria-label="Time since the peer's last frame, against the link timeout"><i></i></div></div>
+      <div class="mrow" data-only="uart"><div class="top"><span>RX buffer peak <small class="note">· UART receive buffer, highest fill</small></span><b class="num" data-r="v-rxbuf">–</b></div><div class="meter" data-r="m-rxbuf" role="progressbar" aria-label="Highest fill of the UART receive buffer"><i></i></div></div>
+    </div>
+  </article>
+  <article class="card" data-r="termcard">
+    <div class="card-head"><h2>Console</h2><p class="hint" data-r="termhint">What the board prints, and what you type goes to it, as in the serial terminal.</p></div>
+    <div class="toolbar">
+      <div class="group"><span class="lab">Show</span>
+        <div class="row">
+          <button data-f="frame" aria-pressed="true">Frames</button>
+          <button data-f="stat" aria-pressed="true">Stats</button>
+          <button data-f="info" aria-pressed="true">Info</button>
+          <button data-f="ok" aria-pressed="true">OK</button>
+          <button data-f="warn" aria-pressed="true">Warnings</button>
+          <button data-f="error" aria-pressed="true">Errors</button>
+          <button data-f="cmd" aria-pressed="true">Echo</button>
+          <button data-f="debug" aria-pressed="true">Wire</button>
+          <button data-f="host" aria-pressed="true">This tool</button>
+        </div></div>
+      <div class="group"><span class="lab">Terminal</span>
+        <div class="row">
+          <button data-r="follow" aria-pressed="true">Follow</button>
+          <button data-r="clear">Clear</button>
+          <button data-r="copy">Copy</button>
+          <a class="btn" data-r="csv" download>Frames CSV</a>
+          <a class="btn" data-r="txt" download>Log</a>
+        </div></div>
+    </div>
+    <div class="term" data-r="term" role="log" aria-live="off" tabindex="0"></div>
+    <div class="livebox" data-r="live" aria-label="Live line and traffic dashboard of the board"></div>
+    <form class="cmdline" data-r="cmdform" autocomplete="off">
+      <span class="prompt" data-r="prompt">cli ›</span>
+      <input data-r="cmd" type="text" spellcheck="false" maxlength="96" placeholder="help · config · verbose frames · pattern ocean · burst 1000 max…" aria-label="Command for the board">
+      <select data-r="target" aria-label="Send to"><option value="own">this node</option><option value="both">both nodes</option></select>
+    </form>
+  </article>
+</template>
+
+<template id="tpl-controls">
+  <article class="card" data-r="ctl">
+    <div class="card-head"><h2><span class="dot"></span><span data-r="title2">Node</span> · controls</h2><p class="hint">Every control types the CLI command shown in the console, and the settings table below follows the board.</p></div>
+
+    <details class="group-box" open><summary>Console and node</summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Verbose <span class="note">(what the console prints)</span></span>
+          <div class="seg" data-seg="verbose">
+            <button data-v="silent" title="Only replies and faults">0 silent</button><button data-v="live" title="One line, updated in place: last frame and counters">1 live</button>
+            <button data-v="frames" title="Every frame, and the stats line">2 frames</button><button data-v="wire" title="Frames and what is behind each">3 wire</button>
+          </div></div>
+        <div class="group"><span class="lab">Show again</span>
+          <div class="row"><button data-cmd="info">info</button><button data-cmd="config">config</button><button data-cmd="status">status</button><button data-cmd="list">list</button><button data-cmd="help">help</button></div></div>
+        <div class="group"><span class="lab">Restart</span>
+          <div class="row"><button class="danger" data-cmd="reboot" data-confirm="Reboot this board? Settings not saved are lost.">Reboot</button></div></div>
+      </div>
+    </div></details>
+
+    <details class="group-box" open><summary>RGB LED</summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Pattern</span>
+          <div class="row patterns" data-r="patterns"></div></div>
+        <div class="group"><span class="lab">Brightness <b class="num" data-r="v-bright"></b></span>
+          <input type="range" min="0" max="100" step="1" data-key="rgb.brightness" aria-label="Brightness"></div>
+        <div class="group"><span class="lab">Refresh <b class="num" data-r="v-freq"></b></span>
+          <input type="range" min="1" max="200" step="1" data-key="rgb.freq_hz" aria-label="Refresh rate"></div>
+        <div class="group"><span class="lab">Fade loop, ms <span class="note">200-60000, 2s, 0.5Hz</span></span>
+          <input type="text" data-key="rgb.cycle_ms" aria-label="Fade loop duration"></div>
+      </div>
+    </div></details>
+
+    <details class="group-box" open><summary>Breadboard LEDs</summary><div class="body">
+      <div class="toolbar" data-r="leds"></div>
+    </div></details>
+
+    <details class="group-box" open><summary>Traffic and timing</summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Transmit</span>
+          <div class="seg" data-seg="tx_mode">
+            <button data-v="periodic" title="A DAT frame every data period">periodic</button><button data-v="on-rx" title="An ECH reply to each frame: the peer measures the round trip">on-rx</button><button data-v="quiet" title="Nothing on its own">quiet</button>
+          </div></div>
+        <div class="group"><span class="lab">DAT period <span class="note">10 ms-1 h · 250ms · 4Hz</span></span><input type="text" data-key="data_period_ms" aria-label="DAT period"></div>
+        <div class="group"><span class="lab">Stats line every <span class="note">100 ms-1 h</span></span><input type="text" data-key="status_period_ms" aria-label="Stats period"></div>
+        <div class="group"><span class="lab">Link down after <span class="note">2-100 periods</span></span><input type="number" min="2" max="100" data-key="link_timeout" aria-label="Link timeout in peer periods"></div>
+        <div class="group"><span class="lab">Debounce, ms <span class="note">1-1000</span></span><input type="number" min="1" max="1000" data-key="debounce_ms" aria-label="Debounce"></div>
+        <div class="group"><span class="lab">Lockout, ms <span class="note">0-5000</span></span><input type="number" min="0" max="5000" data-key="lockout_ms" aria-label="Lockout"></div>
+      </div>
+    </div></details>
+
+    <details class="group-box" open data-only="uart"><summary>UART link</summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Baud rate <span class="note">both nodes switch (handshake)</span></span>
+          <div class="row"><select data-r="baud" aria-label="Baud rate">
+            <option>115200</option><option>230400</option><option>460800</option><option>921600</option><option>1000000</option><option>2000000</option><option>3000000</option><option>5000000</option></select>
+            <button data-r="baud-go">Switch</button><button data-cmd="baud">Show</button></div></div>
+      </div>
+    </div></details>
+
+    <details class="group-box" open data-only="eth"><summary>Ethernet link</summary><div class="body">
+      <div class="toolbar"><div class="group"><span class="lab">Show</span><div class="row"><button data-cmd="link">link</button></div></div></div>
+      <dl class="kv" data-r="netinfo"></dl>
+    </div></details>
+
+    <details class="group-box" open><summary>Burst <span class="note">frames sent as fast as asked, the peer measures</span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Frames <span class="note">1-100000</span></span><input type="number" min="1" max="100000" value="1000" data-r="b-count" aria-label="Burst length"></div>
+        <div class="group"><span class="lab">Rate <span class="note">frames/s · 20ms · max</span></span><input type="text" value="max" data-r="b-rate" aria-label="Burst rate"></div>
+        <div class="group"><span class="lab">Run</span><div class="row"><button data-r="b-go">Start burst</button><button data-cmd="burst" title="The board asks length and rate in its console">Ask in console</button></div></div>
+      </div>
+      <div class="prog idle" data-r="burst-prog"><div class="top"><span data-r="burst-label">–</span><b class="num" data-r="burst-val"></b></div><div class="meter" data-r="burst-bar" role="progressbar" aria-label="Burst progress"><i></i></div></div>
+    </div></details>
+
+    <details class="group-box" data-only="eth"><summary>Traffic generator <span class="note">UDP datagrams to the peer, on the next port</span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Rate <span class="note">5000 · 5kpps · 2Mbit</span></span><input type="text" value="2Mbit" data-r="g-rate" aria-label="Generator rate"></div>
+        <div class="group"><span class="lab">Size <span class="note">512B · 64-1400 · imix</span></span><input type="text" value="512B" data-r="g-size" aria-label="Datagram size"></div>
+        <div class="group"><span class="lab">Shape</span>
+          <select data-r="g-shape" aria-label="Rate shape"><option value="flat">flat</option><option>sine</option><option>cosine</option><option>triangle</option><option>saw</option><option>square</option><option>ramp</option><option>steps</option><option>pulse</option><option>random</option></select></div>
+        <div class="group"><span class="lab" data-r="g-l1">Peak</span><input type="text" value="3Mbit" data-r="g-p1" aria-label="Shape peak"></div>
+        <div class="group"><span class="lab" data-r="g-l2">Cycle</span><input type="text" value="20s" data-r="g-p2" aria-label="Shape cycle"></div>
+        <div class="group"><span class="lab">Time <span class="note">30s · 2min · forever · auto</span></span><input type="text" value="auto" data-r="g-time" aria-label="Duration"></div>
+      </div>
+      <div class="row"><button data-r="g-go">Start</button><button data-cmd="gen stop">Stop</button><button data-cmd="gen pause">Pause</button><button data-cmd="gen resume">Resume</button><button data-cmd="gen status">Status</button><span class="note" data-r="g-line"></span></div>
+      <div class="prog idle" data-r="gen-prog"><div class="top"><span data-r="gen-label">–</span><b class="num" data-r="gen-val"></b></div><div class="meter" data-r="gen-bar" role="progressbar" aria-label="Traffic generator progress"><i></i></div></div>
+    </div></details>
+
+    <details class="group-box" data-only="eth"><summary>Network trace <span class="note">frames that cross the cable, decoded line by line in the console</span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Trace</span><div class="seg" data-seg="trace"><button data-v="off">0 off</button><button data-v="events">1 events</button><button data-v="frames">2 frames</button></div></div>
+        <div class="group"><span class="lab">Layout</span><select data-key="trace_view" aria-label="Trace layout"><option>compact</option><option>layers</option><option>inside-out</option></select></div>
+        <div class="group"><span class="lab">Hex dump, bytes <span class="note">0-256</span></span><input type="number" min="0" max="256" data-key="trace_bytes" aria-label="Hex dump bytes"></div>
+        <div class="group"><span class="lab">Short IPs</span><div class="seg" data-seg="trace_short_ip"><button data-v="false">off</button><button data-v="true">on</button></div></div>
+      </div>
+    </div></details>
+
+    <details class="group-box" data-only="eth"><summary>Traffic dashboard <span class="note">bars of what is sent and received, above the console prompt; works with the trace on or off</span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Size <span class="note">off at boot</span></span><div class="seg" data-seg="trace_dash"><button data-v="off">0 off</button><button data-v="mini">1 mini</button><button data-v="normal">2 normal</button><button data-v="full">3 full</button></div></div>
+        <div class="group"><span class="lab">View</span><div class="seg" data-seg="trace_dash_view"><button data-v="bars">bars</button><button data-v="chart">chart</button><button data-v="mix">mix</button></div></div>
+        <div class="group"><span class="lab">Window, s <span class="note">2-3600 · 30s · 2min</span></span><input type="text" data-key="trace_window_s" aria-label="Dashboard window"></div>
+      </div>
+    </div></details>
+
+    <details class="group-box"><summary>Peer's address space <span class="note">browse, read, write and watch the other node's variables</span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Path</span><input type="text" list="paths" value="/" data-r="s-path" aria-label="Path in the peer's address space" style="width:170px"></div>
+        <div class="group"><span class="lab">Value <span class="note">to write</span></span><input type="text" data-r="s-value" aria-label="Value to write" style="width:130px"></div>
+        <div class="group"><span class="lab">Ask the peer</span><div class="row">
+          <button data-r="s-browse">Browse</button><button data-r="s-read">Read</button><button data-r="s-write">Write</button><button data-r="s-watch">Watch</button><button data-r="s-unwatch">Unwatch</button></div></div>
+      </div>
+      <div class="cols-s" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+        <div><div class="note">Tree <span data-r="s-treehint"></span></div><div class="tree scroll" data-r="s-tree"></div></div>
+        <div><div class="note">Values the peer answered</div><div class="scroll"><table data-r="s-values"></table></div></div>
+      </div>
+    </div></details>
+
+    <details class="group-box" open><summary>Settings <span class="note" data-r="s-note"></span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">In flash <span class="note" data-r="s-flash"></span></span>
+          <div class="row"><button data-cmd="save" title="Keep the settings that differ from the build across reboots">Save</button><button data-cmd="forget" title="Erase what was saved: the next boot uses the build config (the current settings stay until then)">Forget</button><button data-cmd="reset" data-confirm="Put every setting back to its build value (not saved ones are lost)?" title="Every setting back to the build value">Reset all</button></div></div>
+        <div class="group"><span class="lab">Table</span>
+          <div class="row"><button data-cmd="config" data-quiet="1">Refresh</button><button data-r="s-changed" aria-pressed="false" title="Only the settings that differ from the build">Changed only</button><button data-r="s-ro" aria-pressed="false" title="Also the settings fixed at build time (name, pins, network), and on the UART app the trace settings, which do nothing there">Read-only too</button></div></div>
+      </div>
+      <div class="scroll" style="max-height:420px"><table data-r="settings"></table></div>
+    </div></details>
+
+    <details class="group-box" open><summary>Peer's config <span class="note" data-r="p-note"></span></summary><div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">1 · Look</span>
+          <div class="row"><button data-r="p-read" title="Ask the peer for each of its settings (read /config/&lt;key&gt;), over the link">Read peer's config</button></div></div>
+        <div class="group"><span class="lab">2 · Choose</span>
+          <div class="row"><button data-r="p-diff">Differing</button><button data-r="p-all">All</button><button data-r="p-none">None</button></div></div>
+        <div class="group"><span class="lab">3 · Copy the chosen</span>
+          <div class="row"><button data-r="p-pull" title="Set them here to the peer's values (the same as typing set)">← Pull to this node</button><button data-r="p-push" title="Write them on the peer (write /config/&lt;key&gt;), over the link">Push to the peer →</button></div></div>
+      </div>
+      <div class="note" data-r="p-line"></div>
+      <div class="prog idle" data-r="p-prog"><div class="top"><span data-r="p-prog-label">–</span><b class="num" data-r="p-prog-val"></b></div><div class="meter" data-r="p-bar" role="progressbar" aria-label="Peer config progress"><i></i></div></div>
+      <div class="scroll" style="max-height:420px"><table data-r="p-table"></table></div>
+    </div></details>
+  </article>
+</template>
+<datalist id="paths"></datalist>
+
+<script src="/plotly.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+window.addEventListener("error", (e) => { document.title = "Node dashboard: " + e.message; });
+window.addEventListener("unhandledrejection", (e) => { document.title = "Node dashboard: " + ((e.reason && e.reason.message) || e.reason); });
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const BK = ["a", "b"];
+const SERIES_VAR = { a: "--series-1", b: "--series-2" };
+const PATTERNS = { // key colours of the firmware's patterns (fx.rs), for the swatches
+  viridis: ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"], sunset: ["#ffaa00", "#ff5a00", "#ff1e50", "#9600a0"],
+  ocean: ["#0028ff", "#008cff", "#00e6c8", "#00b4ff"], aurora: ["#00ff6e", "#00beff", "#6e28ff", "#00ffb4"], sakura: ["#ff508c", "#ff96be", "#be78ff", "#ffc8dc"],
+};
+const KEY_HELP = { // Key::describe() of the firmware
+  data_period_ms: "period of the DAT frame sent to the peer (tx_mode periodic) · 10-3600000 ms, or a frequency: 2.5Hz",
+  status_period_ms: "period of the stats line in the console · 100-3600000 ms, or a frequency",
+  link_timeout: "link DOWN after this many peer periods without a frame · 2-100",
+  debounce_ms: "button: the line must be stable this long before an edge counts · 1-1000",
+  lockout_ms: "button: changes ignored this long after an accepted edge · 0-5000",
+  "rgb.pattern": "RGB LED fade pattern · name or number", "rgb.freq_hz": "RGB LED refresh rate · 1-200 Hz, or a period: 20ms",
+  "rgb.cycle_ms": "duration of one fade loop (lower = faster) · 200-60000 ms, or a frequency", "rgb.brightness": "RGB LED brightness, % · 0-100",
+  led1: "breadboard LED mode · off on blink [period|freq] button peer link rx tx", led2: "breadboard LED mode · off on blink [period|freq] button peer link rx tx",
+  verbose: "console detail · 0 silent, 1 live, 2 frames, 3 wire (or next)", tx_mode: "when this node sends frames on its own · periodic [period|freq], on-rx, quiet",
+  "burst.count": "frames per burst (default of `burst`) · 1-100000", "burst.rate_hz": "burst rate, frames/s · 0.1-20000 Hz, or max (= 0, back to back)",
+  console: "where the console output goes · auto serial rtt both", trace: "network trace (Ethernet) · 0 off, 1 events, 2 frames (or next)",
+  trace_bytes: "trace: raw bytes of each frame as a hex dump · 0-256", trace_view: "trace layout · compact, layers, inside-out",
+  trace_dash: "trace: the traffic dashboard · 0 off, 1 mini, 2 normal, 3 full", trace_dash_view: "dashboard view · bars, chart, mix",
+  trace_window_s: "dashboard window · 2-3600 s (30, 30s, 2min)", trace_short_ip: "compact trace: this subnet's addresses short (.12) · on, off",
+};
+const QUICK_PATHS = ["/", "/node/name", "/node/uptime", "/leds/1", "/leds/2", "/buttons/jumper", "/buttons/boot", "/rgb/pattern", "/rgb/brightness", "/stats/tx", "/stats/rx", "/stats/lost"];
+$("paths").innerHTML = QUICK_PATHS.map((p) => `<option value="${p}">`).join("");
+
+// ---- view settings kept in this browser ------------------------------------------------------
+const ui = { span: 120, logrtt: false, follow: true, f_frame: true, f_stat: true, f_info: true, f_ok: true, f_warn: true, f_error: true, f_cmd: true, f_debug: true, f_host: true,
+             termfollow: { a: true, b: true }, changed: false, ro: false };
+try { Object.assign(ui, JSON.parse(localStorage.getItem("node-ui") || "{}")); } catch (_) {}
+const saveUi = () => { try { localStorage.setItem("node-ui", JSON.stringify(ui)); } catch (_) {} };
+
+// ---- theme -------------------------------------------------------------------------------------
+const themes = ["auto", "light", "dark"];
+let theme = "auto";
+try { theme = localStorage.getItem("node-theme") || "auto"; } catch (_) {}
+function applyTheme() {
+  if (theme === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", theme);
+  $("theme").textContent = "Theme: " + theme;
+  plotsDirty = true;
+}
+$("theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; try { localStorage.setItem("node-theme", theme); } catch (_) {} applyTheme(); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { plotsDirty = true; });
+
+// ---- formatting --------------------------------------------------------------------------------
+const fmtInt = (n) => (n === null || n === undefined ? "–" : n.toLocaleString("en-US"));
+const fmtUs = (us) => (us >= 1000 ? (us / 1000).toFixed(2) + " ms" : us.toFixed(0) + " µs");
+const fmtBps = (b) => (b >= 1e6 ? (b / 1e6).toFixed(2) + " MB/s" : b >= 1e3 ? (b / 1e3).toFixed(1) + " kB/s" : b.toFixed(0) + " B/s");
+const fmtDur = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : ms.toFixed(1) + " ms");
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour12: false });
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+// A progress bar: `pct` 0-100, or null when the end is unknown (a sliding bar). `cls`: good / warn / crit / run.
+function setMeter(el, pct, cls) {
+  if (!el) return;
+  const unknown = pct === null || pct === undefined;
+  el.className = "meter" + (cls ? " " + cls : "") + (unknown ? " indet" : "");
+  if (unknown) { el.removeAttribute("aria-valuenow"); return; }
+  const v = Math.max(0, Math.min(100, pct));
+  el.style.setProperty("--p", v + "%"); el.setAttribute("aria-valuenow", String(Math.round(v)));
+}
+const fillRange = (el) => el.style.setProperty("--p", ((el.value - el.min) / (el.max - el.min) * 100) + "%");
+// "2.5 s", "500 ms", "250ms", "4Hz", "500" (ms) -> ms
+function parseMs(t) {
+  const m = /^\s*([\d.]+)\s*(hz|khz|ms|s|min|µs)?\s*$/i.exec(String(t == null ? "" : t));
+  if (!m) return null;
+  const n = +m[1], u = (m[2] || "ms").toLowerCase();
+  return !n ? null : u === "hz" ? 1000 / n : u === "khz" ? 1 / n : u === "s" ? n * 1000 : u === "min" ? n * 60000 : u === "µs" ? n / 1000 : n;
+}
+const iconOk = (c) => `<svg class="ico" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l3 3 5-6.5" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const iconWarn = (c) => `<svg class="ico" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2l5.2 9.3H.8z" fill="${c}"/></svg>`;
+const iconDown = (c) => `<svg class="ico" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="${c}" stroke-width="2" stroke-linecap="round"/></svg>`;
+
+// ---- the two boards ----------------------------------------------------------------------------
+const B = {};
+const SERIES = ["rate", "rtt", "rttstat", "delta", "marks", "events", "tests"];
+const KEEP = { rate: 3700, rtt: 4000, rttstat: 1000, delta: 4000, marks: 500, events: 300, tests: 200 };
+const tplCard = $("tpl-card"), tplCtl = $("tpl-controls");
+for (const k of BK) {
+  const b = B[k] = { k, data: Object.fromEntries(SERIES.map((s) => [s, []])), snap: null, lastLog: 0, settingsKey: "", spaceV: -1, lastRow: null, history: [], hAt: 0 };
+  const colA = document.createElement("div"); colA.className = "col"; colA.style.setProperty("--me", `var(${SERIES_VAR[k]})`);
+  colA.append(tplCard.content.cloneNode(true));
+  $("boards").append(colA);
+  const colC = document.createElement("div"); colC.style.setProperty("--me", `var(${SERIES_VAR[k]})`);
+  colC.append(tplCtl.content.cloneNode(true));
+  $("panels").append(colC);
+  b.col = colA; b.ctl = colC;
+  b.r = (name) => colA.querySelector(`[data-r="${name}"]`) || colC.querySelector(`[data-r="${name}"]`);
+  b.q = (sel) => colC.querySelectorAll(sel);
+  b.r("title").textContent = `Node ${k.toUpperCase()}`; b.r("title2").textContent = `Node ${k.toUpperCase()}`;
+  b.term = b.r("term");
+  b.col.dataset.app = ""; colC.dataset.app = "";
+}
+
+// ---- sending commands -------------------------------------------------------------------------
+function post(board, text, quiet) {
+  return fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ board, text, quiet: !!quiet }) })
+    .then((r) => r.json()).catch(() => null);
+}
+const cmd = (k, text) => post(k, text);
+
+// ---- terminal -----------------------------------------------------------------------------------
+const GLYPH = { frame: "·", stat: "▪", info: "·", ok: "✓", warn: "▲", error: "✗", cmd: "›", debug: "◦" };
+function runsToHtml(runs) {
+  return runs.map(([text, fg, bg, fl]) => {
+    const cls = [], style = [];
+    if (typeof fg === "number") cls.push("f" + fg); else if (fg) style.push("color:" + fg);
+    if (typeof bg === "number") cls.push("b" + bg); else if (bg) style.push("background:" + bg);
+    if (fl & 1) cls.push("bold"); if (fl & 2) cls.push("faint");
+    return cls.length || style.length ? `<span${cls.length ? ` class="${cls.join(" ")}"` : ""}${style.length ? ` style="${style.join(";")}"` : ""}>${esc(text)}</span>` : esc(text);
+  }).join("");
+}
+const runsPlain = (runs) => runs.map((r) => r[0]).join("");
+function applyTermFilters() {
+  for (const k of BK) {
+    const b = B[k];
+    for (const f of ["frame", "stat", "info", "ok", "warn", "error", "cmd", "debug", "host"]) b.term.classList.toggle("hide-" + f, !ui["f_" + f]);
+    b.col.querySelectorAll("[data-f]").forEach((el) => el.setAttribute("aria-pressed", String(ui["f_" + el.dataset.f])));
+    b.r("follow").setAttribute("aria-pressed", String(ui.termfollow[k]));
+  }
+}
+function addLogs(k, list) {
+  const b = B[k];
+  for (const e of list) {
+    if (e.i <= b.lastLog) continue;
+    b.lastLog = e.i;
+    const row = document.createElement("div");
+    row.className = `l l-${e.level} l-${e.src}`;
+    row.dataset.plain = `${clock(e.t)} ${e.src === "host" ? "tool " : ""}${runsPlain(e.runs)}`;
+    // a board's line carries its own time stamp; the tool's lines get the clock
+    row.innerHTML = e.src === "host" ? `<span class="t">${clock(e.t)}</span><span class="x">${esc(runsPlain(e.runs))}</span>` : `<span class="x">${runsToHtml(e.runs)}</span>`;
+    b.term.append(row);
+    while (b.term.children.length > 1500) b.term.removeChild(b.term.firstChild);
+  }
+  if (ui.termfollow[k]) b.term.scrollTop = b.term.scrollHeight;
+}
+for (const k of BK) {
+  const b = B[k];
+  b.col.querySelectorAll("[data-f]").forEach((el) => { el.onclick = () => { ui["f_" + el.dataset.f] = !ui["f_" + el.dataset.f]; saveUi(); applyTermFilters(); }; });
+  b.r("follow").onclick = () => { ui.termfollow[k] = !ui.termfollow[k]; saveUi(); applyTermFilters(); if (ui.termfollow[k]) b.term.scrollTop = b.term.scrollHeight; };
+  b.r("clear").onclick = () => { b.term.textContent = ""; };
+  b.r("copy").onclick = () => {
+    const text = [...b.term.children].filter((r) => r.offsetParent !== null).map((r) => r.dataset.plain).join("\n");
+    try { navigator.clipboard.writeText(text); b.r("termhint").textContent = "Copied the visible lines."; } catch (_) {}
+  };
+  b.r("csv").href = `/api/export?board=${k}&kind=frames`; b.r("csv").download = `node-${k}-frames.csv`;
+  b.r("txt").href = `/api/export?board=${k}&kind=log`; b.r("txt").download = `node-${k}-log.txt`;
+  b.term.addEventListener("scroll", () => {
+    const atBottom = b.term.scrollHeight - b.term.scrollTop - b.term.clientHeight < 8;
+    if (atBottom !== ui.termfollow[k]) { ui.termfollow[k] = atBottom; saveUi(); applyTermFilters(); }
+  });
+  const input = b.r("cmd");
+  b.r("cmdform").onsubmit = (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    const asking = b.snap && !/^cli\b/.test(b.snap.prompt || "cli");   // a question of the burst wizard: Enter alone takes the default
+    if (!text && !asking) return;
+    input.value = "";
+    if (text && b.history[b.history.length - 1] !== text) b.history.push(text);
+    b.hAt = b.history.length;
+    if (text === "clear") { b.term.textContent = ""; return; }
+    if (/^(reboot|restart|rb)$/.test(text) && !confirm("Reboot this board?")) return;
+    post(b.r("target").value === "both" ? "ab" : k, text);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    b.hAt = Math.max(0, Math.min(b.history.length, b.hAt + (e.key === "ArrowUp" ? -1 : 1)));
+    input.value = b.history[b.hAt] || "";
+  });
+}
+
+// ---- controls ------------------------------------------------------------------------------------
+const setting = (b, key) => (b.snap && b.snap.settings[key] ? b.snap.settings[key][0] : undefined);
+for (const k of BK) {
+  const b = B[k];
+  const send = (text) => cmd(k, text);
+  // every button that is just a command
+  b.ctl.querySelectorAll("[data-cmd]").forEach((el) => {
+    el.onclick = () => {
+      if (el.dataset.confirm && !confirm(el.dataset.confirm)) return;
+      if (el.dataset.quiet) post(k, el.dataset.cmd, true); else send(el.dataset.cmd);
+    };
+  });
+  // segmented controls: `set <key> <value>`
+  b.ctl.querySelectorAll("[data-seg]").forEach((seg) => seg.querySelectorAll("button").forEach((el) => { el.onclick = () => send(`set ${seg.dataset.seg} ${el.dataset.v}`); }));
+  // inputs and selects bound to a setting
+  b.ctl.querySelectorAll("[data-key]").forEach((el) => {
+    const key = el.dataset.key;
+    if (el.type === "range") {
+      const label = key === "rgb.brightness" ? "v-bright" : "v-freq";
+      el.oninput = () => { b.r(label).textContent = el.value + (key === "rgb.freq_hz" ? " Hz" : " %"); fillRange(el); };
+      fillRange(el);
+      el.onchange = () => send(`set ${key} ${el.value}`);
+    } else if (el.tagName === "SELECT") {
+      el.onchange = () => send(`set ${key} ${el.value}`);
+    } else {
+      el.title = KEY_HELP[key] || "";
+      el.onkeydown = (e) => { if (e.key === "Enter") { send(`set ${key} ${el.value.trim()}`); el.blur(); } };
+      el.onchange = () => send(`set ${key} ${el.value.trim()}`);
+    }
+  });
+  // RGB patterns
+  const pat = b.r("patterns");
+  for (const [name, cols] of Object.entries(PATTERNS)) {
+    const el = document.createElement("button");
+    el.dataset.v = name; el.title = `pattern ${name}`;
+    el.innerHTML = `<span class="swatch" style="background:linear-gradient(90deg,${cols.join(",")})"></span>${name}`;
+    el.onclick = () => send(`pattern ${name}`);
+    pat.append(el);
+  }
+  // breadboard LEDs
+  const leds = b.r("leds");
+  for (const n of [1, 2]) {
+    const g = document.createElement("div"); g.className = "group";
+    g.innerHTML = `<span class="lab">LED ${n}</span><div class="row"><select aria-label="LED ${n} mode">${["off", "on", "blink", "button", "peer", "link", "rx", "tx"].map((m) => `<option>${m}</option>`).join("")}</select>
+      <input type="text" placeholder="period" value="500" title="blink: a period (200, 0.5s) or a frequency (2Hz)" aria-label="LED ${n} blink period" style="width:80px"></div>`;
+    leds.append(g);
+    const sel = g.querySelector("select"), per = g.querySelector("input");
+    const apply = () => send(`led ${n} ${sel.value === "blink" ? "blink " + (per.value.trim() || "500") : sel.value}`);
+    sel.onchange = apply;
+    per.onkeydown = (e) => { if (e.key === "Enter") { sel.value = "blink"; apply(); } };
+    g.dataset.led = `led${n}`;
+  }
+  // baud (UART)
+  b.r("baud-go").onclick = () => send(`baud ${b.r("baud").value}`);
+  // burst
+  b.r("b-go").onclick = () => send(`burst ${b.r("b-count").value} ${b.r("b-rate").value.trim() || "max"}`);
+  // traffic generator
+  const shape = b.r("g-shape"), labels = { sine: ["Peak", "Cycle"], cosine: ["Peak", "Cycle"], triangle: ["Peak", "Cycle"], saw: ["Peak", "Cycle"], square: ["Peak", "Cycle"], ramp: ["Peak", "Over"], steps: ["Peak", "Steps:over"], pulse: ["On", "Off"] };
+  const syncShape = () => { const l = labels[shape.value]; b.r("g-p1").parentElement.classList.toggle("hidden", !l); b.r("g-p2").parentElement.classList.toggle("hidden", !l); if (l) { b.r("g-l1").textContent = l[0]; b.r("g-l2").textContent = l[1]; } };
+  shape.onchange = () => {
+    const defaults = { pulse: ["200ms", "800ms"], steps: ["3Mbit", "5:30s"], ramp: ["3Mbit", "30s"] }[shape.value] || ["3Mbit", "20s"];
+    b.r("g-p1").value = defaults[0]; b.r("g-p2").value = defaults[1]; syncShape();
+  };
+  syncShape();
+  b.r("g-go").onclick = () => {
+    const s = shape.value;
+    const token = s === "flat" ? "" : s === "random" ? "random" : `${s}:${b.r("g-p1").value.trim()}:${b.r("g-p2").value.trim()}`;
+    send(["gen start", b.r("g-rate").value.trim(), b.r("g-size").value.trim(), token, b.r("g-time").value.trim()].filter(Boolean).join(" "));
+  };
+  // address space
+  const path = () => b.r("s-path").value.trim() || "/";
+  b.r("s-browse").onclick = () => send(`browse ${path()} 2`);
+  b.r("s-read").onclick = () => send(`read ${path()}`);
+  b.r("s-write").onclick = () => send(`write ${path()} ${b.r("s-value").value.trim()}`);
+  b.r("s-watch").onclick = () => send(`watch ${path()} 500ms`);
+  b.r("s-unwatch").onclick = () => send(`unwatch ${path()}`);
+  b.r("s-changed").onclick = () => { ui.changed = !ui.changed; saveUi(); if (b.snap) drawSettings(b, true); };
+  b.r("s-ro").onclick = () => { ui.ro = !ui.ro; saveUi(); if (b.snap) drawSettings(b, true); };
+}
+
+function syncControls(b) {
+  const s = b.snap.settings;
+  const v = (key) => (s[key] ? s[key][0] : undefined);
+  b.ctl.querySelectorAll("[data-seg]").forEach((seg) => {
+    const cur = v(seg.dataset.seg);
+    seg.querySelectorAll("button").forEach((el) => el.setAttribute("aria-pressed", String(cur === el.dataset.v)));
+  });
+  b.ctl.querySelectorAll("[data-key]").forEach((el) => {
+    const cur = v(el.dataset.key);
+    if (cur === undefined || document.activeElement === el) return;
+    el.value = cur;
+    if (el.type === "range") el.oninput();
+  });
+  b.r("patterns").querySelectorAll("button").forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.v === v("rgb.pattern"))));
+  b.r("leds").querySelectorAll("[data-led]").forEach((g) => {
+    const cur = v(g.dataset.led); if (cur === undefined) return;
+    const [mode, ...rest] = cur.split(/\s+/);
+    const sel = g.querySelector("select"), per = g.querySelector("input");
+    if (document.activeElement !== sel) sel.value = mode;
+    if (rest.length && document.activeElement !== per) per.value = rest.join(" ");
+  });
+  const burst = [v("burst.count"), v("burst.rate_hz")];
+  if (burst[0] && !b.burstSet) { b.burstSet = true; b.r("b-count").value = burst[0]; b.r("b-rate").value = burst[1] === "0" ? "max" : burst[1]; }
+}
+
+const noEffect = (b, key) => b.snap.app === "uart" && key.startsWith("trace");   // accepted, does nothing without a network
+function drawSettings(b, force) {
+  const all = Object.entries(b.snap.settings);
+  const rows = all.filter(([key, [, , ro, changed]]) => (ui.ro || (!ro && !noEffect(b, key))) && (!ui.changed || changed));
+  b.r("s-changed").setAttribute("aria-pressed", String(ui.changed)); b.r("s-ro").setAttribute("aria-pressed", String(ui.ro));
+  const changedN = all.filter(([, x]) => x[3]).length;
+  b.r("s-note").textContent = all.length ? `${changedN} differ from the build` : "asking the board…";
+  const saved = (b.snap.card || {}).saved;
+  b.r("s-flash").textContent = saved ? `at the last boot: ${saved}` : "";
+  const table = b.r("settings");
+  if (!force && document.activeElement && table.contains(document.activeElement)) return; // not under the cursor
+  table.innerHTML = "<thead><tr><th>Key</th><th class='l'>Value</th><th class='l'>Build</th><th></th></tr></thead><tbody>" + (rows.length ? rows.map(([key, [value, build, ro, changed]]) =>
+    `<tr class="${changed ? "changed" : ""} ${ro || noEffect(b, key) ? "ro" : ""}" title="${esc(noEffect(b, key) ? "does nothing on the UART app (no network frames)" : KEY_HELP[key] || (ro ? "fixed at build time" : ""))}"><td class="key">${esc(key)}</td>` +
+    (ro ? `<td class="l val">${esc(value)}</td><td class="l">read-only</td><td></td>`
+        : `<td class="l val"><input type="text" value="${esc(value)}" data-k="${esc(key)}" aria-label="${esc(key)}"></td><td class="l">${changed ? esc(build) : ""}</td><td>${changed ? `<button data-reset="${esc(key)}" title="reset ${esc(key)}">↺</button>` : ""}</td>`) + "</tr>").join("")
+    : `<tr><td colspan="4" class="empty">${ui.changed ? "Nothing differs from the build." : "No setting known yet."}</td></tr>`) + "</tbody>";
+  table.querySelectorAll("input[data-k]").forEach((el) => { el.onkeydown = (e) => { if (e.key === "Enter") { cmd(b.k, `set ${el.dataset.k} ${el.value.trim()}`); el.blur(); } }; el.onchange = () => cmd(b.k, `set ${el.dataset.k} ${el.value.trim()}`); });
+  table.querySelectorAll("button[data-reset]").forEach((el) => { el.onclick = () => cmd(b.k, `reset ${el.dataset.reset}`); });
+}
+
+// ---- the peer's config, over the link (Ethernet or UART) ---------------------------------------------------------
+// The board reads and writes the peer's /config/<key> variables itself; the server runs the sequence and reports.
+const KEEP_OUT = ["verbose", "console"];   // not copied by default: they change what a console prints
+const keepOut = (b, k) => KEEP_OUT.includes(k) || noEffect(b, k);
+function peerPost(b, action, keys) {
+  return fetch("/api/peer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ board: b.k, action, keys }) })
+    .then((r) => r.json()).catch(() => ({ ok: false, error: "server not reachable" }))
+    .then((res) => { b.peerErr = res.ok ? "" : res.error || ""; b.peerKey = ""; if (b.snap) drawPeer(b); return res; });
+}
+const peerSame = (a, b) => a !== null && a !== undefined && b !== undefined && String(a).trim() === String(b).trim();
+function peerDiffering(b) {
+  const s = b.snap.settings;
+  return b.snap.peer.rows.filter((r) => r.peer !== null && !peerSame(r.peer, (s[r.key] || [])[0])).map((r) => r.key);
+}
+const PEER_TEXT = { ok: "", pushed: "✓ written on the peer", pulled: "✓ set here", sent: "…", skipped: "skipped" };
+function drawPeer(b) {
+  const p = b.snap.peer, s = b.snap.settings, running = p.state === "running", connected = b.snap.status === "connected";
+  const link = b.snap.app === "uart" ? "the UART link" : b.snap.app === "eth" ? "Ethernet" : "the link";
+  if (b.peerN !== p.n) {       // a sequence just ended: choose what differs
+    b.peerN = p.n;
+    if (p.op === "read") b.sel = new Set(peerDiffering(b).filter((k) => !keepOut(b, k)));
+  }
+  b.sel = b.sel || new Set();
+  const key = JSON.stringify([p, Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v[0]])), [...b.sel], b.peerErr]);
+  if (key === b.peerKey) return;
+  b.peerKey = key;
+  const pp = b.r("p-prog");
+  pp.classList.toggle("idle", !running);
+  if (running) {
+    b.r("p-prog-label").textContent = `${{ read: "Reading the peer's", pull: "Pulling to this node", push: "Pushing to the peer" }[p.op]} · ${p.done} of ${p.total} settings`;
+    b.r("p-prog-val").textContent = `${Math.round(p.done / Math.max(p.total, 1) * 100)} %`;
+    setMeter(b.r("p-bar"), p.done / Math.max(p.total, 1) * 100, "run");
+  }
+  const ready = connected && !running && Object.keys(s).length > 0;
+  const chosen = [...b.sel].filter((k) => p.rows.some((r) => r.key === k && r.peer !== null));
+  b.r("p-read").disabled = !ready;
+  for (const n of ["p-diff", "p-all", "p-none"]) b.r(n).disabled = !p.rows.length;
+  b.r("p-pull").disabled = !ready || !chosen.length; b.r("p-push").disabled = !ready || !chosen.length;
+  b.r("p-pull").textContent = `← Pull ${chosen.length || ""} to this node`.replace("  ", " ");
+  b.r("p-push").textContent = `Push ${chosen.length || ""} to the peer →`.replace("  ", " ");
+  const diff = peerDiffering(b);
+  b.r("p-note").textContent = p.rows.length ? `${diff.length} of ${p.rows.length} differ from the peer, asked over ${link}` : `over ${link}`;
+  b.r("p-line").textContent = running ? `${{ read: "Reading", pull: "Pulling", push: "Pushing" }[p.op]} ${p.done} / ${p.total} over ${link}…` : b.peerErr || p.error || (p.rows.length ? "" : "Read the peer's config to compare it with this node's.");
+  b.r("p-line").style.color = b.peerErr || p.error ? css("--critical") : "";
+  const rows = p.rows;
+  b.r("p-table").innerHTML = rows.length
+    ? "<thead><tr><th class='l'></th><th class='l'>Key</th><th class='l'>This node</th><th class='l'>Peer</th><th class='l'></th></tr></thead><tbody>" + rows.map((r) => {
+        const mine = (s[r.key] || [""])[0], differs = r.peer !== null && !peerSame(r.peer, mine);
+        const state = r.status in PEER_TEXT ? PEER_TEXT[r.status] : `✗ ${r.status}${r.note ? ` (${r.note})` : ""}`;
+        const bad = r.status && !(r.status in PEER_TEXT);
+        return `<tr class="${differs ? "changed" : ""}"><td class="l"><input type="checkbox" data-sel="${esc(r.key)}" ${b.sel.has(r.key) ? "checked" : ""} ${r.peer === null || running ? "disabled" : ""} aria-label="Copy ${esc(r.key)}"></td>` +
+          `<td class="key l">${esc(r.key)}</td><td class="l ${differs ? "val" : ""}">${esc(mine)}</td><td class="l ${differs ? "val" : ""}">${r.peer === null ? "–" : esc(r.peer)}</td><td class="l ${bad ? "bad" : ""}">${esc(state)}</td></tr>`;
+      }).join("") + "</tbody>"
+    : "";
+  b.r("p-table").querySelectorAll("input[data-sel]").forEach((el) => { el.onchange = () => { el.checked ? b.sel.add(el.dataset.sel) : b.sel.delete(el.dataset.sel); b.peerKey = ""; drawPeer(b); }; });
+}
+function peerControls(b) {
+  b.r("p-read").onclick = () => peerPost(b, "read");
+  b.r("p-diff").onclick = () => { b.sel = new Set(peerDiffering(b).filter((k) => !keepOut(b, k))); b.peerKey = ""; drawPeer(b); };
+  b.r("p-all").onclick = () => { b.sel = new Set(b.snap.peer.rows.filter((r) => r.peer !== null).map((r) => r.key)); b.peerKey = ""; drawPeer(b); };
+  b.r("p-none").onclick = () => { b.sel = new Set(); b.peerKey = ""; drawPeer(b); };
+  const chosen = () => [...b.sel].filter((k) => b.snap.peer.rows.some((r) => r.key === k && r.peer !== null));
+  b.r("p-pull").onclick = () => peerPost(b, "pull", chosen());
+  b.r("p-push").onclick = () => {
+    const keys = chosen();
+    if (keys.length && confirm(`Write ${keys.length} setting(s) of node ${b.k.toUpperCase()} on its peer?\n\n${keys.join(", ")}`)) peerPost(b, "push", keys);
+  };
+}
+for (const k of BK) peerControls(B[k]);
+
+function drawSpace(b) {
+  const sp = b.snap.space;
+  b.r("s-tree").innerHTML = sp.tree.length
+    ? sp.tree.map((n) => `<div style="padding-left:${n.level * 16}px">${n.obj ? `<span class="ob">${esc(n.name)}/</span>` : `<a data-p="${esc(n.path)}">${esc(n.name)}</a> <span class="note">${n.type} ${n.rw ? "rw" : "ro"}</span>`}</div>`).join("")
+    : '<div class="empty">Browse the peer to list what it has.</div>';
+  b.r("s-tree").querySelectorAll("a[data-p]").forEach((a) => { a.onclick = () => { b.r("s-path").value = a.dataset.p; cmd(b.k, `read ${a.dataset.p}`); }; });
+  const vals = Object.entries(sp.values);
+  b.r("s-values").innerHTML = vals.length
+    ? "<thead><tr><th>Path</th><th class='l'>Value</th><th>When</th></tr></thead><tbody>" + vals.map(([p, v]) =>
+        `<tr><td class="l"><button class="link" data-p="${esc(p)}">${esc(p)}</button></td><td class="l ${v.status === "Good" ? "" : "bad"}">${v.status === "Good" ? esc(v.value) : esc(v.status) + (v.value ? ` (still ${esc(v.value)})` : "")}</td><td class="note">${clock(v.t)}</td></tr>`).join("") + "</tbody>"
+    : '<tbody><tr><td class="empty">Nothing read yet.</td></tr></tbody>';
+  b.r("s-values").querySelectorAll("button[data-p]").forEach((a) => { a.onclick = () => { b.r("s-path").value = a.dataset.p; }; });
+}
+
+// ---- tiles ----------------------------------------------------------------------------------------
+function updateBoard(b) {
+  const s = b.snap, set = (name, html) => { const el = b.r(name); if (el.innerHTML !== html) el.innerHTML = html; };
+  const good = css("--good"), warn = css("--warning"), crit = css("--critical"), muted = css("--text-muted");
+  b.col.dataset.app = s.app || ""; b.ctl.dataset.app = s.app || "";
+  b.r("app").textContent = s.app === "eth" ? "Ethernet" : s.app === "uart" ? "UART" : "app unknown yet";
+  const ok = s.status === "connected";
+  set("conn", ok ? (s.silent_s !== null && s.silent_s > 5 ? "quiet" : "connected") : s.status === "unassigned" ? "no board" : esc(s.status));
+  b.r("port").textContent = ok ? s.port || "" : s.detail || "";
+  if (s.name) { b.r("title").textContent = s.name; b.r("title2").textContent = s.name; }
+  const c = s.counters, have = c.tx !== null;
+  set("k-link", s.link_up === null ? "–" : s.link_up ? `${iconOk(good)}UP` : `${iconDown(crit)}DOWN`);
+  set("n-link", s.speed ? esc(s.speed) + (s.app === "uart" ? " baud" : "bit/s") : "");
+  set("k-tx", have ? fmtInt(c.tx) : "–"); set("k-rx", have ? fmtInt(c.rx) : "–");
+  const rate = b.data.rate[b.data.rate.length - 1];
+  set("n-tx", rate ? `${rate[1].toFixed(1)} /s` : ""); set("n-rx", rate ? `${rate[2].toFixed(1)} /s` : "");
+  set("k-lost", have ? `${fmtInt(c.lost)} · ${fmtInt(c.bad)}` : "–");
+  set("n-lost", have ? (c.lost + c.bad > 0 ? iconWarn(warn) + "frames missed" : iconOk(good) + "none missed") : "");
+  const last = b.data.rtt[b.data.rtt.length - 1];
+  set("k-rtt", s.rtt_stat ? fmtUs(s.rtt_stat[1] * 1000) : last ? fmtUs(last[1]) : "–");
+  set("n-rtt", s.rtt_stat ? `min ${s.rtt_stat[0].toFixed(2)} · max ${s.rtt_stat[2].toFixed(2)} ms` : last ? "last echo" : "peer needs tx on-rx");
+  set("k-btn", s.peer_btn ? (s.peer_btn === "pressed" ? "● pressed" : "○ released") : "–");
+  const ev = b.data.events[b.data.events.length - 1];
+  set("n-btn", ev ? `${ev[1] === "TX" ? "own" : "peer"} ${ev[2]} ${clock(ev[0])}` : "");
+  if (s.app === "eth") { set("l-x", "Main loop"); set("k-x", s.loop ? `${fmtInt(s.loop[0])}<small>/s</small>` : "–"); set("n-x", s.loop ? `slowest ${s.loop[1]} µs` : "verbose frames"); }
+  else if (s.app === "uart") { set("l-x", "RX buffer peak"); set("k-x", s.rx_peak ? `${s.rx_peak[0]}<small>/ ${s.rx_peak[1]}</small>` : "–"); set("n-x", s.peer_period ? `peer period ${esc(s.peer_period)}` : "verbose frames"); }
+  const card = s.card || {};
+  set("k-board", esc(s.name || "–"));
+  set("n-board", esc([card.MAC, card.git && card.git.split(" ")[0], card.reset].filter(Boolean).join(" · ") || (s.uptime_s !== null ? `up ${s.uptime_s} s` : "")));
+  // the live line and the dashboard, under the log
+  const live = s.live ? runsToHtml(s.live) : `<span class="dim">${s.verbose && s.verbose !== "live" ? `verbose ${esc(s.verbose)}: no live line` : "waiting for a frame…"}</span>`;
+  const html = live + (s.dash || []).map((r) => "\n" + runsToHtml(r)).join("");
+  const lb = b.r("live"); if (lb.dataset.h !== html) { lb.dataset.h = html; lb.innerHTML = html; }
+  b.r("prompt").textContent = (s.prompt || "cli ›").replace(/›.*$/, "›");
+  b.r("cmd").placeholder = /^cli\b/.test(s.prompt || "cli") ? "help · config · verbose frames · pattern ocean · burst 1000 max…" : "Enter alone takes the default · q cancels";
+  const key = JSON.stringify(s.settings);
+  if (key !== b.settingsKey) { b.settingsKey = key; syncControls(b); drawSettings(b); }
+  drawPeer(b);
+  updateMeters(b);
+  if (s.space.v !== b.spaceV) { b.spaceV = s.space.v; drawSpace(b); }
+  if (s.net && Object.keys(s.net).length) b.r("netinfo").innerHTML = Object.entries(s.net).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v.replace(/●\s*/, ""))}</dd>`).join("");
+  if (s.app === "uart" && s.speed && document.activeElement !== b.r("baud")) {   // "5M", "921k", "9600": the status line's short form
+    const m = /^(\d+)([kM]?)$/.exec(s.speed), bps = m ? +m[1] * (m[2] === "M" ? 1e6 : m[2] === "k" ? 1e3 : 1) : 0;
+    const opts = [...b.r("baud").options].map((o) => +o.value);
+    if (bps) b.r("baud").value = String(opts.reduce((p, q) => (Math.abs(q - bps) < Math.abs(p - bps) ? q : p)));
+  }
+  b.r("g-line").textContent = s.gen ? `${s.gen.state} · ${s.gen.rate} · ${s.gen.size} · ${s.gen.shape}` : "";
+}
+
+function updateMeters(b) {
+  const s = b.snap, now = frame ? frame.t : Date.now() / 1000;
+  // how long the peer has been silent, against the time after which the node calls the link down
+  const period = parseMs(s.peer_period) || parseMs(setting(b, "data_period_ms")), periods = +setting(b, "link_timeout") || 0;
+  const shown = s.status === "connected" && s.peer_last && period && periods && s.verbose && s.verbose !== "silent";
+  b.r("row-health").classList.toggle("hidden", !shown);
+  if (shown) {
+    const age = Math.max(0, (now - s.peer_last) * 1000), timeout = period * periods, ratio = age / timeout;
+    setMeter(b.r("m-health"), ratio * 100, ratio >= 1 ? "crit" : ratio >= 0.5 ? "warn" : "good");
+    b.r("v-health").textContent = ratio >= 1 ? `${(age / 1000).toFixed(1)} s · link down` : `${(age / 1000).toFixed(1)} s of ${(timeout / 1000).toFixed(1)} s`;
+  }
+  if (s.app === "uart") {   // the UART receive buffer: how close it came to overflowing
+    const rp = s.rx_peak, ratio = rp ? rp[0] / rp[1] : 0;
+    setMeter(b.r("m-rxbuf"), ratio * 100, ratio >= 0.8 ? "crit" : ratio >= 0.5 ? "warn" : "");
+    b.r("v-rxbuf").textContent = rp ? `${fmtInt(rp[0])} of ${fmtInt(rp[1])} bytes` : "verbose frames";
+  }
+  // a burst this node is sending: time-based when it has a rate, a sliding bar when it runs back to back
+  const br = s.burst_run;
+  b.r("burst-prog").classList.toggle("idle", !br);
+  if (br) {
+    const est = br.rate_hz ? br.count / br.rate_hz : 0, el = Math.max(0, now - br.t);
+    b.r("burst-label").textContent = `Burst #${br.id} · ${fmtInt(br.count)} frames ${br.rate_hz ? "at " + br.rate_hz + " Hz" : "back to back"}`;
+    setMeter(b.r("burst-bar"), est ? Math.min(el / est, 0.99) * 100 : null, "run");
+    b.r("burst-val").textContent = est ? `${Math.min(el, est).toFixed(1)} / ${est.toFixed(1)} s` : `${el.toFixed(1)} s`;
+  }
+  // the traffic generator: its stream's time against the time it was told to last
+  const g = s.gen, active = g && (g.state === "running" || g.state === "paused");
+  b.r("gen-prog").classList.toggle("idle", !active);
+  if (active) {
+    const st = g.stream, paused = g.state === "paused";
+    let dur = st ? st.dur_ms : 0;
+    if (!paused && st && g.t) dur += Math.max(0, now - g.t) * 1000;   // between two answers of `gen status`
+    if (g.total_ms) dur = Math.min(dur, g.total_ms);
+    b.r("gen-label").textContent = `Generator${st ? " · stream #" + st.id : ""} · ${g.rate} · ${g.size} · ${g.shape}${paused ? " · paused" : ""}`;
+    setMeter(b.r("gen-bar"), g.total_ms ? dur / g.total_ms * 100 : null, paused ? "warn" : "run");
+    b.r("gen-val").textContent = (g.total_ms ? `${(dur / 1000).toFixed(1)} / ${(g.total_ms / 1000).toFixed(1)} s` : st ? `${(dur / 1000).toFixed(1)} s` : "starting…") + (st ? ` · ${fmtInt(st.sent)} datagrams` : "");
+  }
+}
+
+function updateHeader() {
+  const connected = BK.filter((k) => B[k].snap && B[k].snap.status === "connected").length;
+  const apps = [...new Set(BK.map((k) => B[k].snap && B[k].snap.app).filter(Boolean))];
+  $("sub").textContent = apps.length === 1 ? (apps[0] === "eth" ? "Ethernet app: two nodes over UDP" : "UART app: two nodes over a serial link") : "the two boards of the Ethernet and UART apps, as in the serial terminal";
+  const color = connected === 2 ? css("--good") : connected ? css("--warning") : css("--text-muted");
+  $("status").innerHTML = (connected === 2 ? iconOk(color) : iconWarn(color)) + `<span>${connected} of 2 boards connected</span>`;
+  // charts need the frames
+  const need = BK.filter((k) => { const b = B[k]; return b.snap && b.snap.status === "connected" && b.snap.verbose && !["frames", "wire"].includes(b.snap.verbose); });
+  const html = need.length ? `<div class="banner">${iconWarn(css("--warning"))}<span>Round-trip times and intervals come from the frame lines: node ${need.map((k) => k.toUpperCase()).join(" and ")} prints ${need.map((k) => B[k].snap.verbose).join(" / ")}.</span>` +
+    need.map((k) => `<button data-need="${k}">Set verbose frames on ${k.toUpperCase()}</button>`).join("") + "</div>" : "";
+  if ($("needs").dataset.h !== html) { $("needs").dataset.h = html; $("needs").innerHTML = html; $("needs").querySelectorAll("[data-need]").forEach((el) => { el.onclick = () => cmd(el.dataset.need, "set verbose frames"); }); }
+}
+
+// ---- charts ------------------------------------------------------------------------------------------
+let plotsDirty = true, lastPlot = 0, following = true;
+const plotCfg = { displaylogo: false, responsive: true, scrollZoom: false, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toImage"] };
+function baseLayout(title) {
+  const text = css("--text-secondary"), grid = css("--grid"), surface = css("--surface-2"), ink = css("--text-primary");
+  const axis = { gridcolor: grid, gridwidth: 0.5, zeroline: false, showline: false, ticks: "", tickfont: { color: text, size: 11 }, titlefont: { color: text, size: 12 }, automargin: true,
+                 showspikes: true, spikemode: "across", spikesnap: "cursor", spikethickness: 1, spikecolor: css("--text-muted"), spikedash: "dot" };
+  return {
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: { family: getComputedStyle(document.body).fontFamily, color: text, size: 12 },
+    margin: { l: 8, r: 12, t: 8, b: 8 }, xaxis: { ...axis, type: "date" }, yaxis: { ...axis, showspikes: false, title: { text: title } },
+    hoverlabel: { bgcolor: surface, bordercolor: grid, font: { color: ink, size: 12 } }, hovermode: "closest",
+    legend: { orientation: "h", x: 0, y: 1.14, font: { color: text, size: 11 } }, showlegend: true,
+  };
+}
+function xRange() {
+  const now = Date.now();
+  return [now - ui.span * 1000, now + ui.span * 20];
+}
+function plot(id, traces, layout) {
+  if (following) layout.xaxis.range = xRange();
+  layout.uirevision = `${theme}|${ui.span}|${ui.logrtt}|${following}`;
+  Plotly.react(id, traces, layout, plotCfg);
+}
+const ms = (t) => t * 1000;
+function drawPlots() {
+  const col = { a: css(SERIES_VAR.a), b: css(SERIES_VAR.b) };
+  // frames per second: sent solid, received dashed (colour = the board, line = the direction)
+  {
+    const traces = [];
+    for (const k of BK) {
+      const d = B[k].data.rate, name = k.toUpperCase();
+      traces.push({ x: d.map((p) => ms(p[0])), y: d.map((p) => p[1]), name: `${name} sent`, type: "scatter", mode: "lines", line: { color: col[k], width: 1.25 }, hovertemplate: `${name} sent %{y:.1f}/s<extra></extra>` });
+      traces.push({ x: d.map((p) => ms(p[0])), y: d.map((p) => p[2]), name: `${name} received`, type: "scatter", mode: "lines", line: { color: col[k], width: 1.25, dash: "dot" }, hovertemplate: `${name} received %{y:.1f}/s<extra></extra>` });
+    }
+    const L = baseLayout("frames / s"); L.yaxis.rangemode = "tozero"; L.hovermode = "x";
+    plot("p-rate", traces, L);
+  }
+  {
+    const traces = BK.map((k) => ({ x: B[k].data.rtt.map((p) => ms(p[0])), y: B[k].data.rtt.map((p) => p[1]), name: `Node ${k.toUpperCase()}`, type: "scatter", mode: "markers",
+      marker: { color: col[k], size: 4.5, opacity: 0.85, line: { width: 0 } }, hovertemplate: `Node ${k.toUpperCase()} %{y:.0f} µs<extra></extra>` }));
+    const L = baseLayout("µs"); L.yaxis.type = ui.logrtt ? "log" : "linear"; if (!ui.logrtt) L.yaxis.rangemode = "tozero";
+    plot("p-rtt", traces, L);
+  }
+  {
+    const traces = BK.map((k) => ({ x: B[k].data.delta.map((p) => ms(p[0])), y: B[k].data.delta.map((p) => p[1]), name: `Node ${k.toUpperCase()}`, type: "scatter", mode: "markers",
+      marker: { color: col[k], size: 4.5, opacity: 0.85, line: { width: 0 } }, text: B[k].data.delta.map((p) => `after ${p[2]}`), hovertemplate: `Node ${k.toUpperCase()} %{y:.3f} ms, %{text}<extra></extra>` }));
+    const L = baseLayout("ms"); L.yaxis.rangemode = "tozero";
+    plot("p-delta", traces, L);
+  }
+  {
+    // one trace per kind of event (the symbol says which), one row per board
+    const kinds = [
+      { id: "lost", name: "frames lost", symbol: "triangle-down", color: css("--critical") },
+      { id: "bad", name: "bad frame", symbol: "x", color: css("--critical") },
+      { id: "link", name: "link change", symbol: "diamond", color: css("--warning") },
+      { id: "restart", name: "peer restarted", symbol: "square", color: css("--warning") },
+      { id: "boot", name: "boot", symbol: "circle-open", color: css("--text-secondary") },
+      { id: "press", name: "button press", symbol: "triangle-up", color: css("--text-secondary") },
+      { id: "release", name: "button release", symbol: "triangle-up-open", color: css("--text-secondary") },
+    ];
+    const rows = { a: "Node A", b: "Node B" };
+    const traces = kinds.map((kd) => {
+      const x = [], y = [], text = [];
+      for (const k of BK) {
+        for (const m of B[k].data.marks) if (m[1] === kd.id) { x.push(ms(m[0])); y.push(rows[k]); text.push(m[2]); }
+        for (const e of B[k].data.events) if (e[1] === "TX" && e[2] === kd.id) { x.push(ms(e[0])); y.push(rows[k]); text.push(`${e[5] || "button"} ${e[2]} · key ${e[3]}`); }
+      }
+      return { x, y, text, name: kd.name, type: "scatter", mode: "markers", marker: { symbol: kd.symbol, size: 9, color: kd.color, line: { color: kd.color, width: 1.5 } }, hovertemplate: "%{y}: %{text}<extra></extra>" };
+    });
+    const L = baseLayout(""); L.yaxis.type = "category"; L.yaxis.categoryarray = ["Node B", "Node A"]; L.yaxis.title = undefined; L.legend.y = 1.2;
+    plot("p-marks", traces, L);
+  }
+}
+
+// ---- the test results -------------------------------------------------------------------------------------
+let testsKey = null;
+function drawTests() {
+  const all = [];
+  for (const k of BK) for (const t of B[k].data.tests) all.push({ ...t, node: k });
+  all.sort((p, q) => q.t - p.t);
+  const key = all.map((t) => `${t.node}${t.t}`).join() + "|" + BK.map((k) => { const e = B[k].data.events; return e.length + ":" + (e.length ? e[e.length - 1][0] : 0); }).join();
+  if (key === testsKey) return;
+  testsKey = key;
+  $("tests").innerHTML = all.length
+    ? "<thead><tr><th>Time</th><th class='l'>Node</th><th class='l'>Test</th><th>Frames</th><th>Lost · bad</th><th>Throughput</th><th>Of the line</th><th>Duration</th></tr></thead><tbody>" +
+      all.slice(0, 40).map((t) => `<tr><td>${clock(t.t)}</td><td class="l"><span class="dot" style="--me:var(${SERIES_VAR[t.node]});display:inline-block"></span> ${t.node.toUpperCase()}</td><td class="l">${t.kind} #${t.id} ${t.dir === "tx" ? "sent" : "received"}</td>` +
+        `<td>${fmtInt(t.frames)}${t.of && t.of !== t.frames ? " / " + fmtInt(t.of) : ""}</td><td class="${t.lost + t.bad ? "bad" : "ok"}">${fmtInt(t.lost)} · ${fmtInt(t.bad)}</td><td>${fmtBps(t.bps || 0)}</td><td>${(t.pct || 0).toFixed(1)} %<span class="meter mini ${t.pct >= 90 ? "warn" : ""}" style="--p:${Math.min(100, t.pct || 0)}%" aria-hidden="true"><i></i></span></td><td>${fmtDur(t.dur_ms || 0)}</td></tr>`).join("") + "</tbody>"
+    : '<tbody><tr><td class="empty">No burst or generator run yet.</td></tr></tbody>';
+  const recent = all.slice(0, 12).reverse();
+  const L = baseLayout("kB/s"); L.hovermode = "closest"; L.showlegend = false; L.xaxis = { ...L.xaxis, type: "category", showspikes: false }; L.margin.b = 30; L.yaxis.rangemode = "tozero";
+  Plotly.react("p-tests", [{
+    type: "bar", x: recent.map((t) => `${t.node.toUpperCase()} ${t.kind} #${t.id} ${t.dir}`), y: recent.map((t) => (t.bps || 0) / 1000),
+    marker: { color: recent.map((t) => css(SERIES_VAR[t.node])), line: { color: css("--surface-1"), width: 2 } }, hovertemplate: "%{x}<br>%{y:.1f} kB/s<extra></extra>",
+  }], L, plotCfg);
+  const ev = [];
+  for (const k of BK) for (const e of B[k].data.events) ev.push({ node: k, e });
+  ev.sort((p, q) => q.e[0] - p.e[0]);
+  $("events").innerHTML = ev.length
+    ? "<thead><tr><th>Time</th><th class='l'>Node</th><th class='l'>Edge</th><th class='l'>Key</th></tr></thead><tbody>" +
+      ev.slice(0, 30).map(({ node, e }) => `<tr><td>${clock(e[0])}</td><td class="l">${node.toUpperCase()} ${e[1] === "TX" ? "sent" : "got"}</td><td class="l">${e[2] === "press" ? "▼" : "▲"} ${e[5] || ""} ${e[2]}</td><td class="l num">${e[3]}</td></tr>`).join("") + "</tbody>"
+    : '<tbody><tr><td class="empty">No button edge yet: put the jumper to GND.</td></tr></tbody>';
+}
+
+// controls of the charts
+$("span").value = String(ui.span);
+$("span").onchange = (e) => { ui.span = +e.target.value; saveUi(); plotsDirty = true; };
+$("logrtt").setAttribute("aria-pressed", String(ui.logrtt));
+$("logrtt").onclick = () => { ui.logrtt = !ui.logrtt; $("logrtt").setAttribute("aria-pressed", String(ui.logrtt)); saveUi(); plotsDirty = true; };
+function setFollow(on) { following = on; $("follow").setAttribute("aria-pressed", String(on)); $("follow").textContent = on ? "Live" : "Paused: zoomed"; plotsDirty = true; }
+$("follow").onclick = () => setFollow(!following);
+for (const id of ["p-rate", "p-rtt", "p-delta", "p-marks"]) {
+  const el = $(id);
+  const hook = () => {
+    el.on("plotly_relayout", (ev) => { if (ev["xaxis.range[0]"] !== undefined) setFollow(false); if (ev["xaxis.autorange"]) setFollow(true); });
+  };
+  Plotly.newPlot(id, [], baseLayout(""), plotCfg).then(hook);
+}
+
+// ---- stream --------------------------------------------------------------------------------------------------
+let frame = null, drawn = null;
+function merge(msg) {
+  for (const k of BK) {
+    const b = B[k], s = msg.boards[k];
+    if (!s) continue;
+    b.snap = s;
+    for (const name of SERIES) {
+      const items = s.series[name].items;
+      if (!items.length) continue;
+      const arr = b.data[name]; arr.push(...items);
+      if (arr.length > KEEP[name]) arr.splice(0, arr.length - KEEP[name]);
+      plotsDirty = true;
+    }
+  }
+}
+function connect() {
+  const es = new EventSource("/events");
+  es.onopen = () => { for (const k of BK) { for (const s of SERIES) B[k].data[s] = []; B[k].lastLog = 0; B[k].term.textContent = ""; } };
+  es.onmessage = (e) => { frame = JSON.parse(e.data); merge(frame); };
+  es.addEventListener("log", (e) => { const m = JSON.parse(e.data); addLogs(m.board, m.rows); });
+  es.onerror = () => { $("status").innerHTML = "<span>Server not reachable, retrying…</span>"; };
+}
+function tick() {
+  try {
+    if (frame && frame !== drawn) { drawn = frame; for (const k of BK) if (B[k].snap) updateBoard(B[k]); updateHeader(); }
+    const now = performance.now();
+    if (frame && (plotsDirty || (following && now - lastPlot > 1500)) && now - lastPlot > 500) { lastPlot = now; plotsDirty = false; drawPlots(); drawTests(); }
+  } catch (e) { console.error(e); document.title = "Node dashboard: " + e.message; }
+  requestAnimationFrame(tick);
+}
+applyTheme(); applyTermFilters(); connect(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>
