@@ -191,7 +191,7 @@ struct Peer {
 impl Peer {
     fn timeout_us(&self, cfg: &NodeConfig) -> u64 {
         let period_us = self.period_us.map_or(units::ms_to_us(cfg.data_period_ms), u64::from);
-        period_us * u64::from(cfg.link_timeout_periods)
+        period_us * u64::from(cfg.link_timeout)
     }
 
     fn link_up(&self, cfg: &NodeConfig) -> bool {
@@ -507,10 +507,10 @@ impl Node {
             if !batch.is_empty() {
                 term::trace_batch(&batch, self.cfg.trace, self.cfg.trace_view, usize::from(self.cfg.trace_bytes));
             }
-            // The dashboard, a few times a second, when the console has room for it.
-            if self.cfg.trace_dash != TraceDash::Off && trace::dash_due() && console::free() >= console::REPLY_ROOM {
-                term::dash_update(self.cfg.trace_dash, self.cfg.trace_dash_view, &trace::snapshot(), net::link_state());
-            }
+        }
+        // The dashboard, a few times a second, when the console has room for it: on its own, trace on or off.
+        if self.cfg.trace_dash != TraceDash::Off && trace::dash_due() && console::free() >= console::REPLY_ROOM {
+            term::dash_update(self.cfg.trace_dash, self.cfg.trace_dash_view, &trace::snapshot(), net::link_state());
         }
         let dropped = trace::take_dropped();
         if dropped > 0 && self.cfg.trace != Trace::Off {
@@ -987,7 +987,7 @@ impl Node {
         trace::set_dash(self.cfg.trace_window_s, self.cfg.trace_dash.columns(self.cfg.trace_dash_view));
         trace::set_level(self.cfg.trace);
         term::set_short_ip(self.cfg.trace_short_ip);
-        if self.cfg.trace == config::Trace::Off || self.cfg.trace_dash == config::TraceDash::Off {
+        if self.cfg.trace_dash == config::TraceDash::Off {
             term::dash_clear();
         }
     }
@@ -1011,7 +1011,11 @@ impl Node {
                     return;
                 }
                 self.sync();
-                term::cli_ok(format_args!("{} = {}", k.name(), self.cfg.value(k)));
+                // A view or a window chosen while the dashboard is off: say why nothing appears.
+                let off =
+                    matches!(k, Key::TraceDashView | Key::TraceWindow) && self.cfg.trace_dash == config::TraceDash::Off;
+                let note = if off { "  (the dashboard is off: `dash normal` shows it)" } else { "" };
+                term::cli_ok(format_args!("{} = {}{note}", k.name(), self.cfg.value(k)));
                 if k == Key::RgbPattern {
                     term::cli_status(&self.fx.settings, self.fx.last, &self.leds);
                 }

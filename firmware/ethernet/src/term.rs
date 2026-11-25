@@ -42,7 +42,7 @@ static VERBOSITY: AtomicU8 = AtomicU8::new(0);
 /// The live line: the last frame event, redrawn in place just above the prompt (verbosity 1).
 static LIVE: Mutex<RefCell<Option<heapless::String<512>>>> = Mutex::new(RefCell::new(None));
 /// The traffic dashboard: up to four rows between the live line and the prompt, redrawn in place with them.
-static DASH: Mutex<RefCell<heapless::Vec<heapless::String<400>, { config::DASH_MAX_ROWS }>>> =
+static DASH: Mutex<RefCell<heapless::Vec<heapless::String<512>, { config::DASH_MAX_ROWS }>>> =
     Mutex::new(RefCell::new(heapless::Vec::new()));
 
 /// Prints formatted text on the serial console (the prompt and the live line are serial only).
@@ -453,7 +453,7 @@ pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo, sys: &SystemInfo) {
         ),
     );
     card_row("status", format_args!("stats line every {}", Period(cfg.status_period_ms)));
-    card_row("timeout", format_args!("link DOWN after {} peer periods", cfg.link_timeout_periods));
+    card_row("timeout", format_args!("link DOWN after {} peer periods", cfg.link_timeout));
     card_row("button", format_args!("jumper GPIO{} + BOOT GPIO61 · IRQ on both edges", p.button));
     card_row("filter", format_args!("{} ms debounce · {} ms lockout", cfg.debounce_ms, cfg.lockout_ms));
 
@@ -1740,13 +1740,6 @@ pub fn trace_frame(c: &crate::trace::Captured, level: Trace, view: TraceView, du
 /// Columns of the widest graph, for the buffers that hold one.
 const MAX_BARS: usize = workshop_core::traffic::MAX_COLUMNS;
 
-/// Draws a row of bars for `values`, scaled so `max` is a full bar. A bar is 3 bytes of UTF-8: `N` is 3 per column.
-fn bars<const N: usize>(values: impl Iterator<Item = u32>, max: u32) -> heapless::String<N> {
-    let mut s = heapless::String::new();
-    let _ = workshop_core::traffic::spark(values, max, &mut s);
-    s
-}
-
 /// A rate given in bytes per second, shown in bits per second: `1.20 Mbit/s`, `845.3 kbit/s`.
 struct BitRate(u64);
 
@@ -1851,18 +1844,21 @@ fn side(snap: &crate::trace::Snapshot, tx: bool, capacity: u64) -> Side {
 
 /// Redraws the traffic dashboard above the prompt. Three views, each in three sizes:
 ///
-/// - `bars`: a small bar graph per direction, with rate, frames per second, peak and link use;
-/// - `chart`: the same data as taller plots with a bit-rate axis and a time axis, and beside them what a network
-///   engineer reads: rate, packets per second, average frame size, peak, and the use of the link;
+/// - `bars`: a plot of vertical bars per direction (`▁` to `█`, one column per slice of the window), each scaled
+///   to its own peak, with a bit-rate scale, a time axis, and the rate, packets per second, average frame size,
+///   peak and link use beside it;
+/// - `chart`: the classic network graph, receive and send as two lines on the same axes (one scale), with the same
+///   numbers beside it;
 /// - `mix`: the chart, and the protocols that went by ranked as horizontal bars on colored backgrounds.
 ///
 /// ```text
-///      rx   5.72 Mbit/s ┤                ▃████▃          │ now   1.20 Mbit/s    1000 pkt/s
-///                       ┤▁▁▁▁▁▁▁▁▁▁▃█████████▆▁▁▁▁▁▁▁▁▁   │ avg 150 B · peak 5.72 Mbit/s · 0.10%
-///      tx  154.9 kbit/s ┤                          ▃████  │ ...
-///                     0 ┤·········································
-///                       └-30s ─────────── -15s ────────── now
-///                   UDP │███████████████████████████ 94.2% 51230 frames
+///   ── network · chart · normal · 30s ──────────────────────────────────────────────────────────
+///               5.72 Mbit/s ┤          ╭──╮                │ ━ rx   5.72 Mbit/s   1000 pkt/s · avg 150 B
+///                           │          │  ╰╮               │ ━ tx  154.9 kbit/s    150 pkt/s · avg  90 B
+///               2.86 Mbit/s ┤         ╭╯   ╰╮              │ peak   5.72 Mbit/s  link rx 0.10% tx 0.01%
+///                           │         │     ╰╮             │
+///                         0 ┤─────────╯      ╰─────────────│
+///                           └-30s ─────────── -15s ────────── now
 /// ```
 pub fn dash_update(mode: config::TraceDash, view: config::DashView, snap: &crate::trace::Snapshot, phy: PhyLink) {
     use config::{DashView, TraceDash};
@@ -1875,9 +1871,9 @@ pub fn dash_update(mode: config::TraceDash, view: config::DashView, snap: &crate
     let (rx, tx) = (side(snap, false, capacity), side(snap, true, capacity));
     let window_s = snap.slice_us * snap.columns.len() as u64 / 1_000_000;
 
-    let mut rows: heapless::Vec<heapless::String<400>, { config::DASH_MAX_ROWS }> = heapless::Vec::new();
+    let mut rows: heapless::Vec<heapless::String<512>, { config::DASH_MAX_ROWS }> = heapless::Vec::new();
     let mut push = |text: &dyn core::fmt::Display| {
-        let mut r: heapless::String<400> = heapless::String::new();
+        let mut r: heapless::String<512> = heapless::String::new();
         let _ = write!(r, "{text}");
         let _ = rows.push(r);
     };
@@ -1887,10 +1883,10 @@ pub fn dash_update(mode: config::TraceDash, view: config::DashView, snap: &crate
     push(&Rule { title: &title, width: snap.columns.len() + 56 });
 
     match view {
-        DashView::Bars => bars_rows(mode, snap, &rx, &tx, window_s, phy, &mut push),
-        DashView::Chart => chart_rows(mode, snap, [&rx, &tx], window_s, &mut push),
+        DashView::Bars => bars_rows(mode, snap, [&rx, &tx], window_s, &mut push),
+        DashView::Chart => line_rows(mode, snap, [&rx, &tx], window_s, &mut push),
         DashView::Mix => {
-            chart_rows(mode, snap, [&rx, &tx], window_s, &mut push);
+            line_rows(mode, snap, [&rx, &tx], window_s, &mut push);
             mix_rows(mode, snap, &mut push);
         }
     }
@@ -1908,96 +1904,6 @@ pub fn dash_update(mode: config::TraceDash, view: config::DashView, snap: &crate
     });
     UNSCROLL.store(shrunk, Ordering::Relaxed);
     prompt_draw();
-}
-
-/// The `bars` view.
-fn bars_rows(
-    mode: config::TraceDash,
-    snap: &crate::trace::Snapshot,
-    rx: &Side,
-    tx: &Side,
-    window_s: u64,
-    phy: PhyLink,
-    push: &mut dyn FnMut(&dyn core::fmt::Display),
-) {
-    use config::TraceDash;
-    use core::fmt::Write as _;
-    // Each graph is scaled to its own peak (printed beside it): a quiet direction still shows its shape.
-    let graph = |s: &Side| {
-        bars::<{ 3 * MAX_BARS }>(snap.columns.iter().map(|c| if s.tx { c.tx.bytes } else { c.rx.bytes }), s.max)
-    };
-    // One direction's row: label, graph, rate, frames per second, peak, link use.
-    struct Row<'a> {
-        s: &'a Side,
-        label: heapless::String<12>,
-        graph: heapless::String<{ 3 * MAX_BARS }>,
-    }
-    impl core::fmt::Display for Row<'_> {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            let s = self.s;
-            write!(
-                f,
-                "{p}{:<7}{RST}{SEP}│{RST} {p}{}{RST} {SEP}│{RST} {BOLD}{:>12}{RST} {SEP}│{RST} {:>6} {DIM}pkt/s{RST} {SEP}│{RST} {DIM}peak{RST} {:>12} {SEP}│{RST} {DIM}{:>6}{RST}",
-                self.label,
-                self.graph,
-                &*rate_cell(s.rate),
-                s.fps,
-                &*rate_cell(s.peak),
-                s.used,
-                p = s.paint
-            )
-        }
-    }
-    let win = span_text(window_s);
-    fn row<'a>(s: &'a Side, label: &str, graph: heapless::String<{ 3 * MAX_BARS }>) -> Row<'a> {
-        Row { s, label: cell(label), graph }
-    }
-    match mode {
-        TraceDash::Off => {}
-        TraceDash::Mini => {
-            let small = |s: &Side| graph(s);
-            push(&format_args!(
-                "{DIM}net {win:<4}{RST}{SEP}│{RST} {RX}rx{RST} {RX}{}{RST} {BOLD}{:>12}{RST} {SEP}│{RST} {TX}tx{RST} {TX}{}{RST} {BOLD}{:>12}{RST}",
-                small(rx),
-                &*rate_cell(rx.rate),
-                small(tx),
-                &*rate_cell(tx.rate)
-            ));
-        }
-        TraceDash::Normal => {
-            let mut l: heapless::String<12> = heapless::String::new();
-            let _ = write!(l, "rx {win}");
-            push(&row(rx, &l, graph(rx)));
-            push(&row(tx, "tx", graph(tx)));
-        }
-        TraceDash::Full => {
-            let link: heapless::String<24> = if phy.up {
-                cell(format_args!(
-                    "{} {}",
-                    Speed(phy.mbps),
-                    if phy.full_duplex { "full duplex" } else { "half duplex" }
-                ))
-            } else {
-                cell("no link")
-            };
-            let ms = snap.slice_us / 1000;
-            push(&format_args!(
-                "{DIM}net{RST}    {SEP}│{RST} {DIM}window {window_s} s · {ms} ms a column · each graph scaled to its own peak · link {}{RST}",
-                &*link
-            ));
-            push(&row(rx, "rx", graph(rx)));
-            push(&row(tx, "tx", graph(tx)));
-            let t = snap.totals;
-            push(&format_args!(
-                "{DIM}total{RST}  {SEP}│{RST} {RX}rx{RST} {} frames {} {SEP}│{RST} {TX}tx{RST} {} frames {} {SEP}│{RST} {DIM}trace dropped {}{RST}",
-                t.rx_frames,
-                Bytes(t.rx_bytes),
-                t.tx_frames,
-                Bytes(t.tx_bytes),
-                snap.dropped
-            ));
-        }
-    }
 }
 
 /// What goes beside a plot row: the numbers a network engineer reads, spread over the rows the size allows.
@@ -2021,9 +1927,10 @@ fn chart_note(s: &Side, h: usize, idx: usize) -> heapless::String<128> {
     out
 }
 
-/// The `chart` view: both directions as plots `h` rows tall, a bit-rate scale on the left, notes on the right
-/// and a time axis under them.
-fn chart_rows(
+/// The `bars` view: each direction as a plot of vertical bars `h` rows tall (`▁` to `█`, a column of the plot per
+/// slice of the window, scaled to the direction's own peak), a bit-rate scale on the left, notes on the right and a
+/// time axis under them. A slice without traffic is left empty.
+fn bars_rows(
     mode: config::TraceDash,
     snap: &crate::trace::Snapshot,
     sides: [&Side; 2],
@@ -2031,7 +1938,6 @@ fn chart_rows(
     push: &mut dyn FnMut(&dyn core::fmt::Display),
 ) {
     use config::TraceDash;
-    use core::fmt::Write as _;
     use workshop_core::traffic::plot_cell;
     let h = match mode {
         TraceDash::Off => return,
@@ -2062,7 +1968,14 @@ fn chart_rows(
         }
     }
     if mode != TraceDash::Mini {
-        // `-30s ───── -15s ───── now`, as wide as the plots.
+        time_axis(cols, window_s, push);
+    }
+}
+
+/// `-30s ───── -15s ───── now`, as wide as the plots, under a plot with a scale on its left.
+fn time_axis(cols: usize, window_s: u64, push: &mut dyn FnMut(&dyn core::fmt::Display)) {
+    use core::fmt::Write as _;
+    {
         let mut axis: heapless::String<{ 3 * MAX_BARS + 24 }> = heapless::String::new();
         let (left, mid) = (span_text(window_s), span_text(window_s / 2));
         let _ = write!(axis, "-{left} ");
@@ -2081,6 +1994,126 @@ fn chart_rows(
         let _ = axis.push_str(" now");
         push(&format_args!("{:<15} {SEP}└{RST}{DIM}{axis}{RST}", ""));
     }
+}
+
+/// The `chart` view: the classic network graph. Receive and send as two lines on the same axes (one scale for
+/// both, so they can be compared), `h` rows tall: bit rate on the left, time under it, what a network engineer
+/// reads beside it. Each column is one slice of the window; a line is drawn from the middle of a slice to the middle
+/// of the next one with `─ │ ╭ ╮ ╯ ╰`. Where both lines meet in a cell, send is drawn.
+fn line_rows(
+    mode: config::TraceDash,
+    snap: &crate::trace::Snapshot,
+    sides: [&Side; 2],
+    window_s: u64,
+    push: &mut dyn FnMut(&dyn core::fmt::Display),
+) {
+    use config::TraceDash;
+    let h = match mode {
+        TraceDash::Off => return,
+        TraceDash::Mini => 3,
+        TraceDash::Normal => 5,
+        TraceDash::Full => 6,
+    };
+    let cols = snap.columns.len();
+    let [rx, tx] = sides;
+    // One scale for both lines: the busiest slice of either direction.
+    let max = rx.max.max(tx.max);
+    let scale = |s: &Side| {
+        let mut levels = [0u8; workshop_core::traffic::MAX_COLUMNS];
+        for (level, c) in levels.iter_mut().zip(snap.columns.iter()) {
+            *level = workshop_core::traffic::line_level(if s.tx { c.tx.bytes } else { c.rx.bytes }, max, h);
+        }
+        levels
+    };
+    let (rx_levels, tx_levels) = (scale(rx), scale(tx));
+    let full = rate_cell(snap.per_second_of_slice(max));
+    let half = rate_cell(snap.per_second_of_slice(max / 2));
+    for row in (0..h).rev() {
+        let (label, joint): (&str, &str) = match row {
+            r if r == h - 1 => (&full, "┤"),
+            0 => ("0", "┤"),
+            r if h >= 5 && r == h / 2 => (&half, "┤"),
+            _ => ("", "│"),
+        };
+        let curve = Curve { rx: &rx_levels[..cols], tx: &tx_levels[..cols], row: row as u8 };
+        let note = match h - 1 - row {
+            0 => line_note(rx),
+            1 => line_note(tx),
+            2 => {
+                let mut n: heapless::String<96> = heapless::String::new();
+                let _ = core::fmt::Write::write_fmt(
+                    &mut n,
+                    format_args!(
+                        "{DIM}peak{RST} {:>12} {DIM}link rx {} tx {}{RST}",
+                        &*rate_cell(rx.peak.max(tx.peak)),
+                        rx.used,
+                        tx.used
+                    ),
+                );
+                n
+            }
+            _ => heapless::String::new(),
+        };
+        push(&format_args!("{:<3}{DIM}{label:>12}{RST} {SEP}{joint}{RST}{curve} {SEP}│{RST} {note}", ""));
+    }
+    if mode != TraceDash::Mini {
+        time_axis(cols, window_s, push);
+    }
+}
+
+/// One row of the two lines of the `chart` view, as it is drawn: a color is set when the line changes, and not
+/// more than [`Curve::SWITCHES`] times, which bounds the row.
+struct Curve<'a> {
+    rx: &'a [u8],
+    tx: &'a [u8],
+    row: u8,
+}
+
+impl Curve<'_> {
+    /// Most color changes in a row (the rest of it keeps the last color).
+    const SWITCHES: usize = 8;
+}
+
+impl core::fmt::Display for Curve<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let (mut shown, mut switches) = (None::<bool>, 0);
+        for x in 0..self.rx.len() {
+            // The last slice has no next one: its line goes straight on.
+            let next = |levels: &[u8]| levels.get(x + 1).copied().unwrap_or(levels[x]);
+            let rx = workshop_core::traffic::line_glyph(self.rx[x], next(self.rx), self.row);
+            let tx = workshop_core::traffic::line_glyph(self.tx[x], next(self.tx), self.row);
+            let (glyph, is_tx) = match (rx, tx) {
+                (_, Some(c)) => (c, true),
+                (Some(c), None) => (c, false),
+                (None, None) => {
+                    f.write_str(" ")?;
+                    continue;
+                }
+            };
+            if shown != Some(is_tx) && switches < Self::SWITCHES {
+                write!(f, "{}", if is_tx { TX } else { RX })?;
+                shown = Some(is_tx);
+                switches += 1;
+            }
+            write!(f, "{glyph}")?;
+        }
+        if shown.is_some() { f.write_str(RST) } else { Ok(()) }
+    }
+}
+
+/// `━ rx    1.20 Mbit/s   1000 pkt/s  avg 150 B`: the legend of a line and its numbers now.
+fn line_note(s: &Side) -> heapless::String<96> {
+    let avg: heapless::String<12> = match s.avg {
+        Some(n) => cell(format_args!("{n} B")),
+        None => cell("-"),
+    };
+    cell(format_args!(
+        "{p}━ {}{RST} {BOLD}{:>12}{RST} {:>6} {DIM}pkt/s · avg{RST} {avg:>6}",
+        s.name,
+        &*rate_cell(s.rate),
+        s.fps,
+        p = s.paint
+    ))
 }
 
 /// The background color of a protocol's bar.

@@ -29,7 +29,7 @@ status_period_ms = 10000
 
 # The peer counts as gone ("link DOWN") after this many of *its* data periods without a valid
 # frame. Range: 2-100.
-link_timeout_periods = 3
+link_timeout = 3
 
 # ---------------------------------------------------------------------------------------------
 # Jumper button (and BOOT): a change is accepted once the line has been quiet for `debounce_ms`,
@@ -82,7 +82,7 @@ console = "auto"
 trace = "off"
 trace_bytes = 32
 trace_view = "layers"
-trace_dash = "normal"
+trace_dash = "off"
 trace_dash_view = "bars"
 trace_window_s = 30
 trace_short_ip = false

@@ -184,7 +184,7 @@ struct Peer {
 impl Peer {
     fn timeout_us(&self, cfg: &NodeConfig) -> u64 {
         let period_us = self.period_us.map_or(units::ms_to_us(cfg.data_period_ms), u64::from);
-        period_us * u64::from(cfg.link_timeout_periods)
+        period_us * u64::from(cfg.link_timeout)
     }
 
     fn link_up(&self, cfg: &NodeConfig) -> bool {

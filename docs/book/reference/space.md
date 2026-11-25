@@ -58,7 +58,7 @@ What every node has. Ids below 100 are fixed; `/config` has one variable per run
 | `/config` | 17 | object |  | read | the runtime settings: one text variable each, as `set` takes them |
 | `/config/data_period_ms` | 100 | variable | text | read-write | period of the DAT frame sent to the peer (tx_mode periodic) |
 | `/config/status_period_ms` | 101 | variable | text | read-write | period of the stats line in the console |
-| `/config/link_timeout_periods` | 102 | variable | text | read-write | link DOWN after this many peer periods without a frame |
+| `/config/link_timeout` | 102 | variable | text | read-write | link DOWN after this many peer periods without a frame |
 | `/config/debounce_ms` | 103 | variable | text | read-write | button: line must be stable this long before an edge counts, ms |
 | `/config/lockout_ms` | 104 | variable | text | read-write | button: changes ignored this long after an accepted edge, ms |
 | `/config/rgb.pattern` | 105 | variable | text | read-write | RGB LED fade pattern |
@@ -75,7 +75,7 @@ What every node has. Ids below 100 are fixed; `/config` has one variable per run
 | `/config/trace` | 116 | variable | text | read-write | network trace (Ethernet firmware): control frames, or every frame decoded layer by layer |
 | `/config/trace_bytes` | 117 | variable | text | read-write | network trace: raw bytes of each frame shown as a hex dump |
 | `/config/trace_view` | 118 | variable | text | read-write | network trace: how a frame is laid out, on one line, layer by layer, or the node's frame first |
-| `/config/trace_dash` | 119 | variable | text | read-write | network trace: the traffic dashboard above the prompt (bar graphs of what is sent and received) |
-| `/config/trace_dash_view` | 120 | variable | text | read-write | network trace: what the dashboard draws (small bars, a time-series chart, the chart and the protocol ranking) |
-| `/config/trace_window_s` | 121 | variable | text | read-write | network trace: time the dashboard's graphs cover |
+| `/config/trace_dash` | 119 | variable | text | read-write | the traffic dashboard above the prompt (graphs of what is sent and received), with or without the trace |
+| `/config/trace_dash_view` | 120 | variable | text | read-write | what the dashboard draws (bars per direction, a line chart of the bit rate, the chart and the protocol ranking) |
+| `/config/trace_window_s` | 121 | variable | text | read-write | time the dashboard's graphs cover |
 | `/config/trace_short_ip` | 122 | variable | text | read-write | network trace, compact view: write this subnet's addresses short (.12) |

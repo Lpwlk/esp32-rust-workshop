@@ -10,10 +10,12 @@
 //!                    ▼  main loop: poll_trace() decodes (workshop_core::dissect) and prints (term)
 //! ```
 //!
-//! The tap also counts every frame into per-slice totals ([`snapshot`]) for the dashboard's bar graphs.
+//! The tap also counts every frame into per-slice totals ([`snapshot`]) for the dashboard's bar graphs. The
+//! dashboard (`dash`) and the trace (`trace`) are independent: the dashboard counts while it is shown, whatever
+//! the trace level, and the trace keeps frames while it is on, whatever the dashboard.
 //!
 //! The tap runs in the network task, in the path of every packet, so it does as little as it can:
-//! with `trace off` it is one atomic load. It decodes nothing for printing: the main loop owns the console,
+//! with `trace off` and no dashboard it is two atomic loads. It decodes nothing for printing: the main loop owns the console,
 //! and formatting a frame takes longer than the frame does on the wire. With `trace events` it does decode
 //! enough to keep only the control frames, so the queue isn't filled with the data it would throw away.
 
@@ -52,7 +54,7 @@ static DROPPED: AtomicU32 = AtomicU32::new(0);
 static DROPPED_TOTAL: AtomicU32 = AtomicU32::new(0);
 
 /// What crossed the port, per slice of time, for the dashboard's graphs. Counted for every frame while the
-/// trace is on, whatever the level keeps (a graph of only the control frames would say nothing).
+/// dashboard is on, whatever the trace level keeps (a graph of only the control frames would say nothing).
 static TRAFFIC: Mutex<RefCell<Traffic>> = Mutex::new(RefCell::new(Traffic::new()));
 /// The window and columns of [`TRAFFIC`], to restart it only when they change.
 static WINDOW_S: AtomicU32 = AtomicU32::new(0);
@@ -64,14 +66,12 @@ static LAST_DASH_US: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
 /// How often the dashboard is looked at, µs (it is only redrawn if a row changed).
 const DASH_EVERY_US: u64 = 500_000;
 
-/// Sets what the tap keeps (the `trace` setting). Switching off empties the queue; switching on starts the
-/// graphs over.
+/// Sets what the tap keeps (the `trace` setting). Switching off empties the queue. The graphs are not touched:
+/// they belong to the dashboard ([`set_dash`]).
 pub fn set_level(level: Trace) {
-    let before = LEVEL.swap(level as u8, Ordering::Relaxed);
+    LEVEL.store(level as u8, Ordering::Relaxed);
     if level == Trace::Off {
         while QUEUE.try_receive().is_ok() {}
-    } else if before == Trace::Off as u8 {
-        restart_traffic();
     }
 }
 
@@ -164,17 +164,22 @@ fn level() -> Trace {
 }
 
 /// Called by the driver for every frame that crosses it (`tx`: leaving), with the frame as the MAC
-/// sees it. Keeps a copy of the start of it when the trace wants it.
+/// sees it. Counts it for the dashboard when that is shown, and keeps a copy of the start of it when the trace
+/// wants it: each works without the other.
 #[inline]
 pub fn tap(tx: bool, frame: &[u8]) {
     let level = level();
-    if level == Trace::Off {
+    let dash = DASH_ON.load(Ordering::Relaxed) != 0;
+    if level == Trace::Off && !dash {
         return;
     }
     let now = crate::link::now_us();
-    if DASH_ON.load(Ordering::Relaxed) != 0 {
+    if dash {
         let class = classify(frame);
         critical_section::with(|cs| TRAFFIC.borrow_ref_mut(cs).record(now, tx, frame.len(), class));
+    }
+    if level == Trace::Off {
+        return;
     }
     let kept = &frame[..frame.len().min(usize::from(TRACE_BYTES_MAX))];
     if level == Trace::Events && !dissect::dissect(kept, frame.len()).is_ok_and(|p| p.is_control() || p.is_damaged()) {

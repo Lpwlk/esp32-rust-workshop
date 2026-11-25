@@ -186,7 +186,7 @@ led 2 blink 2.5Hz
 |---|---|---|
 | `link` | `net`, `lk` | the Ethernet link: cable, speed, addresses, transport, counters |
 | `trace [0|1|2|off|events|frames|compact|layers|inside-out]` | `t`, `tr` | decode the network frames on the port (= set trace, or trace_view) |
-| `dash [bars|chart|mix | off|mini|normal|full]` | `ds` | the traffic dashboard under the trace (= set trace_dash[_view]) |
+| `dash [bars|chart|mix | off|mini|normal|full]` | `ds` | the traffic dashboard above the prompt (= set trace_dash[_view]) |
 | `gen [start|stop|pause|resume|rate|size|shape|for|count] ...` | `g` | traffic generator: UDP datagrams to the peer, finely controlled |
 | `window <2-3600 seconds>` | `win` | the time the dashboard's graphs cover (= set trace_window_s) |
 | `dump <0-256>` | `d` | raw bytes of each traced frame as a hex dump (= set trace_bytes) |
@@ -211,7 +211,7 @@ link
 ### `trace`
 
 ```text
-0 off     nothing (the driver doesn't even copy the frames)
+0 off     nothing (the driver copies no frame; `dash` still counts them)
 1 events  one line per control frame: ARP, ICMP, TCP SYN/FIN/RST, the undecodable
 2 frames  every frame decoded, checksums checked, and `dump` bytes as a hex dump
 `trace` alone goes to the next level (frames goes back to off).
@@ -236,10 +236,12 @@ t 0
 
 ```text
 Graphs of what is received and sent, at the bottom of the console above the
-prompt, redrawn in place. Shown while `trace` is on. A view, and a size:
-bars   a small bar graph per direction, with its rate (default)
-chart  the traffic as a time series: bit rate over the window with a time axis,
-       and beside it frames per second, average frame size, peak, link use
+prompt, redrawn in place. It counts the frames itself, with `trace` on or off.
+Off at boot: `dash normal` shows it. A view, and a size:
+bars   vertical bars per direction (▁ to █, a column per slice of time), with a
+       scale, a time axis and its rate (default)
+chart  the classic network graph: rx and tx as two lines on the same axes, bit rate
+       over the window, with a time axis, packets per second, peak, link use
 mix    the chart, and under it the protocols that went by as horizontal bars
 off | mini | normal | full   how many lines (0 off, 1 mini, 2 normal, 3 full)
 `dash` alone goes to the next view; `dash next` to the next size.

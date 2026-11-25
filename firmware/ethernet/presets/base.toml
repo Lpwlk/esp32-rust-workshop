@@ -29,7 +29,7 @@ status_period_ms = 10000
 
 # The peer counts as gone ("link DOWN") after this many of *its* data periods without a valid
 # frame. Range: 2-100.
-link_timeout_periods = 3
+link_timeout = 3
 
 # ---------------------------------------------------------------------------------------------
 # Jumper button (and BOOT): a change is accepted once the line has been quiet for `debounce_ms`,
@@ -98,17 +98,19 @@ trace_bytes = 32
 trace_view = "layers"
 
 # The traffic dashboard: bar graphs of what is received and sent, at the bottom of the console above the prompt,
-# redrawn in place while `trace` is on (and `dash` in the CLI: `dash` alone goes to the next size):
-#   "off" (0)      not shown
+# redrawn in place, with the trace on or off: it counts the frames itself (and `dash` in the CLI: `dash` alone goes
+# to the next view, `dash normal` shows it):
+#   "off" (0)      not shown (the default)
 #   "mini" (1)     the fewest lines
 #   "normal" (2)   a few more
-#   "full" (3)     the most; how many lines depends on the view below (bars 2/3/5, chart 3/6/8, mix 4/9/14, the first of them a thin rule above the graphs)
-trace_dash = "normal"
+#   "full" (3)     the most; how many lines depends on the view below (bars 3/6/8, chart 4/7/8, mix 5/10/14, the first of them a thin rule above the graphs)
+trace_dash = "off"
 
 # What the dashboard draws (and `dash bars|chart|mix` in the CLI: `dash` alone goes to the next view):
-#   "bars"    a small bar graph per direction, with its rate
-#   "chart"   the traffic as a time series: bit rate over the window with a time axis, and beside it frames
-#             per second, the average frame size, the peak and the use of the link
+#   "bars"    vertical bars per direction (one column per slice of the window), with a bit-rate scale, a time
+#             axis, and beside them the rate, packets per second, average frame size, peak and link use
+#   "chart"   the classic network graph: receive and send as two lines on the same axes (one scale), bit rate
+#             over the window with a time axis, and the same numbers beside it
 #   "mix"     the chart, and under it the protocols that went by ranked as horizontal bars on colored
 #             backgrounds (the `mix_*` colors below)
 trace_dash_view = "bars"

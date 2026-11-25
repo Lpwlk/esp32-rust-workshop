@@ -343,7 +343,7 @@ pub fn boot_card(cfg: &NodeConfig, chip: &ChipInfo, sys: &SystemInfo) {
         ),
     );
     card_row("status", format_args!("stats line every {}", Period(cfg.status_period_ms)));
-    card_row("timeout", format_args!("link DOWN after {} peer periods", cfg.link_timeout_periods));
+    card_row("timeout", format_args!("link DOWN after {} peer periods", cfg.link_timeout));
     card_row("button", format_args!("jumper GPIO{} + BOOT GPIO61 · IRQ on both edges", p.button));
     card_row("filter", format_args!("{} ms debounce · {} ms lockout", cfg.debounce_ms, cfg.lockout_ms));
 

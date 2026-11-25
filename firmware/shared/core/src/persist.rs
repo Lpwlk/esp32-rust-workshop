@@ -200,7 +200,7 @@ mod tests {
         for (k, v) in [
             ("data_period_ms", "3333.333"),
             ("status_period_ms", "3333.333"),
-            ("link_timeout_periods", "99"),
+            ("link_timeout", "99"),
             ("debounce_ms", "999"),
             ("lockout_ms", "4999"),
             ("rgb.pattern", "sakura"),

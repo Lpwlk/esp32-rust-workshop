@@ -348,17 +348,18 @@ impl fmt::Display for TraceView {
     }
 }
 
-/// The traffic dashboard under the network trace: `trace_dash` in the CLI (`dash`), presets and saved settings.
-/// It is a few lines at the bottom of the console, above the prompt, redrawn in place like the live line.
+/// The traffic dashboard: `trace_dash` in the CLI (`dash`), presets and saved settings. It is a few lines at the
+/// bottom of the console, above the prompt, redrawn in place like the live line. It works on its own: the network
+/// trace (`trace`) may be on or off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TraceDash {
     /// Not shown.
     Off,
-    /// One line: receive and send as two short bar graphs, with their rates.
+    /// The fewest lines: a short graph (a few rows tall, 24 columns) and its numbers.
     Mini,
-    /// Two lines: a bar graph each for receive and send, with rate, frames per second, peak and link use.
+    /// A taller graph (40 columns) with a time axis.
     Normal,
-    /// Four lines: a header with the scale, both graphs, and the totals.
+    /// The tallest graph (60 columns), with a time axis; the protocol ranking of `mix` lists every class.
     Full,
 }
 
@@ -366,10 +367,12 @@ pub enum TraceDash {
 /// saved settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DashView {
-    /// A small bar graph per direction: the shape of the traffic over the window, and its rate.
+    /// Receive and send as plots of vertical bars (`▁` to `█`, one column per slice of the window), each scaled to
+    /// its own peak, with a bit-rate scale, a time axis and, beside them, the rate, frames per second, the average
+    /// frame size, the peak and the use of the link.
     Bars,
-    /// The traffic as a time series: bit rate over the window, taller plots with a time axis, and beside them
-    /// frames per second, the average frame size, the peak and the use of the link.
+    /// The classic network graph: receive and send as two lines on the same axes, one scale for both, bit rate over
+    /// the window, with a time axis and the same numbers beside it.
     Chart,
     /// The chart, and under it the protocols that went by ranked as horizontal bars on colored backgrounds.
     Mix,
@@ -433,14 +436,14 @@ impl TraceDash {
     pub const fn rows(self, view: DashView) -> usize {
         match (view, self) {
             (_, TraceDash::Off) => 0,
-            (DashView::Bars, TraceDash::Mini) => 1 + 1,
-            (DashView::Bars, TraceDash::Normal) => 2 + 1,
-            (DashView::Bars, TraceDash::Full) => 4 + 1,
-            (DashView::Chart, TraceDash::Mini) => 2 + 1,
-            (DashView::Chart, TraceDash::Normal) => 5 + 1,
+            (DashView::Bars, TraceDash::Mini) => 2 + 1,
+            (DashView::Bars, TraceDash::Normal) => 5 + 1,
+            (DashView::Bars, TraceDash::Full) => 7 + 1,
+            (DashView::Chart, TraceDash::Mini) => 3 + 1,
+            (DashView::Chart, TraceDash::Normal) => 6 + 1,
             (DashView::Chart, TraceDash::Full) => 7 + 1,
-            (DashView::Mix, TraceDash::Mini) => 3 + 1,
-            (DashView::Mix, TraceDash::Normal) => 8 + 1,
+            (DashView::Mix, TraceDash::Mini) => 4 + 1,
+            (DashView::Mix, TraceDash::Normal) => 9 + 1,
             (DashView::Mix, TraceDash::Full) => 13 + 1,
         }
     }
@@ -449,7 +452,6 @@ impl TraceDash {
     pub const fn columns(self, view: DashView) -> usize {
         match (view, self) {
             (_, TraceDash::Off) => 0,
-            (DashView::Bars, TraceDash::Mini) => 12,
             (_, TraceDash::Mini) => 24,
             (_, TraceDash::Normal) => 40,
             (_, TraceDash::Full) => 60,
@@ -566,7 +568,7 @@ pub struct NodeConfig {
     /// Period of the stats line in the console, ms.
     pub status_period_ms: f32,
     /// The link is DOWN after this many *peer* data periods without a valid frame.
-    pub link_timeout_periods: u32,
+    pub link_timeout: u32,
     /// Button: line must be stable this long before an edge is accepted, ms.
     pub debounce_ms: u32,
     /// Button: changes ignored this long after an accepted edge, ms.
@@ -591,7 +593,7 @@ pub struct NodeConfig {
     pub trace_bytes: u16,
     /// How a traced frame is laid out.
     pub trace_view: TraceView,
-    /// The traffic dashboard shown while the trace is on.
+    /// The traffic dashboard, shown whatever the trace level. Off by default.
     pub trace_dash: TraceDash,
     /// What the dashboard draws.
     pub trace_dash_view: DashView,
@@ -611,7 +613,7 @@ impl NodeConfig {
         link: Link::Uart(UartLink { tx: 2, rx: 3 }),
         data_period_ms: 2500.0,
         status_period_ms: 10_000.0,
-        link_timeout_periods: 3,
+        link_timeout: 3,
         debounce_ms: 30,
         lockout_ms: 150,
         rgb: RgbConfig { pattern: "viridis", freq_hz: 50.0, cycle_ms: 6000.0, brightness: 40 },
@@ -624,7 +626,7 @@ impl NodeConfig {
         trace: Trace::Off,
         trace_bytes: 32,
         trace_view: TraceView::Layers,
-        trace_dash: TraceDash::Normal,
+        trace_dash: TraceDash::Off,
         trace_dash_view: DashView::Bars,
         trace_window_s: 30,
         trace_short_ip: false,
@@ -667,7 +669,7 @@ impl NodeConfig {
         // Periods and frequencies are f32: NaN fails every check below (see `ensure!`).
         ensure!(self.data_period_ms >= 10.0, "config: `data_period_ms` must be at least 10 ms (100 Hz)");
         ensure!(self.status_period_ms >= 100.0, "config: `status_period_ms` must be at least 100 ms");
-        ensure!(self.link_timeout_periods >= 2, "config: `link_timeout_periods` must be at least 2");
+        ensure!(self.link_timeout >= 2, "config: `link_timeout` must be at least 2");
         ensure!(self.debounce_ms >= 1 && self.debounce_ms <= 1000, "config: `debounce_ms` must be 1-1000");
         ensure!(self.lockout_ms <= 5000, "config: `lockout_ms` must be at most 5000");
 
@@ -683,7 +685,7 @@ impl NodeConfig {
         ensure!(self.rgb.brightness <= 100, "config: `rgb.brightness` must be 0-100");
         ensure!(self.data_period_ms <= 3_600_000.0, "config: `data_period_ms` must be at most 3600000 ms (1 h)");
         ensure!(self.status_period_ms <= 3_600_000.0, "config: `status_period_ms` must be at most 3600000 ms (1 h)");
-        ensure!(self.link_timeout_periods <= 100, "config: `link_timeout_periods` must be at most 100");
+        ensure!(self.link_timeout <= 100, "config: `link_timeout` must be at most 100");
         ensure!(
             self.burst.count >= BURST_COUNT_RANGE.0 && self.burst.count <= BURST_COUNT_RANGE.1,
             "config: `burst.count` must be 1-100000"
@@ -770,7 +772,7 @@ const fn check_led(mode: LedMode) -> Result<(), &'static str> {
 pub enum Key {
     DataPeriod,
     StatusPeriod,
-    LinkTimeoutPeriods,
+    LinkTimeout,
     Debounce,
     Lockout,
     RgbPattern,
@@ -797,7 +799,7 @@ pub enum Key {
 pub const KEYS: [(&str, Key); 23] = [
     ("data_period_ms", Key::DataPeriod),
     ("status_period_ms", Key::StatusPeriod),
-    ("link_timeout_periods", Key::LinkTimeoutPeriods),
+    ("link_timeout", Key::LinkTimeout),
     ("debounce_ms", Key::Debounce),
     ("lockout_ms", Key::Lockout),
     ("rgb.pattern", Key::RgbPattern),
@@ -871,7 +873,7 @@ impl Key {
                 ("period of the DAT frame sent to the peer (tx_mode periodic)", "10-3600000 ms, or a frequency: 2.5Hz")
             }
             Key::StatusPeriod => ("period of the stats line in the console", "100-3600000 ms, or a frequency"),
-            Key::LinkTimeoutPeriods => ("link DOWN after this many peer periods without a frame", "2-100"),
+            Key::LinkTimeout => ("link DOWN after this many peer periods without a frame", "2-100"),
             Key::Debounce => ("button: line must be stable this long before an edge counts, ms", "1-1000"),
             Key::Lockout => ("button: changes ignored this long after an accepted edge, ms", "0-5000"),
             Key::RgbPattern => ("RGB LED fade pattern", "name or number, see `list`"),
@@ -899,14 +901,14 @@ impl Key {
                 "compact, layers, inside-out",
             ),
             Key::TraceDash => (
-                "network trace: the traffic dashboard above the prompt (bar graphs of what is sent and received)",
+                "the traffic dashboard above the prompt (graphs of what is sent and received), with or without the trace",
                 "0 off, 1 mini, 2 normal, 3 full (or next)",
             ),
             Key::TraceDashView => (
-                "network trace: what the dashboard draws (small bars, a time-series chart, the chart and the protocol ranking)",
+                "what the dashboard draws (bars per direction, a line chart of the bit rate, the chart and the protocol ranking)",
                 "bars, chart, mix (or next)",
             ),
-            Key::TraceWindow => ("network trace: time the dashboard's graphs cover", "2-3600 s (30, 30s, 2min)"),
+            Key::TraceWindow => ("time the dashboard's graphs cover", "2-3600 s (30, 30s, 2min)"),
             Key::TraceShortIp => ("network trace, compact view: write this subnet's addresses short (.12)", "on, off"),
         }
     }
@@ -962,7 +964,7 @@ impl NodeConfig {
         match key {
             Key::DataPeriod => new.data_period_ms = period()?,
             Key::StatusPeriod => new.status_period_ms = period()?,
-            Key::LinkTimeoutPeriods => new.link_timeout_periods = number()?,
+            Key::LinkTimeout => new.link_timeout = number()?,
             Key::Debounce => new.debounce_ms = number()?,
             Key::Lockout => new.lockout_ms = number()?,
             Key::RgbPattern => {
@@ -1169,7 +1171,7 @@ impl NodeConfig {
         }
         writeln!(out, "    data_period_ms: {:?},", self.data_period_ms)?;
         writeln!(out, "    status_period_ms: {:?},", self.status_period_ms)?;
-        writeln!(out, "    link_timeout_periods: {},", self.link_timeout_periods)?;
+        writeln!(out, "    link_timeout: {},", self.link_timeout)?;
         writeln!(out, "    debounce_ms: {},", self.debounce_ms)?;
         writeln!(out, "    lockout_ms: {},", self.lockout_ms)?;
         writeln!(
@@ -1260,7 +1262,7 @@ impl NodeConfig {
         match key {
             Key::DataPeriod => write!(out, "{}", Num(self.data_period_ms)),
             Key::StatusPeriod => write!(out, "{}", Num(self.status_period_ms)),
-            Key::LinkTimeoutPeriods => write!(out, "{}", self.link_timeout_periods),
+            Key::LinkTimeout => write!(out, "{}", self.link_timeout),
             Key::Debounce => write!(out, "{}", self.debounce_ms),
             Key::Lockout => write!(out, "{}", self.lockout_ms),
             Key::RgbPattern => write!(out, "{}", self.rgb.pattern),
@@ -1339,7 +1341,7 @@ mod tests {
         let cases: [(&str, &str, &str, &[&str]); 9] = [
             ("data_period_ms", "10", "3600000", &["9.9", "3600000.5"]),
             ("status_period_ms", "100", "3600000", &["99.5", "3600001"]),
-            ("link_timeout_periods", "2", "100", &["1", "101"]),
+            ("link_timeout", "2", "100", &["1", "101"]),
             ("debounce_ms", "1", "1000", &["0", "1001"]),
             ("lockout_ms", "0", "5000", &["5001"]),
             ("rgb.freq_hz", "1", "200", &["0.9", "200.5"]),
@@ -1536,7 +1538,7 @@ mod tests {
     #[test]
     fn trace_dash_sizes_and_window() {
         let mut cfg = D;
-        assert_eq!((cfg.trace_dash, cfg.trace_window_s), (TraceDash::Normal, 30));
+        assert_eq!((cfg.trace_dash, cfg.trace_window_s), (TraceDash::Off, 30));
         for (text, size) in
             [("off", TraceDash::Off), ("1", TraceDash::Mini), ("normal", TraceDash::Normal), ("full", TraceDash::Full)]
         {
@@ -1597,7 +1599,7 @@ mod tests {
     #[test]
     fn dash_views_cycle_and_parse() {
         let mut cfg = D;
-        assert_eq!(cfg.trace_dash_view, DashView::Bars, "the original look is the default");
+        assert_eq!(cfg.trace_dash_view, DashView::Bars, "bars are the default");
         let mut seen = std::vec::Vec::new();
         for _ in 0..4 {
             assert!(cfg.set("trace_dash_view", "next").is_ok());
@@ -1718,7 +1720,7 @@ mod tests {
             let other = NodeConfig {
                 data_period_ms: 99.5,
                 status_period_ms: 999.0,
-                link_timeout_periods: 9,
+                link_timeout: 9,
                 debounce_ms: 9,
                 lockout_ms: 9,
                 verbose: Verbosity::Wire,

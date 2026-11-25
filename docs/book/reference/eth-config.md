@@ -11,7 +11,7 @@ Invalid values fail the build; at runtime `set` applies the same checks.
 |---|---|---|---|
 | `data_period_ms` | period of the DAT frame sent to the peer (tx_mode periodic) | 10-3600000 ms, or a frequency: 2.5Hz | `2500` |
 | `status_period_ms` | period of the stats line in the console | 100-3600000 ms, or a frequency | `10000` |
-| `link_timeout_periods` | link DOWN after this many peer periods without a frame | 2-100 | `3` |
+| `link_timeout` | link DOWN after this many peer periods without a frame | 2-100 | `3` |
 | `debounce_ms` | button: line must be stable this long before an edge counts, ms | 1-1000 | `30` |
 | `lockout_ms` | button: changes ignored this long after an accepted edge, ms | 0-5000 | `1000` |
 | `rgb.pattern` | RGB LED fade pattern | name or number, see `list` | `viridis` |
@@ -28,9 +28,9 @@ Invalid values fail the build; at runtime `set` applies the same checks.
 | `trace` | network trace (Ethernet firmware): control frames, or every frame decoded layer by layer | 0 off, 1 events, 2 frames (or next) | `off` |
 | `trace_bytes` | network trace: raw bytes of each frame shown as a hex dump | 0-256 (0 = no dump) | `32` |
 | `trace_view` | network trace: how a frame is laid out, on one line, layer by layer, or the node's frame first | compact, layers, inside-out | `layers` |
-| `trace_dash` | network trace: the traffic dashboard above the prompt (bar graphs of what is sent and received) | 0 off, 1 mini, 2 normal, 3 full (or next) | `normal` |
-| `trace_dash_view` | network trace: what the dashboard draws (small bars, a time-series chart, the chart and the protocol ranking) | bars, chart, mix (or next) | `bars` |
-| `trace_window_s` | network trace: time the dashboard's graphs cover | 2-3600 s (30, 30s, 2min) | `30` |
+| `trace_dash` | the traffic dashboard above the prompt (graphs of what is sent and received), with or without the trace | 0 off, 1 mini, 2 normal, 3 full (or next) | `off` |
+| `trace_dash_view` | what the dashboard draws (bars per direction, a line chart of the bit rate, the chart and the protocol ranking) | bars, chart, mix (or next) | `bars` |
+| `trace_window_s` | time the dashboard's graphs cover | 2-3600 s (30, 30s, 2min) | `30` |
 | `trace_short_ip` | network trace, compact view: write this subnet's addresses short (.12) | on, off | `off` |
 
 ## Fixed at build time

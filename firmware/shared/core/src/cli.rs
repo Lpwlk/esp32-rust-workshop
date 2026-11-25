@@ -68,28 +68,28 @@ pub enum Command {
     /// (default 1), see [`crate::space`].
     Browse {
         /// The branch, `/` when none was given.
-        path: Option<String<24>>,
+        path: Option<Path>,
         /// How many levels to list, 1 to [`crate::space::MAX_BROWSE_DEPTH`].
         depth: u8,
     },
     /// `read <path>`: reads one of the peer's variables.
-    Read(String<24>),
+    Read(Path),
     /// `write <path> <value>`: writes one of the peer's variables.
     Write {
         /// The variable, e.g. `/leds/1`.
-        path: String<24>,
+        path: Path,
         /// The new value, as text.
         value: String<24>,
     },
     /// `watch <path> [interval]`: the peer reports a variable whenever it changes.
     Watch {
         /// The variable.
-        path: String<24>,
+        path: Path,
         /// How often the peer checks it, ms.
         interval_ms: u32,
     },
     /// `unwatch [path]`: stops watching one variable, or all of them.
-    Unwatch(Option<String<24>>),
+    Unwatch(Option<Path>),
     /// `burst [count [rate]]`. Missing values: ask them ([`BurstWizard`]).
     Burst {
         /// Frames in the burst.
@@ -148,10 +148,15 @@ fn split_first(text: &str) -> (&str, &str) {
     }
 }
 
+/// Longest address space path a command takes (the longest `/config/<key>` is 24 characters: room to grow).
+pub const PATH_LEN: usize = 64;
+/// A path of the peer's address space, as typed.
+pub type Path = String<PATH_LEN>;
+
 /// Default sampling interval of `watch`, ms.
 pub const DEFAULT_WATCH_MS: u32 = 250;
 
-fn path_arg(path: &str) -> Result<String<24>, CliError<'_>> {
+fn path_arg(path: &str) -> Result<Path, CliError<'_>> {
     String::try_from(path).map_err(|_| CliError::TooLong)
 }
 
@@ -699,7 +704,7 @@ pub static COMMANDS: &[CmdHelp] = &[
         usage: "trace [0|1|2|off|events|frames|compact|layers|inside-out]",
         summary: "decode the network frames on the port (= set trace, or trace_view)",
         details: &[
-            "0 off     nothing (the driver doesn't even copy the frames)",
+            "0 off     nothing (the driver copies no frame; `dash` still counts them)",
             "1 events  one line per control frame: ARP, ICMP, TCP SYN/FIN/RST, the undecodable",
             "2 frames  every frame decoded, checksums checked, and `dump` bytes as a hex dump",
             "`trace` alone goes to the next level (frames goes back to off).",
@@ -716,13 +721,15 @@ pub static COMMANDS: &[CmdHelp] = &[
         name: "dash",
         aliases: &["ds"],
         usage: "dash [bars|chart|mix | off|mini|normal|full]",
-        summary: "the traffic dashboard under the trace (= set trace_dash[_view])",
+        summary: "the traffic dashboard above the prompt (= set trace_dash[_view])",
         details: &[
             "Graphs of what is received and sent, at the bottom of the console above the",
-            "prompt, redrawn in place. Shown while `trace` is on. A view, and a size:",
-            "bars   a small bar graph per direction, with its rate (default)",
-            "chart  the traffic as a time series: bit rate over the window with a time axis,",
-            "       and beside it frames per second, average frame size, peak, link use",
+            "prompt, redrawn in place. It counts the frames itself, with `trace` on or off.",
+            "Off at boot: `dash normal` shows it. A view, and a size:",
+            "bars   vertical bars per direction (▁ to █, a column per slice of time), with a",
+            "       scale, a time axis and its rate (default)",
+            "chart  the classic network graph: rx and tx as two lines on the same axes, bit rate",
+            "       over the window, with a time axis, packets per second, peak, link use",
             "mix    the chart, and under it the protocols that went by as horizontal bars",
             "off | mini | normal | full   how many lines (0 off, 1 mini, 2 normal, 3 full)",
             "`dash` alone goes to the next view; `dash next` to the next size.",
@@ -1043,7 +1050,7 @@ mod link_command_tests {
 
     #[test]
     fn address_space_commands() {
-        let s = |t: &str| String::<24>::try_from(t).unwrap();
+        let s = |t: &str| Path::try_from(t).unwrap();
         assert_eq!(parse("browse"), Ok(Command::Browse { path: None, depth: 1 }));
         assert_eq!(parse("br /leds"), Ok(Command::Browse { path: Some(s("/leds")), depth: 1 }));
         // The depth: alone, after or before the path, or as an option.
@@ -1057,9 +1064,17 @@ mod link_command_tests {
         assert_eq!(msg("browse -d"), "missing value for `depth`");
         assert_eq!(msg("browse /a /b"), "'/b': expected one path and a depth");
         assert_eq!(parse("read /buttons/jumper"), Ok(Command::Read(s("/buttons/jumper"))));
+        // Every `/config/<key>` fits, the longest included.
+        for (key, _) in crate::config::KEYS {
+            let line = format!("read /config/{key}");
+            assert!(parse(&line).is_ok(), "{line}");
+        }
         assert_eq!(parse("rd /node/uptime"), Ok(Command::Read(s("/node/uptime"))));
         // The value is everything after the path, spaces included.
-        assert_eq!(parse("write /leds/2 blink 200"), Ok(Command::Write { path: s("/leds/2"), value: s("blink 200") }));
+        assert_eq!(
+            parse("write /leds/2 blink 200"),
+            Ok(Command::Write { path: s("/leds/2"), value: String::<24>::try_from("blink 200").unwrap() })
+        );
         assert_eq!(
             parse("watch /buttons/jumper"),
             Ok(Command::Watch { path: s("/buttons/jumper"), interval_ms: DEFAULT_WATCH_MS })
@@ -1073,7 +1088,7 @@ mod link_command_tests {
         assert_eq!(parse("write"), Err(CliError::MissingValue("path")));
         assert!(matches!(parse("watch /x fast"), Err(CliError::BadNumber { .. })));
         assert!(matches!(parse("watch /x 0"), Err(CliError::BadNumber { .. })));
-        assert_eq!(parse("read /a/very/long/path/that/does/not/fit"), Err(CliError::TooLong));
+        assert_eq!(parse(&format!("read /{}", "a/".repeat(PATH_LEN))), Err(CliError::TooLong));
     }
 
     #[test]

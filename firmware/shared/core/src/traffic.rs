@@ -304,17 +304,42 @@ impl Traffic {
 
 /// One cell of a plot `rows` characters tall: the part of a column of height `value` (of `max`) that falls in
 /// row `row`, counted from the bottom. A full row is `█`, the top of a column is a bar of the right height
-/// (`▁`..`▇`), above it is a space. Any `value` above zero shows at least the lowest bar of the bottom row; the
-/// bottom row of a zero is a dot.
+/// (`▁`..`▇`), above it is a space. Any `value` above zero shows at least the lowest bar of the bottom row; zero is
+/// blank.
 pub fn plot_cell(value: u32, max: u32, rows: usize, row: usize) -> char {
     if value == 0 || max == 0 {
-        return if row == 0 { '·' } else { ' ' };
+        return ' ';
     }
     let levels = (rows.max(1) * 8) as u64;
     let fill = (u64::from(value) * levels).div_ceil(u64::from(max)).clamp(1, levels) as usize;
     match fill.saturating_sub(row * 8).min(8) {
         0 => ' ',
         n => BARS[n - 1],
+    }
+}
+
+/// The height of a rate on a line `h` rows tall, 0 (the bottom row) to `h - 1`. Anything above zero is above the
+/// bottom row: a trickle must not look like silence.
+pub fn line_level(value: u32, max: u32, h: usize) -> u8 {
+    if value == 0 || max == 0 {
+        return 0;
+    }
+    let steps = (h - 1) as u64;
+    (u64::from(value) * steps).div_ceil(u64::from(max)).clamp(1, steps) as u8
+}
+
+/// What the line of one slice does in the row `row` (from the bottom): it comes in from the left at the height of
+/// this slice and goes on to the right at the height of the next.
+pub fn line_glyph(from: u8, to: u8, row: u8) -> Option<char> {
+    if from == to {
+        return (row == from).then_some('─');
+    }
+    let (lo, hi) = (from.min(to), from.max(to));
+    match row {
+        r if r == from => Some(if from > to { '╮' } else { '╯' }),
+        r if r == to => Some(if from > to { '╰' } else { '╭' }),
+        r if r > lo && r < hi => Some('│'),
+        _ => None,
     }
 }
 
@@ -507,9 +532,9 @@ mod tests {
         assert_eq!((plot_cell(100, 100, 2, 0), plot_cell(100, 100, 2, 1)), ('█', '█'));
         // 75 %: the bottom row is full, the top one half full.
         assert_eq!((plot_cell(75, 100, 2, 0), plot_cell(75, 100, 2, 1)), ('█', '▄'));
-        // A trickle shows the lowest bar; nothing is a dot at the bottom and blank above.
+        // A trickle shows the lowest bar; nothing is blank.
         assert_eq!((plot_cell(1, 100, 3, 0), plot_cell(1, 100, 3, 1)), ('▁', ' '));
-        assert_eq!((plot_cell(0, 100, 3, 0), plot_cell(0, 100, 3, 1), plot_cell(5, 0, 3, 0)), ('·', ' ', '·'));
+        assert_eq!((plot_cell(0, 100, 3, 0), plot_cell(0, 100, 3, 1), plot_cell(5, 0, 3, 0)), (' ', ' ', ' '));
         assert_eq!(plot_cell(500, 100, 1, 0), '█', "above the maximum is clamped");
     }
 
@@ -525,5 +550,25 @@ mod tests {
         assert_eq!(draw(&[5, 5], 0), "··", "nothing at all: dots, not a division by zero");
         assert_eq!(draw(&[200], 100), "█", "above the maximum is clamped");
         assert_eq!(draw(&[], 10), "");
+    }
+
+    #[test]
+    fn a_line_steps_between_slices() {
+        // Flat: a dash on the row of the level only.
+        assert_eq!((line_glyph(2, 2, 2), line_glyph(2, 2, 1)), (Some('─'), None));
+        // Up from 1 to 3: enters at the bottom (`╯`), rises through 2 (`│`), leaves at the top (`╭`).
+        assert_eq!([1, 2, 3].map(|r| line_glyph(1, 3, r)), [Some('╯'), Some('│'), Some('╭')]);
+        assert_eq!((line_glyph(1, 3, 0), line_glyph(1, 3, 4)), (None, None));
+        // Down from 3 to 1: the mirror image.
+        assert_eq!([3, 2, 1].map(|r| line_glyph(3, 1, r)), [Some('╮'), Some('│'), Some('╰')]);
+    }
+
+    #[test]
+    fn a_trickle_is_above_silence_on_a_line() {
+        assert_eq!(
+            (line_level(0, 100, 5), line_level(1, 100, 5), line_level(100, 100, 5), line_level(500, 100, 5)),
+            (0, 1, 4, 4)
+        );
+        assert_eq!(line_level(5, 0, 5), 0);
     }
 }

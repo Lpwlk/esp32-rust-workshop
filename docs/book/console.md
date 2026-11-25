@@ -321,41 +321,51 @@ When even that is too much to read, the [dashboard](#the-traffic-dashboard-dash)
 
 ## The traffic dashboard: `dash`
 
-Whenever `trace` is on (`events` or `frames`, in any view), a block of graphs sits at the bottom of the console,
-above the prompt, redrawn in place like the live line (at most twice a second, and only when something changed),
-while everything else scrolls above it. It has three **views** and three **sizes**; `dash` alone goes to the next
+Once it is shown (it is **off** at boot: `dash normal` turns it on), a block of graphs sits at the bottom of the
+console, above the prompt, redrawn in place like the live line (at most twice a second, and only when something
+changed), while everything else scrolls above it. It does not depend on `trace`: it counts the frames itself, so
+it works with the trace on or off, and the trace works without it. It has three **views** (vertical bars, a line chart, the chart with the protocols) and three **sizes**; `dash` alone goes to the next
 view, `dash mini|normal|full|off` chooses the size.
 
-Every rate is in **bits per second** and packets per second, counted for **every** frame while the trace is on,
-whatever the level keeps: `trace events` shows only the control frames and the dashboard still shows the whole
-traffic. With `trace off` nothing is counted and nothing is drawn.
+Every rate is in **bits per second** and packets per second, counted for **every** frame while the dashboard is on,
+whatever the trace level keeps: `trace events` shows only the control frames and the dashboard still shows the whole
+traffic. With `dash off` nothing is counted and nothing is drawn (the driver's tap then reads two flags per
+frame and stops).
 
-### `bars`: the shape of the traffic
-
-```text
-rx 30s │ ▁▁▁▁▁▁▁▁▁▁▃███████▆▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │ 960.6 kbit/s │   1001 pkt/s │ peak 45.76 Mbit/s │  0.09%
-tx     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▃█████████████ │  1.23 Mbit/s │    300 pkt/s │ peak  1.24 Mbit/s │  0.12%
-```
-
-One bar graph per direction, a column per slice of the window (30 s over 40 columns: 750 ms), the newest on the
-right, only complete slices (so the right edge doesn't flicker). A bar is the bytes of the slice; `·` is an empty
-slice, and any traffic shows at least `▁`. Each graph is scaled to **its own** peak, printed beside it, so a quiet
-direction still shows its shape.
-
-### `chart`: the traffic as a time series
+### `bars`: vertical bars per direction
 
 ```text
-rx 45.76 Mbit/s ┤           ███████▃                      │ now 960.6 kbit/s   1001 pkt/s
-              0 ┤▁▁▁▁▁▁▁▁▁▁▆████████▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │ avg  119 B peak 45.76 Mbit/s 0.09%
-tx  1.24 Mbit/s ┤                           █████████████ │ now  1.23 Mbit/s    300 pkt/s
-              0 ┤▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▆█████████████ │ avg  513 B peak  1.24 Mbit/s 0.12%
-                └-30s ───────────── -15s ───────────── now
+rx  45.76 Mbit/s ┤           ▆███                          │ now 960.6 kbit/s   1001 pkt/s
+               0 ┤        ▃█████████▂                      │ avg  119 B
+tx   1.24 Mbit/s ┤                           ▄█████████████ │ now  1.23 Mbit/s    300 pkt/s
+               0 ┤                           ████████████████│ avg  513 B
+                 └-30s ───────────── -15s ───────────── now
 ```
 
-The same data as taller plots (2 rows tall in `normal`, 3 in `full`: 16 or 24 steps of height), with the bit-rate
-scale on the left (the top is the busiest slice, the bottom is zero), a time axis under them, and on the right what
-a network engineer reads: the rate over the last second, **packets per second**, the **average frame size**, the
-peak, and the **use of the link** (against the speed the PHY negotiated).
+One plot of rectangles per direction, a column per slice of the window (30 s over 40 columns: 750 ms), the
+newest on the right, only complete slices (so the right edge doesn't flicker). The height of a column is the
+bytes of the slice, in steps of an eighth of a row (`▁` to `█`; 2 rows tall in `normal`, 3 in `full`, 1 in `mini`);
+an empty slice is blank, and any traffic shows at least `▁`. Each plot is scaled to **its own** peak (the scale on
+its left), so a quiet direction still shows its shape, with a time axis under them and on the right what a
+network engineer reads: the rate over the last second, **packets per second**, the **average frame size**, the
+peak and the **use of the link** (against the speed the PHY negotiated).
+
+### `chart`: the classic network graph
+
+```text
+               5.72 Mbit/s ┤          ╭───╮                         │ ━ rx   960.6 kbit/s   1001 pkt/s · avg  119 B
+                           │         ╭╯   │                         │ ━ tx    1.23 Mbit/s    300 pkt/s · avg  513 B
+                           ┤        ╭╯    ╰╮                        │ peak   5.72 Mbit/s  link rx 0.09% tx 0.12%
+                           │        │      │                        │
+                         0 ┤────────╯      ╰────────────────────────│
+                           └-30s ───────────── -15s ───────────── now
+```
+
+Receive and send as two **lines on the same axes**: one bit-rate scale for both, so they can be compared, and
+the time under them (5 rows tall in `normal`, 6 in `full`, 3 in `mini`). A line goes from the middle of a slice to
+the middle of the next one with `─ │ ╭ ╮ ╯ ╰`; where the two meet in a character, send is drawn. Any traffic is above
+the bottom row, so a trickle doesn't look like silence. Beside it: the rate over the last second, packets per
+second, the average frame size, the peak and the use of the link.
 
 ### `mix`: and the protocols that went by
 
@@ -376,9 +386,9 @@ scrolls ends and the dashboard begins.
 
 | Lines taken (the rule included) | `mini` | `normal` | `full` |
 |---|---|---|---|
-| `bars` | 2 | 3 | 5 |
-| `chart` | 3 | 6 | 8 |
-| `mix` | 4 (one stacked bar of the shares, and the three biggest named) | 9 (the three biggest) | 14 (all six) |
+| `bars` | 3 | 6 | 8 |
+| `chart` | 4 | 7 | 8 |
+| `mix` (the chart and the protocols) | 5 (one stacked bar of the shares, and the three biggest named) | 10 (the three biggest) | 14 (all six) |
 
 `window <seconds>` (`window 2min`, 2 to 3600 s) chooses what the graphs cover, and starts them over. The settings
 are `trace_dash` (size), `trace_dash_view` and `trace_window_s`, so a preset can choose them.
