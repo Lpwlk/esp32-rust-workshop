@@ -14,20 +14,25 @@
     python3 scripts/dev.py --app adc flash b -m  # the ADC streamer on node B's board, then its console
     python3 scripts/dev.py fft                   # the live spectrum page (Plotly) for adc-stream, in the browser
     python3 scripts/dev.py fft --demo            # the same with a simulated board
+    python3 scripts/dev.py dash                  # the dashboard of both boards (eth or uart app): their consoles, as controls and charts
+    python3 scripts/dev.py --app uart dash       # the same for the UART app (the page reads the app from the boards anyway)
+    python3 scripts/dev.py dash --demo [uart]    # the same with two simulated nodes
     python3 scripts/dev.py boards                # plugged boards: MAC, port, probe, node
     python3 scripts/dev.py boards assign a 6C:1A # this board is node A (remembered)
-    python3 scripts/dev.py build [a|b]           # firmware, release (both by default)
+    python3 scripts/dev.py build [a|b] [-v]      # firmware, release (both by default); -v / -vv: cargo's verbose
     python3 scripts/dev.py size [a|b]            # flash / RAM used (also after each build)
     python3 scripts/dev.py flash a [-m]          # build + flash with espflash (+ monitor)
-    python3 scripts/dev.py flash all             # both nodes on their boards
+    python3 scripts/dev.py flash all             # both nodes: one build, both boards flashed at the same time
+    python3 scripts/dev.py watch [a|b] [-f]      # rebuild on every saved source file (-f: reflash node a|b too)
     python3 scripts/dev.py monitor a             # serial console + CLI, backtraces decoded
+    python3 scripts/dev.py reset a               # restart the firmware: no build, no flashing
     python3 scripts/dev.py rtt a                 # RTT build, flash, cargo-embed console
-    python3 scripts/dev.py erase a               # erase the whole flash
+    python3 scripts/dev.py erase a [--settings]  # erase the whole flash (--settings: only the saved settings)
 
   Tests and quality
     python3 scripts/dev.py test host [-u]        # core tests on this computer (-u: regen docs)
     python3 scripts/dev.py test target [a]       # firmware/uart/tests/hil.rs on a board, then reflash it
-    python3 scripts/dev.py check                 # what CI runs, locally
+    python3 scripts/dev.py check [--fast]        # what CI runs, locally, with the time of each step (--fast: no firmware builds, no site)
     python3 scripts/dev.py format [--check]      # cargo fmt + black
 
   Documentation
@@ -42,6 +47,24 @@
 Everything after `setup` runs inside `.venv`: the script relaunches itself there.
 That keeps the system Python out of it (a Python 3.15 alpha breaks pip 26.3 and
 Zensical's dependencies). Logs: scripts/logs/dev.log.
+
+What you see: while a command runs, a progress bar at the bottom of the terminal (a pulsing bar, the
+elapsed time, the line the command is on). When it ends the bar goes and a log line takes its place:
+`14:03:21 DONE  build node-a  6.2 s  156 crates compiled`, then the command it ran (`$ cargo build ...`).
+A failure (ERROR) or warnings (WARNING) print the command's whole output, in color; scripts/logs/dev.log
+keeps all of it. Consoles (`monitor`, `flash -m`, `rtt`) and dev servers (`fft`, `dash`, `docs serve`)
+keep the terminal. The colors are a theme: set ACTIVE_THEME in scripts/devthemes.py.
+
+`-v` / `-vv` (after the command: build, flash, watch, rtt, test, check, docs build|api) goes to the
+cargo commands (the rustc and linker command lines, to see what a build really runs) and shows
+cargo's own output, live, instead of the bar.
+
+Shorter to type: `scripts/dev` runs this script from any folder, with the .venv's Python.
+Link it once onto your PATH (`ln -s "$PWD/scripts/dev" ~/.local/bin/dev`) and `dev build -v`,
+`dev flash a -m`, `dev check --fast` work as they are written above, minus the `python3 scripts/dev.py`.
+
+A command that ends by itself after 30 s or more (build, flash, check, test, ...) raises a desktop
+notification, so you can look away; `DEV_NOTIFY=0` turns that off.
 """
 
 from __future__ import annotations
@@ -50,9 +73,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -60,120 +85,27 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 TOOLS = ROOT / "tools"
 FFT_TOOL = TOOLS / "adc-fft" / "adc_fft.py"
+DASH_TOOL = TOOLS / "node-dash" / "node_dash.py"
 VENV = ROOT / ".venv"
 VENV_BIN = VENV / ("Scripts" if os.name == "nt" else "bin")
-VENV_PY = VENV_BIN / "python"
+VENV_PYTHON = VENV_BIN / "python"
 REQUIREMENTS = SCRIPTS / "requirements.txt"
 # Zensical's dependencies don't support Python 3.15 yet: take the first one found.
-PYTHONS = ["python3.13", "python3.12", "python3.14"]
+PYTHON_CANDIDATES = ["python3.13", "python3.12", "python3.14"]
 COMMIT_TYPES = ["feat", "fix", "chore", "refactor", "test", "docs"]
 
-# Firmware (see Cargo.toml and .cargo/config.toml).
 CHIP = "esp32s31"
 TARGET = "riscv32imafc-unknown-none-elf"
-NODES = ("a", "b")  # the board-to-board apps
+NODES = ("a", "b")
 
+NOTIFY_COMMANDS = ("build", "flash", "erase", "check", "test", "update")
+NOTIFY_AFTER_SECONDS = 30
 
-def in_venv() -> bool:
-    return Path(sys.prefix).resolve() == VENV.resolve()
-
-
-# --------------------------------------------------------------------------------------
-# setup (standard library only)
-# --------------------------------------------------------------------------------------
-
-
-def setup(python: str | None) -> None:
-    candidates = [python] if python else PYTHONS
-    interpreter = next((shutil.which(p) for p in candidates if p and shutil.which(p)), None)
-    if not interpreter:
-        sys.exit(f"No suitable Python found (tried {', '.join(candidates)}).")
-    print(f"• creating {VENV.relative_to(ROOT)} with {interpreter}")
-    subprocess.run([interpreter, "-m", "venv", "--clear", str(VENV)], check=True)
-    pip = [str(VENV_PY), "-m", "pip", "--disable-pip-version-check"]
-    print("• upgrading pip")
-    subprocess.run([*pip, "install", "--quiet", "--upgrade", "pip"], check=True)
-    print(f"• installing {REQUIREMENTS.relative_to(ROOT)}")
-    subprocess.run([*pip, "install", "--quiet", "-r", str(REQUIREMENTS)], check=True)
-    print("✓ ready: python3 scripts/dev.py doctor")
-
-
-# --------------------------------------------------------------------------------------
-# Python tooling (inside .venv, rich available)
-# --------------------------------------------------------------------------------------
-
-
-def requirement_names() -> list[str]:
-    """Package names from requirements.txt (version specifiers and comments dropped)."""
-    names = []
-    for line in REQUIREMENTS.read_text().splitlines():
-        line = line.split("#")[0].strip()
-        if line:
-            for sep in "<>=!~[ ;":
-                line = line.split(sep)[0]
-            names.append(line)
-    return names
-
-
-def update(dry_run: bool) -> None:
-    from devlib import BRANCH, LAST, log, run
-
-    wanted = ["pip", *requirement_names()]
-    log.info(f"Checking {', '.join(f'[pkg]{n}[/]' for n in wanted)} …")
-    pip = [str(VENV_PY), "-m", "pip", "--disable-pip-version-check"]
-    # Packages missing from .venv (requirements.txt grew since `setup`).
-    installed = {p["name"].lower() for p in json.loads(run([*pip, "list", "--format=json"]).stdout)}
-    missing = [n for n in wanted if n.lower() not in installed]
-    if missing:
-        log.info(f"{BRANCH}missing: {', '.join(f'[pkg]{n}[/]' for n in missing)}")
-        if not dry_run:
-            run([*pip, "install", "--quiet", "-r", str(REQUIREMENTS)])
-    # One call, structured output: no parsing of human-readable text.
-    outdated = json.loads(run([*pip, "list", "--outdated", "--format=json"]).stdout)
-    to_upgrade = [p for p in outdated if p["name"].lower() in {w.lower() for w in wanted}]
-
-    if not to_upgrade:
-        log.info(f"{LAST}everything is up to date")
-        return
-    for i, p in enumerate(to_upgrade):
-        tree = LAST if i == len(to_upgrade) - 1 else BRANCH
-        log.info(
-            f"{tree}[pkg]{p['name']}[/] [old]{p['version']}[/] → [ver]{p['latest_version']}[/]"
-        )
-    if dry_run:
-        log.info("dry run: nothing installed")
-        return
-    run([*pip, "install", "--upgrade", *(p["name"] for p in to_upgrade)])
-    log.info("✓ updated")
-
-
-def format_code(check: bool) -> None:
-    from devlib import live, log, run
-
-    live(["cargo", "fmt", "--all"] + (["--", "--check"] if check else []))
-    # firmware/ethernet and firmware/adc-stream are their own Cargo workspaces: `--all` at the root doesn't reach them.
-    for app in OWN_WORKSPACES:
-        live(["cargo", "fmt"] + (["--", "--check"] if check else []), cwd=APP_DIRS[app])
-    run(
-        [str(VENV_BIN / "black"), "--line-length", "100"]
-        + (["--check"] if check else [])
-        + [str(SCRIPTS.relative_to(ROOT)), str(TOOLS.relative_to(ROOT))]
-    )
-    log.info("✓ formatted" if not check else "✓ already formatted")
-
-
-# --------------------------------------------------------------------------------------
-# Boards and firmware
-# --------------------------------------------------------------------------------------
-
-
-# Which firmware the build / flash / monitor commands work on: `--app eth` (firmware/ethernet/, the
-# Ethernet app: its own Cargo workspace; the default), `--app uart` (firmware/uart/, a member of the
-# root workspace) or `--app adc` (firmware/adc-stream/: a node's board streaming its ADC to a computer;
-# its own Cargo workspace). `--preset NAME` builds that preset (firmware/<app>/presets/NAME.toml) instead
-# of node-a / node-b (the apps with presets).
+# `--app` and `--preset`: the firmware that build / flash / monitor work on, and the preset built
+# instead of node-a / node-b (firmware/<app>/presets/NAME.toml).
 APP = "eth"
 PRESET: str | None = None
+VERBOSE = 0
 APP_DIRS = {
     "uart": ROOT / "firmware" / "uart",
     "eth": ROOT / "firmware" / "ethernet",
@@ -185,29 +117,141 @@ TARGET_DIRS = {
     "eth": ROOT / "firmware" / "ethernet" / "target",
     "adc": ROOT / "firmware" / "adc-stream" / "target",
 }
-# The firmware's own Cargo workspaces (`cargo ... --all` at the root doesn't reach them).
+# `cargo ... --all` at the root doesn't reach the apps that are their own Cargo workspaces.
 OWN_WORKSPACES = ("eth", "adc")
+
+# Not `run -q` (cargo refuses -v with -q), `presets` (an alias that ends in `--`: the flag would
+# reach that program), `fmt` or `embed`.
+VERBOSE_SUBCOMMANDS = ("build", "clippy", "doc", "test", "test-host", "test-target")
+
+
+def in_venv() -> bool:
+    return Path(sys.prefix).resolve() == VENV.resolve()
+
+
+def setup(python: str | None) -> None:
+    candidates = [python] if python else PYTHON_CANDIDATES
+    interpreter = next(
+        (shutil.which(name) for name in candidates if name and shutil.which(name)), None
+    )
+    if not interpreter:
+        sys.exit(f"No suitable Python found (tried {', '.join(candidates)}).")
+    print(f"• creating {VENV.relative_to(ROOT)} with {interpreter}")
+    subprocess.run([interpreter, "-m", "venv", "--clear", str(VENV)], check=True)
+    pip_command = [str(VENV_PYTHON), "-m", "pip", "--disable-pip-version-check"]
+    print("• upgrading pip")
+    subprocess.run([*pip_command, "install", "--quiet", "--upgrade", "pip"], check=True)
+    print(f"• installing {REQUIREMENTS.relative_to(ROOT)}")
+    subprocess.run([*pip_command, "install", "--quiet", "-r", str(REQUIREMENTS)], check=True)
+    print("✓ ready: python3 scripts/dev.py doctor")
+
+
+def requirement_names() -> list[str]:
+    """Package names from requirements.txt (version specifiers and comments dropped)."""
+    names = []
+    for line in REQUIREMENTS.read_text().splitlines():
+        requirement = line.split("#")[0].strip()
+        if requirement:
+            for separator in "<>=!~[ ;":
+                requirement = requirement.split(separator)[0]
+            names.append(requirement)
+    return names
+
+
+def update(dry_run: bool) -> None:
+    from devlib import TREE_BRANCH, TREE_LAST, done, log, run
+
+    wanted_packages = ["pip", *requirement_names()]
+    log.info(f"Checking {', '.join(f'[package]{name}[/]' for name in wanted_packages)} …")
+    pip_command = [str(VENV_PYTHON), "-m", "pip", "--disable-pip-version-check"]
+    installed_names = {
+        package["name"].lower()
+        for package in json.loads(run([*pip_command, "list", "--format=json"]).stdout)
+    }
+    missing_packages = [name for name in wanted_packages if name.lower() not in installed_names]
+    if missing_packages:
+        missing_list = ", ".join(f"[package]{name}[/]" for name in missing_packages)
+        log.info(f"{TREE_BRANCH}missing: {missing_list}")
+        if not dry_run:
+            run([*pip_command, "install", "--quiet", "-r", str(REQUIREMENTS)])
+    outdated_packages = json.loads(
+        run([*pip_command, "list", "--outdated", "--format=json"]).stdout
+    )
+    wanted_lowercase = {name.lower() for name in wanted_packages}
+    packages_to_upgrade = [p for p in outdated_packages if p["name"].lower() in wanted_lowercase]
+
+    if not packages_to_upgrade:
+        log.info(f"{TREE_LAST}everything is up to date")
+        return
+    for index, package in enumerate(packages_to_upgrade):
+        tree_prefix = TREE_LAST if index == len(packages_to_upgrade) - 1 else TREE_BRANCH
+        log.info(
+            f"{tree_prefix}[package]{package['name']}[/] [loss]{package['version']}[/] → "
+            f"[gain]{package['latest_version']}[/]"
+        )
+    if dry_run:
+        log.info("dry run: nothing installed")
+        return
+    run(
+        [
+            *pip_command,
+            "install",
+            "--upgrade",
+            *(package["name"] for package in packages_to_upgrade),
+        ]
+    )
+    done("updated")
+
+
+def format_code(check_only: bool) -> None:
+    from devlib import done, task
+
+    action = "check" if check_only else "format"
+    task(
+        f"{action} Rust (workspace)",
+        ["cargo", "fmt", "--all"] + (["--", "--check"] if check_only else []),
+    )
+    for app in OWN_WORKSPACES:
+        task(
+            f"{action} Rust ({APP_DIRS[app].name})",
+            ["cargo", "fmt"] + (["--", "--check"] if check_only else []),
+            working_directory=APP_DIRS[app],
+        )
+    task(
+        f"{action} Python (black)",
+        [str(VENV_BIN / "black"), "--line-length", "100"]
+        + (["--check"] if check_only else [])
+        + [str(SCRIPTS.relative_to(ROOT)), str(TOOLS.relative_to(ROOT))],
+    )
+    done("already formatted" if check_only else "formatted")
 
 
 def app_dir() -> Path:
     return APP_DIRS[APP]
 
 
+def with_verbose(command: list[str]) -> list[str]:
+    """`command` with cargo's `-v` (or `-vv`) right after the subcommand, when asked for.
+    Not at the end: after a `--` (clippy's `-D warnings`) it would belong to another program."""
+    if not VERBOSE or command[0] != "cargo" or command[1] not in VERBOSE_SUBCOMMANDS:
+        return command
+    return [*command[:2], "-" + "v" * min(VERBOSE, 2), *command[2:]]
+
+
 def app_nodes() -> tuple[str, ...]:
-    """The nodes of the chosen app: every app runs on either board (adc-stream is one binary for both)."""
+    """Every app runs on either board (adc-stream is one binary for both)."""
     return NODES
 
 
 def bin_name(node: str) -> str:
-    """The Cargo binary of a node."""
     return "adc-stream" if APP == "adc" else f"node-{node}"
 
 
-def preset_env() -> dict[str, str] | None:
+def preset_environment() -> dict[str, str] | None:
     return {"PRESET": PRESET} if PRESET else None
 
 
-def elf(node: str, release: bool = True) -> Path:
+def elf_path(node: str, release: bool = True) -> Path:
     return TARGET_DIRS[APP] / TARGET / ("release" if release else "debug") / bin_name(node)
 
 
@@ -218,11 +262,11 @@ def board_for(node: str | None, selector: str | None):
 
     try:
         board = resolve(node, selector)
-    except BoardError as e:
-        log.error(str(e))
+    except BoardError as error:
+        log.error(str(error))
         raise SystemExit(1)
-    label = f"node {node.upper()} → " if node else ""
-    log.info(f"{label}board [pkg]{board.short}[/] on [path]{board.port}[/]")
+    node_prefix = f"node {node.upper()} → " if node else ""
+    log.info(f"{node_prefix}board [package]{board.short}[/] on [path]{board.port}[/]")
     return board
 
 
@@ -231,95 +275,137 @@ def boards_list() -> None:
     from devlib import console, log
     from rich.table import Table
 
-    found = detect()
-    if not found:
+    plugged_boards = detect()
+    if not plugged_boards:
         log.warning("No ESP32-S31 on USB. Plug it by its USB Serial/JTAG port.")
     else:
-        table = Table(box=None, header_style="bold", pad_edge=False)
-        for col in ("#", "node", "MAC", "port", "probe (probe-rs)"):
-            table.add_column(col)
-        for i, b in enumerate(found):
-            node = node_of(b)
-            table.add_row(str(i), node.upper() if node else "[dim]-[/]", b.mac, b.port, b.probe)
+        table = Table(box=None, header_style="table_header", pad_edge=False)
+        for column in ("#", "node", "MAC", "port", "probe (probe-rs)"):
+            table.add_column(column)
+        for index, board in enumerate(plugged_boards):
+            node = node_of(board)
+            table.add_row(
+                str(index),
+                node.upper() if node else "[muted]-[/]",
+                board.mac,
+                board.port,
+                board.probe,
+            )
         console.print(table)
-    plugged = {b.mac for b in found}
+    plugged_macs = {board.mac for board in plugged_boards}
     for node, mac in load_assignments().items():
-        if mac not in plugged:
+        if mac not in plugged_macs:
             log.info(f"node {node.upper()}: board {mac} not plugged in")
-    if found and not load_assignments():
-        log.info("Tell them apart: `dev.py boards assign a <MAC end>`, e.g. " + found[0].short)
+    if plugged_boards and not load_assignments():
+        log.info(
+            "Tell them apart: `dev.py boards assign a <MAC end>`, e.g. " + plugged_boards[0].short
+        )
 
 
 def boards_assign(node: str, selector: str) -> None:
     from boards import BoardError, detect, match, save_assignment
-    from devlib import log
+    from devlib import done, log
 
     try:
         board = match(detect(), selector)
-    except BoardError as e:
-        log.error(str(e))
+    except BoardError as error:
+        log.error(str(error))
         raise SystemExit(1)
     save_assignment(node, board.mac)
-    log.info(f"✓ node {node.upper()} = board [pkg]{board.mac}[/] ([path]{board.port}[/])")
+    done(f"node {node.upper()} = board [package]{board.mac}[/] ([path]{board.port}[/])")
 
 
 def cargo_build(nodes: list[str], rtt: bool, release: bool) -> None:
-    from devlib import live, log
+    from devlib import log, task
 
     if rtt and APP == "adc":
         log.error("The RTT console is for the node apps: `--rtt` doesn't apply to adc-stream.")
         raise SystemExit(1)
-    live(
-        ["cargo", "build"]
-        + (["--release"] if release else [])
-        + (["--features", "rtt"] if rtt else [])
-        + [arg for b in dict.fromkeys(bin_name(n) for n in nodes) for arg in ("--bin", b)],
-        cwd=app_dir(),
-        extra_env=preset_env(),
+    binaries = list(dict.fromkeys(bin_name(node) for node in nodes))
+    task(
+        f"build {', '.join(binaries)}" + ("" if release else " [muted](debug)[/]"),
+        with_verbose(
+            ["cargo", "build"]
+            + (["--release"] if release else [])
+            + (["--features", "rtt"] if rtt else [])
+            + [argument for binary in binaries for argument in ("--bin", binary)]
+        ),
+        working_directory=app_dir(),
+        extra_environment=preset_environment(),
     )
     memory_usage(nodes, release)
 
 
 def memory_usage(nodes: list[str], release: bool) -> None:
-    """Flash / RAM table of each node, like GCC's `--print-memory-usage`, with the
-    change since the previous build (scripts/memsize.py)."""
+    """Flash / RAM table of each node, like GCC's `--print-memory-usage`, with the change since
+    the previous build (scripts/memsize.py)."""
     from devlib import console, log
     from memsize import report
     from rich.table import Table
 
     # adc-stream is one binary for both nodes: show it once.
     for node in {bin_name(n): n for n in nodes}.values():
-        path = elf(node, release)
-        if not path.exists():
+        built_elf = elf_path(node, release)
+        if not built_elf.exists():
             log.warning(f"{bin_name(node)}: not built yet (`dev.py build {node}`)")
             continue
-        last = path.parent / f".memsize-{bin_name(node)}.json"
+        previous_report = built_elf.parent / f".memsize-{bin_name(node)}.json"
         table = Table(
-            title=f"{bin_name(node)} memory", title_justify="left", box=None, pad_edge=False
+            title=f"{bin_name(node)} memory",
+            title_justify="left",
+            box=None,
+            pad_edge=False,
+            header_style="table_header",
         )
-        for col in ("Memory region", "Used Size", "Region Size", "%age Used", "Change"):
-            table.add_column(col, justify="right")
-        for region, used, size, pct, change in report(path, last):
-            style = "red" if change.startswith("+") else "green" if change else ""
-            table.add_row(region, used, size, pct, f"[{style}]{change}[/]" if style else "")
+        for column in ("Memory region", "Used Size", "Region Size", "%age Used", "Change"):
+            table.add_column(column, justify="right")
+        for region, used, region_size, percent_used, change in report(built_elf, previous_report):
+            style = "loss" if change.startswith("+") else "gain" if change else ""
+            table.add_row(
+                region, used, region_size, percent_used, f"[{style}]{change}[/]" if style else ""
+            )
         console.print(table)
 
 
+def espflash(subcommand: str, board, *arguments: str) -> list[str]:
+    """An espflash command on this board (chip, port; no update check)."""
+    return [
+        "espflash",
+        subcommand,
+        "--chip",
+        CHIP,
+        "--port",
+        board.port,
+        "--skip-update-check",
+        *arguments,
+    ]
+
+
+def flash_command(board, node: str, monitor: bool, release: bool) -> list[str]:
+    """Writes the node's ELF (espflash skips the blocks the board already holds)."""
+    return espflash(
+        "flash", board, *(["--monitor"] if monitor else []), str(elf_path(node, release))
+    )
+
+
+def flash_label(node: str, board) -> str:
+    return f"flash node {node.upper()} [muted]→ {board.short}[/]"
+
+
 def flash(node: str, selector: str | None, monitor: bool, rtt: bool, release: bool) -> None:
-    from devlib import live
+    from devlib import live, task
 
     board = board_for(node, selector)
     cargo_build([node], rtt, release)
-    live(
-        ["espflash", "flash", "--chip", CHIP, "--port", board.port, "--skip-update-check"]
-        + (["--monitor"] if monitor else [])
-        + [str(elf(node, release))]
-    )
+    if monitor:
+        live(flash_command(board, node, True, release))
+    else:
+        task(flash_label(node, board), flash_command(board, node, False, release))
 
 
 def flash_all(release: bool) -> None:
     from boards import BoardError, resolve
-    from devlib import log
+    from devlib import done, fmt_secs, log, print_output, run_parallel
 
     if APP == "adc":
         log.error(
@@ -329,30 +415,46 @@ def flash_all(release: bool) -> None:
 
     try:
         # Both boards first: don't flash A and then find out B isn't there.
-        targets = {n: resolve(n, None) for n in NODES}
-    except BoardError as e:
-        log.error(f"{e}\n`flash all` needs both nodes assigned: `dev.py boards assign a|b <MAC>`.")
+        boards = {node: resolve(node, None) for node in NODES}
+    except BoardError as error:
+        log.error(
+            f"{error}\n`flash all` needs both nodes assigned: `dev.py boards assign a|b <MAC>`."
+        )
         raise SystemExit(1)
-    if targets["a"] == targets["b"]:
+    if boards["a"] == boards["b"]:
         log.error("Nodes A and B are the same board: assign the other one.")
         raise SystemExit(1)
-    for node in NODES:
-        flash(node, targets[node].mac, monitor=False, rtt=False, release=release)
-    log.info("✓ both nodes flashed: `dev.py monitor a` / `dev.py monitor b` (two terminals)")
+    # One cargo run for both: the shared crates compile once and the two links run side by side.
+    cargo_build(list(NODES), rtt=False, release=release)
+    labels = {node: flash_label(node, boards[node]) for node in NODES}
+    started_at = time.monotonic()
+    results = run_parallel(
+        {node: flash_command(boards[node], node, False, release) for node in NODES}, labels
+    )
+    any_failed = False
+    for exit_code, output, _seconds in results.values():
+        if exit_code != 0:
+            print_output(output)
+            any_failed = True
+    if any_failed:
+        raise SystemExit(1)
+    done(
+        f"both boards flashed side by side in {fmt_secs(time.monotonic() - started_at)}: "
+        "`dev.py monitor a` / `dev.py monitor b` (two terminals)"
+    )
 
 
 def monitor(node: str | None, selector: str | None) -> None:
     from devlib import live, log
 
     board = board_for(node, selector)
-    cmd = ["espflash", "monitor", "--chip", CHIP, "--port", board.port, "--skip-update-check"]
-    if node and elf(node).exists():
-        # Lets espflash turn backtrace addresses into function names.
-        cmd += ["--elf", str(elf(node))]
+    command = espflash("monitor", board)
+    if node and elf_path(node).exists():
+        command += ["--elf", str(elf_path(node))]
     elif node:
-        log.info(f"no {elf(node).relative_to(ROOT)} yet: backtraces won't be decoded")
+        log.info(f"no {elf_path(node).relative_to(ROOT)} yet: backtraces won't be decoded")
     log.info("Ctrl+C to quit")
-    live(cmd, check=False)
+    live(command, exit_on_failure=False)
 
 
 def rtt(node: str, selector: str | None) -> None:
@@ -368,56 +470,164 @@ def rtt(node: str, selector: str | None) -> None:
     live(
         ["cargo", "embed", "--release", "--features", "rtt", "--bin", f"node-{node}"]
         + ["--probe", board.probe]
-        # The settings live in the UART app's folder; they are not specific to it.
         + ["--config", str(APP_DIRS["uart"] / "Embed.toml")],
-        cwd=app_dir(),
-        check=False,
+        working_directory=app_dir(),
+        exit_on_failure=False,
     )
 
 
-def erase(node: str | None, selector: str | None) -> None:
-    from devlib import live
+def erase(node: str | None, selector: str | None, settings_only: bool) -> None:
+    """The whole flash, or with `settings_only` only the `nvs` partition, where `save` keeps the
+    node's settings (a few seconds less than the whole chip, and the firmware stays)."""
+    from devlib import log, task
 
     board = board_for(node, selector)
-    live(["espflash", "erase-flash", "--chip", CHIP, "--port", board.port, "--skip-update-check"])
+    if settings_only:
+        task(
+            f"erase saved settings [muted](nvs) → {board.short}[/]",
+            espflash("erase-parts", board, "nvs"),
+        )
+        log.info("[muted]the firmware boots on its build config: `dev.py reset` restarts it[/]")
+    else:
+        task(f"erase the whole flash [muted]→ {board.short}[/]", espflash("erase-flash", board))
 
 
-# --------------------------------------------------------------------------------------
-# Tests and checks
-# --------------------------------------------------------------------------------------
+def reset(node: str | None, selector: str | None) -> None:
+    """Restarts the board's firmware: no build, no flashing."""
+    from devlib import task
+
+    board = board_for(node, selector)
+    task(f"reset [muted]→ {board.short}[/]", espflash("reset", board))
+
+
+def watched_files_mtimes() -> dict[Path, int]:
+    """Modification times of what a build of the chosen app depends on."""
+    mtimes: dict[Path, int] = {}
+    watched_paths: list[Path] = []
+    watched_roots = [
+        app_dir(),
+        ROOT / "firmware" / "shared",
+        ROOT / "firmware" / "ferrite-esp32s31",
+    ]
+    for watched_root in watched_roots:
+        for directory, subdirectories, file_names in os.walk(watched_root):
+            # target/ holds thousands of build files that change on every build.
+            subdirectories[:] = [
+                name for name in subdirectories if name not in ("target", ".git", "node_modules")
+            ]
+            for file_name in file_names:
+                if Path(file_name).suffix in (".rs", ".toml", ".x"):
+                    watched_paths.append(Path(directory, file_name))
+    watched_paths += [
+        ROOT / "Cargo.toml",
+        ROOT / "esp-config.toml",
+        ROOT / ".cargo" / "config.toml",
+    ]
+    for path in watched_paths:
+        try:
+            mtimes[path] = path.stat().st_mtime_ns
+        except OSError:  # an editor's temporary file, gone since the walk
+            pass
+    return mtimes
+
+
+def watch(node: str | None, selector: str | None, flash_after_build: bool, release: bool) -> None:
+    """Rebuilds whenever a source file is saved (and reflashes the board with `--flash`).
+    A failed build is shown and the loop waits for the next save."""
+    from boards import BoardError, resolve
+    from devlib import console, log, task
+
+    nodes = [node] if node else list(app_nodes())
+    if flash_after_build:
+        board_for(node, selector)
+    known_mtimes = watched_files_mtimes()
+    log.info(
+        f"watching [path]{app_dir().relative_to(ROOT)}[/] and the shared crates (Ctrl+C to stop)"
+    )
+    try:
+        while True:
+            try:
+                cargo_build(nodes, False, release)
+                if flash_after_build:
+                    board = resolve(node, selector)
+                    task(flash_label(node, board), flash_command(board, node, False, release))
+            except BoardError as error:
+                log.warning(f"not flashed: {error}")
+            except SystemExit as exit_request:
+                if exit_request.code in (130, -2):
+                    raise KeyboardInterrupt
+                log.warning("failed: fix it and save, the next save builds again")
+            # The snapshot predates the build: a save made meanwhile triggers the next round.
+            while (current_mtimes := watched_files_mtimes()) == known_mtimes:
+                time.sleep(0.5)
+            time.sleep(0.3)  # an editor or a formatter writes several files: let it finish
+            changed_paths = sorted(
+                path
+                for path in {*current_mtimes, *known_mtimes}
+                if current_mtimes.get(path) != known_mtimes.get(path)
+            )
+            known_mtimes = watched_files_mtimes()
+            changed_names = ", ".join(path.name for path in changed_paths[:3])
+            changed_names += " …" if len(changed_paths) > 3 else ""
+            console.rule(
+                f"[muted]{time.strftime('%H:%M:%S')} {changed_names} changed[/]", style="muted"
+            )
+    except KeyboardInterrupt:
+        log.info("stopped")
+
+
+def tests_summary(output: str) -> str:
+    """`251 tests passed`, from the `test result:` line of each cargo test binary."""
+    passed = sum(int(count) for count in re.findall(r"(\d+) passed", output))
+    return f"{passed} tests passed" if passed else ""
 
 
 def test_host(update_docs: bool) -> None:
-    from devlib import live, log
+    from devlib import log, task
 
-    live(["cargo", "test-host"], extra_env={"UPDATE_DOCS": "1"} if update_docs else None)
+    task(
+        "host tests",
+        with_verbose(["cargo", "test-host"]),
+        extra_environment={"UPDATE_DOCS": "1"} if update_docs else None,
+        summarize=tests_summary,
+    )
     if update_docs:
         log.info("reference pages regenerated: review and commit docs/book/reference")
 
 
-def test_target(node: str | None, selector: str | None, keep: bool) -> None:
-    from devlib import live, log
+def test_target(node: str | None, selector: str | None, keep_test_image: bool) -> None:
+    from devlib import log, task
 
     board = board_for(node, selector)
-    code = live(["cargo", "test-target"], extra_env={"PROBE_RS_PROBE": board.probe}, check=False)
-    # probe-rs left the test image in flash, with the wrong minimum chip revision:
-    # the board would boot-loop. Put the node's firmware back with espflash.
-    if node and not keep:
+    exit_code = task(
+        f"on-target tests [muted]→ {board.short}[/]",
+        with_verbose(["cargo", "test-target"]),
+        extra_environment={"PROBE_RS_PROBE": board.probe},
+        show_output="always",
+        exit_on_failure=False,
+    )
+    # probe-rs left the test image in flash, with the wrong minimum chip revision: the board
+    # would boot-loop. Put the node's firmware back with espflash.
+    if node and not keep_test_image:
         log.info(f"reflashing node {node.upper()}'s firmware (the tests replaced it)")
         flash(node, board.mac, monitor=False, rtt=False, release=True)
-    elif not keep:
+    elif not keep_test_image:
         log.warning(
             "The board now holds the test image: reflash it (`dev.py flash a|b --board "
             f"{board.short}`)."
         )
-    if code != 0:
-        raise SystemExit(code)
+    if exit_code != 0:
+        raise SystemExit(exit_code)
 
 
-def check() -> None:
+def check(fast: bool) -> None:
     """The CI pipeline (.github/workflows/ci.yml), in the same order, stopping at the
-    first failure. On-target tests aren't in CI (no board there): `test target`."""
-    from devlib import live, log, run
+    first failure. On-target tests aren't in CI (no board there): `test target`.
+
+    `fast` leaves out the three firmware builds (fat LTO, the slow part) and the docs site:
+    clippy compiles the same code in check mode, so type errors still stop it. What it can't see
+    is a link error, which `build` or a full `check` shows."""
+    from devlib import done, fmt_secs, task
 
     steps = [
         ("host tests + reference pages up to date", ["cargo", "test-host"]),
@@ -427,10 +637,10 @@ def check() -> None:
         ),
         *[
             (
-                f"example {ex.stem} (shown in the docs)",
-                f"cargo run -q -p workshop-core --target host-tuple --example {ex.stem}".split(),
+                f"example {example.stem} (shown in the docs)",
+                f"cargo run -q -p workshop-core --target host-tuple --example {example.stem}".split(),
             )
-            for ex in sorted((ROOT / "firmware/shared/core/examples").glob("*.rs"))
+            for example in sorted((ROOT / "firmware/shared/core/examples").glob("*.rs"))
         ],
         ("presets load and validate", ["cargo", "presets", "check"]),
         ("firmware build (UART)", ["cargo", "build", "--release"]),
@@ -448,16 +658,40 @@ def check() -> None:
             APP_DIRS["adc"],
         ),
         (
-            "adc-fft self test (receiver, FFT, web server)",
-            [str(VENV_PY), str(FFT_TOOL), "--selftest"],
+            "ADC app: the PWM generator's arithmetic (host)",
+            "rustc --edition 2024 --test src/pwm_plan.rs -o ../../target/pwm_plan_test".split(),
+            APP_DIRS["adc"],
+        ),
+        ("ADC app: run those tests", [str(ROOT / "target" / "pwm_plan_test")]),
+        (
+            "adc-fft self test (receiver, FFT, web server, saved settings)",
+            [str(VENV_PYTHON), str(FFT_TOOL), "--selftest"],
+        ),
+        (
+            "node-dash self test (console parser, web server, simulated nodes)",
+            [str(VENV_PYTHON), str(DASH_TOOL), "--selftest"],
         ),
     ]
-    for i, (name, cmd, *where) in enumerate(steps, 1):
-        log.info(f"[bold]{i}/{len(steps) + 1}[/] {name}")
-        live(cmd, cwd=where[0] if where else None)
-    log.info(f"[bold]{len(steps) + 1}/{len(steps) + 1}[/] docs site")
-    run([str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"])
-    log.info("✓ all green")
+    if fast:
+        steps = [step for step in steps if not step[0].startswith("firmware build")]
+    step_count = len(steps) + (0 if fast else 1)
+    started_at = time.monotonic()
+    for step_number, (name, command, *working_directory) in enumerate(steps, 1):
+        task(
+            f"[muted]{step_number}/{step_count}[/] {name}",
+            with_verbose(command),
+            working_directory=working_directory[0] if working_directory else None,
+            summarize=tests_summary,
+        )
+    if not fast:
+        task(
+            f"[muted]{step_count}/{step_count}[/] docs site",
+            [str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"],
+        )
+    done(
+        f"all green in {fmt_secs(time.monotonic() - started_at)}"
+        + (" (fast: no firmware builds, no site: `check` without --fast runs them)" if fast else "")
+    )
 
 
 def doctor() -> None:
@@ -465,87 +699,112 @@ def doctor() -> None:
     from devlib import console, log, run
     from rich.table import Table
 
-    def version(cmd: list[str]) -> str | None:
-        if not shutil.which(cmd[0]):
+    def tool_version(command: list[str]) -> str | None:
+        if not shutil.which(command[0]):
             return None
-        out = run(cmd, check=False, quiet=True)
-        return (out.stdout or out.stderr).strip().splitlines()[0] if out.returncode == 0 else None
+        result = run(command, exit_on_failure=False, quiet=True)
+        output = result.stdout or result.stderr
+        return output.strip().splitlines()[0] if result.returncode == 0 else None
 
-    rows = [
-        ("cargo", version(["cargo", "--version"]), "https://rustup.rs"),
-        ("espflash", version(["espflash", "--version"]), "cargo install espflash --locked"),
-        ("probe-rs", version(["probe-rs", "--version"]), "cargo install probe-rs-tools --locked"),
-        ("cargo-embed", version(["cargo", "embed", "--version"]), "(with probe-rs-tools)"),
-        ("zensical", version([str(VENV_BIN / "zensical"), "--version"]), "dev.py setup"),
+    tools = [
+        ("cargo", tool_version(["cargo", "--version"]), "https://rustup.rs"),
+        ("espflash", tool_version(["espflash", "--version"]), "cargo install espflash --locked"),
+        (
+            "probe-rs",
+            tool_version(["probe-rs", "--version"]),
+            "cargo install probe-rs-tools --locked",
+        ),
+        ("cargo-embed", tool_version(["cargo", "embed", "--version"]), "(with probe-rs-tools)"),
+        ("zensical", tool_version([str(VENV_BIN / "zensical"), "--version"]), "dev.py setup"),
     ]
-    targets = run(["rustup", "target", "list", "--installed"], check=False, quiet=True)
-    has_target = TARGET in targets.stdout.split()
-    rows.append(
-        (TARGET, "installed" if has_target else None, "rustup show (reads rust-toolchain.toml)")
+    installed_targets = run(
+        ["rustup", "target", "list", "--installed"], exit_on_failure=False, quiet=True
+    )
+    target_installed = TARGET in installed_targets.stdout.split()
+    tools.append(
+        (
+            TARGET,
+            "installed" if target_installed else None,
+            "rustup show (reads rust-toolchain.toml)",
+        )
     )
 
-    table = Table(box=None, header_style="bold", pad_edge=False)
-    for col in ("", "tool", "version", "to install"):
-        table.add_column(col)
-    for name, ver, how in rows:
-        ok = ver is not None
+    table = Table(box=None, header_style="table_header", pad_edge=False)
+    for column in ("", "tool", "version", "to install"):
+        table.add_column(column)
+    for name, version, install_hint in tools:
+        is_installed = version is not None
         table.add_row(
-            "[green]✓[/]" if ok else "[red]✗[/]",
+            "[success]✓[/]" if is_installed else "[error]✗[/]",
             name,
-            ver or "[red]missing[/]",
-            "" if ok else f"[cmd]{how}[/]",
+            version or "[error]missing[/]",
+            "" if is_installed else f"[command]{install_hint}[/]",
         )
     console.print(table)
     console.print()
     boards_list()
-    if any(ver is None for _, ver, _ in rows):
+    if any(version is None for _name, version, _hint in tools):
         log.warning("Some tools are missing (see above).")
-
-
-# --------------------------------------------------------------------------------------
-# Documentation
-# --------------------------------------------------------------------------------------
 
 
 def docs_serve(port: int, open_browser: bool) -> None:
     from devlib import stream
 
     stream(
-        [str(VENV_BIN / "zensical"), "serve", "-f", "docs/zensical.toml", "-a", f"localhost:{port}"]
+        [
+            str(VENV_BIN / "zensical"),
+            "serve",
+            "-f",
+            "docs/zensical.toml",
+            "-a",
+            f"localhost:{port}",
+        ]
         + (["--open"] if open_browser else [])
     )
 
 
-def docs_build(reference: bool) -> None:
-    from devlib import live, log, run
+def docs_build(regenerate_reference: bool) -> None:
+    from devlib import done, task
 
-    if reference:
-        # The reference pages are generated from the Rust code (and checked by CI).
-        live(["cargo", "test-host"], extra_env={"UPDATE_DOCS": "1"})
-    run([str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"])
-    log.info(f"✓ site in [path]{(ROOT / 'docs' / 'site').relative_to(ROOT)}/[/]")
+    if regenerate_reference:
+        task(
+            "regenerate the reference pages",
+            with_verbose(["cargo", "test-host"]),
+            extra_environment={"UPDATE_DOCS": "1"},
+            summarize=tests_summary,
+        )
+    task(
+        "build the docs site",
+        [str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"],
+    )
+    done(f"site in [path]{(ROOT / 'docs' / 'site').relative_to(ROOT)}/[/]")
 
 
 def docs_api(open_browser: bool) -> None:
-    from devlib import live
+    from devlib import task
 
-    live(["cargo", "doc", "-p", "workshop-core", "--target", "host-tuple", "--no-deps"])
-    live(["cargo", "doc", "-p", "esp32-rust-workshop", "--no-deps"])
-    # The Ethernet firmware is its own Cargo workspace, with its own target/.
-    live(
-        ["cargo", "doc", "--no-deps"] + (["--open"] if open_browser else []),
-        cwd=APP_DIRS["eth"],
+    task(
+        "rustdoc: workshop-core",
+        with_verbose(
+            ["cargo", "doc", "-p", "workshop-core", "--target", "host-tuple", "--no-deps"]
+        ),
+    )
+    task(
+        "rustdoc: UART firmware",
+        with_verbose(["cargo", "doc", "-p", "esp32-rust-workshop", "--no-deps"]),
+    )
+    task(
+        "rustdoc: Ethernet firmware",
+        with_verbose(["cargo", "doc", "--no-deps"] + (["--open"] if open_browser else [])),
+        working_directory=APP_DIRS["eth"],
     )
 
 
-# --- git workflow ------------------------------------------------------------------------
-
-
-def git(*args: str) -> str:
+def git(*arguments: str) -> str:
     """Runs a git command (stops the script if it fails); returns its output."""
     from devlib import run
 
-    return run(["git", *args]).stdout.strip()
+    return run(["git", *arguments]).stdout.strip()
 
 
 def current_branch() -> str:
@@ -561,7 +820,7 @@ def ensure_clean() -> None:
 
 
 def git_command(args: argparse.Namespace) -> None:
-    from devlib import log
+    from devlib import done, log
 
     match args.git_command:
         case "branch":
@@ -569,17 +828,17 @@ def git_command(args: argparse.Namespace) -> None:
             git("switch", args.base)
             git("pull", "--ff-only")
             git("switch", "-c", args.name)
-            log.info(f"✓ on new branch [pkg]{args.name}[/] (from {args.base})")
+            done(f"on new branch [package]{args.name}[/] (from {args.base})")
         case "commit":
             if args.all:
                 git("add", "-A")
             message = f"{args.type}: {args.message}" if args.type else args.message
             git("commit", "-m", message)
-            log.info(f"✓ committed: {message}")
+            done(f"committed: {message}")
         case "push":
             branch = current_branch()
             git("push", *(["-u", "origin", branch] if args.set_upstream else []))
-            log.info(f"✓ pushed [pkg]{branch}[/]")
+            done(f"pushed [package]{branch}[/]")
         case "squash":
             branch = current_branch()
             if branch == args.target:
@@ -590,187 +849,324 @@ def git_command(args: argparse.Namespace) -> None:
             git("pull", "--ff-only")
             git("merge", "--squash", branch)
             git("commit", "-m", f"merge({branch}): squash merge on {date.today()}")
-            log.info(f"✓ squash-merged [pkg]{branch}[/] into [pkg]{args.target}[/]")
+            done(f"squash-merged [package]{branch}[/] into [package]{args.target}[/]")
 
 
-# --------------------------------------------------------------------------------------
-
-
-def check_node(args: argparse.Namespace) -> None:
+def require_node(args: argparse.Namespace) -> None:
     """`flash` and `rtt` need a node; the other commands default to both."""
     if not hasattr(args, "node") or args.node == "all" or args.command == "boards":
         return
     if args.node is None and args.command in ("flash", "rtt"):
         sys.exit(f"`{args.command}` needs a node: a or b.")
+    if args.command == "watch" and args.flash and args.node is None:
+        sys.exit("`watch --flash` needs a node: a or b.")
 
 
-def fft(tool_args: list[str]) -> None:
+def fft(tool_arguments: list[str]) -> None:
     """The computer side of adc-stream: a web page with the live spectrum (tools/adc-fft/)."""
     from devlib import log, stream
 
-    if tool_args[:1] == ["--"]:
-        tool_args = tool_args[1:]
+    if tool_arguments[:1] == ["--"]:
+        tool_arguments = tool_arguments[1:]
     log.info(
         "live spectrum: [path]tools/adc-fft/adc_fft.py[/] (Ctrl+C to stop; `dev.py fft --help` for options)"
     )
-    stream([str(VENV_PY), "-u", str(FFT_TOOL), *tool_args])
+    stream([str(VENV_PYTHON), "-u", str(FFT_TOOL), *tool_arguments])
 
 
-def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+def dash(tool_arguments: list[str]) -> None:
+    """The dashboard of both boards (eth or uart app): a web page over their USB consoles (tools/node-dash/)."""
+    from devlib import log, stream
+
+    if tool_arguments[:1] == ["--"]:
+        tool_arguments = tool_arguments[1:]
+    log.info(
+        "node dashboard: [path]tools/node-dash/node_dash.py[/] (Ctrl+C to stop; `dev.py dash --help` for options). "
+        "Close `monitor` first: one program per serial port."
+    )
+    if APP == "adc":
+        sys.exit(
+            "The ADC app has its own page: `dev.py fft`. `dash` is for --app eth or --app uart."
+        )
+    # `dev.py --app uart dash`: the page starts on that app (it also reads it from the boards' `config`).
+    if "--app" in sys.argv[1:] and "--app" not in tool_arguments:
+        tool_arguments = ["--app", APP, *tool_arguments]
+    stream([str(VENV_PYTHON), "-u", str(DASH_TOOL), *tool_arguments])
+
+
+def add_node_argument(command_parser: argparse.ArgumentParser, optional: bool = False) -> None:
+    if optional:
+        command_parser.add_argument("node", nargs="?", choices=NODES, help="a or b")
+    else:
+        command_parser.add_argument("node", choices=NODES, help="a or b")
+    command_parser.add_argument(
+        "--board", metavar="MAC|PORT|#", help="this board instead of the node's assigned one"
+    )
+
+
+def add_debug_argument(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--debug", action="store_true", help="debug profile instead of release"
+    )
+
+
+def add_verbose_argument(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="cargo's -v (-vv for more), and its own output instead of the bar",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    root_parser = argparse.ArgumentParser(
         prog="dev.py",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument(
+    root_parser.add_argument(
         "--app",
         choices=("uart", "eth", "adc"),
         default="eth",
         help="firmware that build / size / flash / monitor / erase work on: eth (default, board-to-board over Ethernet), uart (board-to-board over a UART) or adc (adc-stream: one board to a computer)",
     )
-    p.add_argument(
+    root_parser.add_argument(
         "--preset",
         metavar="NAME",
         help="build firmware/<app>/presets/NAME.toml instead of node-a / node-b",
     )
-    sub = p.add_subparsers(dest="command", required=True, metavar="command")
+    commands = root_parser.add_subparsers(dest="command", required=True, metavar="command")
 
-    def node_arg(s: argparse.ArgumentParser, optional: bool = False) -> None:
-        if optional:
-            s.add_argument("node", nargs="?", choices=NODES, help="a or b")
-        else:
-            s.add_argument("node", choices=NODES, help="a or b")
-        s.add_argument(
-            "--board", metavar="MAC|PORT|#", help="this board instead of the node's assigned one"
-        )
+    setup_parser = commands.add_parser(
+        "setup", help="create .venv and install scripts/requirements.txt"
+    )
+    setup_parser.add_argument(
+        "--python", help="interpreter to use (default: python3.13, 3.12, 3.14)"
+    )
 
-    def debug_arg(s: argparse.ArgumentParser) -> None:
-        s.add_argument("--debug", action="store_true", help="debug profile instead of release")
+    commands.add_parser("doctor", help="check tools, Rust target and boards")
 
-    s = sub.add_parser("setup", help="create .venv and install scripts/requirements.txt")
-    s.add_argument("--python", help="interpreter to use (default: python3.13, 3.12, 3.14)")
+    boards_parser = commands.add_parser(
+        "boards", help="list plugged boards, or assign them to nodes"
+    )
+    boards_commands = boards_parser.add_subparsers(dest="boards_command", metavar="assign")
+    assign_parser = boards_commands.add_parser(
+        "assign", help="remember which board is node A or B (or the ADC board)"
+    )
+    assign_parser.add_argument("node", choices=NODES)
+    assign_parser.add_argument("board", help="end of its MAC (6C:1A), its port, or # from `boards`")
 
-    sub.add_parser("doctor", help="check tools, Rust target and boards")
+    build_command_parser = commands.add_parser(
+        "build", help="build the firmware (both nodes by default)"
+    )
+    build_command_parser.add_argument(
+        "node", nargs="?", choices=NODES, help="a or b (default: both)"
+    )
+    build_command_parser.add_argument(
+        "--rtt", action="store_true", help="with the RTT console (feature rtt)"
+    )
+    add_debug_argument(build_command_parser)
+    add_verbose_argument(build_command_parser)
 
-    # --- boards and firmware ---
-    s = sub.add_parser("boards", help="list plugged boards, or assign them to nodes")
-    b = s.add_subparsers(dest="boards_command", metavar="assign")
-    s = b.add_parser("assign", help="remember which board is node A or B (or the ADC board)")
-    s.add_argument("node", choices=NODES)
-    s.add_argument("board", help="end of its MAC (6C:1A), its port, or # from `boards`")
+    size_parser = commands.add_parser(
+        "size", help="flash and RAM used by the firmware (GCC-style table)"
+    )
+    size_parser.add_argument("node", nargs="?", choices=NODES, help="a or b (default: both)")
+    add_debug_argument(size_parser)
 
-    s = sub.add_parser("build", help="build the firmware (both nodes by default)")
-    s.add_argument("node", nargs="?", choices=NODES, help="a or b (default: both)")
-    s.add_argument("--rtt", action="store_true", help="with the RTT console (feature rtt)")
-    debug_arg(s)
-
-    s = sub.add_parser("size", help="flash and RAM used by the firmware (GCC-style table)")
-    s.add_argument("node", nargs="?", choices=NODES, help="a or b (default: both)")
-    debug_arg(s)
-
-    s = sub.add_parser("flash", help="build and flash a node with espflash (or `all`)")
-    s.add_argument(
+    flash_parser = commands.add_parser(
+        "flash", help="build and flash a node with espflash (or `all`)"
+    )
+    flash_parser.add_argument(
         "node",
         nargs="?",
         choices=[*NODES, "all"],
         help="a, b, or all (both, no monitor; not for --app adc)",
     )
-    s.add_argument("--board", metavar="MAC|PORT|#", help="this board instead of the assigned one")
-    s.add_argument("-m", "--monitor", action="store_true", help="open the console afterwards")
-    s.add_argument("--rtt", action="store_true", help="with the RTT console (feature rtt)")
-    debug_arg(s)
+    flash_parser.add_argument(
+        "--board", metavar="MAC|PORT|#", help="this board instead of the assigned one"
+    )
+    flash_parser.add_argument(
+        "-m", "--monitor", action="store_true", help="open the console afterwards"
+    )
+    flash_parser.add_argument(
+        "--rtt", action="store_true", help="with the RTT console (feature rtt)"
+    )
+    add_debug_argument(flash_parser)
+    add_verbose_argument(flash_parser)
 
-    s = sub.add_parser("monitor", help="serial console + CLI of a board (no flashing)")
-    node_arg(s, optional=True)
+    monitor_parser = commands.add_parser(
+        "monitor", help="serial console + CLI of a board (no flashing)"
+    )
+    add_node_argument(monitor_parser, optional=True)
 
-    s = sub.add_parser("rtt", help="RTT build + flash, then the cargo-embed console")
-    node_arg(s)
+    rtt_parser = commands.add_parser("rtt", help="RTT build + flash, then the cargo-embed console")
+    add_node_argument(rtt_parser)
+    add_verbose_argument(rtt_parser)
 
-    s = sub.add_parser("erase", help="erase a board's whole flash")
-    node_arg(s, optional=True)
+    erase_parser = commands.add_parser(
+        "erase", help="erase a board's whole flash (or only its saved settings)"
+    )
+    add_node_argument(erase_parser, optional=True)
+    erase_parser.add_argument(
+        "--settings",
+        action="store_true",
+        help="only the saved settings (the nvs partition): quicker, the firmware stays",
+    )
 
-    # --- the ADC app's computer side ---
-    s = sub.add_parser(
+    reset_parser = commands.add_parser(
+        "reset", help="restart a board's firmware (no build, no flashing)"
+    )
+    add_node_argument(reset_parser, optional=True)
+
+    watch_parser = commands.add_parser(
+        "watch",
+        help="rebuild on every saved source file (and reflash with --flash)",
+        description="Builds, then waits for a change in the app, the shared crates or the Cargo "
+        "settings and builds again. A failed build is shown and the next save tries again. "
+        "With --flash the board is flashed after each good build (one node: a or b).",
+    )
+    add_node_argument(watch_parser, optional=True)
+    watch_parser.add_argument(
+        "-f", "--flash", action="store_true", help="flash the node after each build"
+    )
+    add_debug_argument(watch_parser)
+    add_verbose_argument(watch_parser)
+
+    fft_parser = commands.add_parser(
         "fft",
         help="live spectrum page for adc-stream (Plotly, in the browser); options go to the tool",
         description="Starts tools/adc-fft/adc_fft.py in .venv. Everything after `fft` is passed to it: "
         "`--demo` (simulated board), `--rate 40000`, `--no-browser`, `--http-port 8051`, `--selftest`, `--help`...",
     )
-    s.add_argument(
+    fft_parser.add_argument(
         "tool_args", nargs=argparse.REMAINDER, metavar="...", help="passed to adc_fft.py"
     )
 
-    # --- tests ---
-    t = sub.add_parser("test", help="host or on-target tests").add_subparsers(
+    dash_parser = commands.add_parser(
+        "dash",
+        help="dashboard of both boards (Ethernet or UART app): consoles, controls and charts, in the browser",
+        description="Starts tools/node-dash/node_dash.py in .venv. Everything after `dash` is passed to it: "
+        "`--demo [uart]` (simulated nodes), `--a PORT --b PORT`, `--no-browser`, `--http-port 8061`, `--selftest`, `--help`...",
+    )
+    dash_parser.add_argument(
+        "tool_args", nargs=argparse.REMAINDER, metavar="...", help="passed to node_dash.py"
+    )
+
+    test_commands = commands.add_parser("test", help="host or on-target tests").add_subparsers(
         dest="test_command", required=True
     )
-    s = t.add_parser("host", help="workshop-core tests on this computer")
-    s.add_argument(
+    test_host_parser = test_commands.add_parser("host", help="workshop-core tests on this computer")
+    test_host_parser.add_argument(
         "-u", "--update-docs", action="store_true", help="regenerate the reference pages"
     )
-    s = t.add_parser(
+    add_verbose_argument(test_host_parser)
+    test_target_parser = test_commands.add_parser(
         "target", help="firmware/uart/tests/hil.rs on a board (probe-rs), then reflash it"
     )
-    node_arg(s, optional=True)
-    s.add_argument("--keep", action="store_true", help="leave the test image on the board")
-
-    sub.add_parser("check", help="run what CI runs (tests, clippy, build, docs)")
-
-    s = sub.add_parser("format", help="cargo fmt + black on scripts/")
-    s.add_argument("--check", action="store_true", help="only check, change nothing")
-
-    # --- docs ---
-    d = sub.add_parser("docs", help="documentation site and API docs").add_subparsers(
-        dest="docs_command", required=True
+    add_node_argument(test_target_parser, optional=True)
+    test_target_parser.add_argument(
+        "--keep", action="store_true", help="leave the test image on the board"
     )
-    s = d.add_parser("serve", help="docs site with live reload")
-    s.add_argument("-p", "--port", type=int, default=3000, help="default: 3000")
-    s.add_argument("-o", "--open", action="store_true", help="open it in the browser")
-    s = d.add_parser("build", help="build the docs site into docs/site/")
-    s.add_argument(
+    add_verbose_argument(test_target_parser)
+
+    check_parser = commands.add_parser(
+        "check", help="run what CI runs (tests, clippy, build, docs)"
+    )
+    check_parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="without the three firmware builds and the docs site (clippy still type-checks)",
+    )
+    add_verbose_argument(check_parser)
+
+    format_parser = commands.add_parser("format", help="cargo fmt + black on scripts/")
+    format_parser.add_argument("--check", action="store_true", help="only check, change nothing")
+
+    docs_commands = commands.add_parser(
+        "docs", help="documentation site and API docs"
+    ).add_subparsers(dest="docs_command", required=True)
+    docs_serve_parser = docs_commands.add_parser("serve", help="docs site with live reload")
+    docs_serve_parser.add_argument("-p", "--port", type=int, default=3000, help="default: 3000")
+    docs_serve_parser.add_argument(
+        "-o", "--open", action="store_true", help="open it in the browser"
+    )
+    docs_build_parser = docs_commands.add_parser(
+        "build", help="build the docs site into docs/site/"
+    )
+    docs_build_parser.add_argument(
         "-r", "--reference", action="store_true", help="regenerate the reference pages first"
     )
-    s = d.add_parser("api", help="rustdoc of workshop-core and the firmware")
-    s.add_argument("-o", "--open", action="store_true", help="open it in the browser")
+    add_verbose_argument(docs_build_parser)
+    docs_api_parser = docs_commands.add_parser(
+        "api", help="rustdoc of workshop-core and the firmware"
+    )
+    docs_api_parser.add_argument("-o", "--open", action="store_true", help="open it in the browser")
+    add_verbose_argument(docs_api_parser)
 
-    # --- tooling ---
-    s = sub.add_parser("update", help="upgrade pip and the requirements that are outdated")
-    s.add_argument("--dry-run", action="store_true", help="only show what's outdated")
+    update_parser = commands.add_parser(
+        "update", help="upgrade pip and the requirements that are outdated"
+    )
+    update_parser.add_argument("--dry-run", action="store_true", help="only show what's outdated")
 
-    g = sub.add_parser("git", help="git workflow helpers").add_subparsers(
+    git_commands = commands.add_parser("git", help="git workflow helpers").add_subparsers(
         dest="git_command", required=True
     )
-    s = g.add_parser("branch", help="new branch from an up-to-date base")
-    s.add_argument("name")
-    s.add_argument("--base", default="main", help="default: main")
-    s = g.add_parser("commit", help="commit, optionally with a conventional type")
-    s.add_argument("message")
-    s.add_argument("-a", "--all", action="store_true", help="stage everything first")
-    s.add_argument("-t", "--type", choices=COMMIT_TYPES, help="prefix: `<type>: message`")
-    s = g.add_parser("push", help="push the current branch")
-    s.add_argument("-u", "--set-upstream", action="store_true")
-    s = g.add_parser("squash", help="squash-merge the current branch into TARGET")
-    s.add_argument("target")
-    return p
+    branch_parser = git_commands.add_parser("branch", help="new branch from an up-to-date base")
+    branch_parser.add_argument("name")
+    branch_parser.add_argument("--base", default="main", help="default: main")
+    commit_parser = git_commands.add_parser(
+        "commit", help="commit, optionally with a conventional type"
+    )
+    commit_parser.add_argument("message")
+    commit_parser.add_argument("-a", "--all", action="store_true", help="stage everything first")
+    commit_parser.add_argument(
+        "-t", "--type", choices=COMMIT_TYPES, help="prefix: `<type>: message`"
+    )
+    push_parser = git_commands.add_parser("push", help="push the current branch")
+    push_parser.add_argument("-u", "--set-upstream", action="store_true")
+    squash_parser = git_commands.add_parser(
+        "squash", help="squash-merge the current branch into TARGET"
+    )
+    squash_parser.add_argument("target")
+    return root_parser
+
+
+def notify_if_long(command: str, started_at: float, succeeded: bool) -> None:
+    """Desktop notification for a command that took a while (silenced with DEV_NOTIFY=0)."""
+    from devlib import fmt_secs, notify
+
+    elapsed = time.monotonic() - started_at
+    if command in NOTIFY_COMMANDS and elapsed >= NOTIFY_AFTER_SECONDS:
+        notify(
+            f"dev.py {command}", f"{'done' if succeeded else 'failed'} after {fmt_secs(elapsed)}"
+        )
 
 
 def main() -> None:
-    # Everything after `fft` belongs to the tool (argparse would choke on its options).
-    argv = sys.argv[1:]
-    tool_args: list[str] = []
-    if "fft" in argv:
-        i = argv.index("fft")
-        argv, tool_args = argv[: i + 1], argv[i + 1 :]
-    args = parser().parse_args(argv)
-    if args.command == "fft":
-        args.tool_args = tool_args
+    # Everything after `fft` / `dash` belongs to the tool (argparse would choke on its options).
+    command_line_arguments = sys.argv[1:]
+    tool_arguments: list[str] = []
+    for tool_command in ("fft", "dash"):
+        if tool_command in command_line_arguments:
+            position = command_line_arguments.index(tool_command)
+            command_line_arguments, tool_arguments = (
+                command_line_arguments[: position + 1],
+                command_line_arguments[position + 1 :],
+            )
+            break
+    args = build_parser().parse_args(command_line_arguments)
+    if args.command in ("fft", "dash"):
+        args.tool_args = tool_arguments
     if args.command == "setup":
         setup(args.python)
         return
     if not in_venv():
-        if not VENV_PY.exists():
+        if not VENV_PYTHON.exists():
             sys.exit("No .venv yet: run `python3 scripts/dev.py setup` first.")
-        os.execv(VENV_PY, [str(VENV_PY), __file__, *sys.argv[1:]])
+        os.execv(VENV_PYTHON, [str(VENV_PYTHON), __file__, *sys.argv[1:]])
 
     sys.path.insert(0, str(SCRIPTS))
     try:
@@ -779,10 +1175,24 @@ def main() -> None:
         if args.command not in ("update", "git", "docs", "format"):
             sys.exit("pyserial is missing from .venv: run `python3 scripts/dev.py update`.")
 
-    global APP, PRESET
+    global APP, PRESET, VERBOSE
     APP, PRESET = args.app, args.preset
+    VERBOSE = getattr(args, "verbose", 0)
+    import devlib
+
+    devlib.RAW = VERBOSE > 0
     release = not getattr(args, "debug", False)
-    check_node(args)
+    require_node(args)
+    started_at = time.monotonic()
+    try:
+        run_command(args, release)
+    except SystemExit as exit_request:
+        notify_if_long(args.command, started_at, succeeded=exit_request.code in (0, None))
+        raise
+    notify_if_long(args.command, started_at, succeeded=True)
+
+
+def run_command(args: argparse.Namespace, release: bool) -> None:
     match args.command:
         case "doctor":
             doctor()
@@ -797,6 +1207,8 @@ def main() -> None:
             memory_usage([args.node] if args.node else list(app_nodes()), release)
         case "fft":
             fft(args.tool_args)
+        case "dash":
+            dash(args.tool_args)
         case "flash":
             if args.node == "all":
                 flash_all(release)
@@ -806,15 +1218,19 @@ def main() -> None:
             monitor(args.node, args.board)
         case "rtt":
             rtt(args.node, args.board)
+        case "reset":
+            reset(args.node, args.board)
+        case "watch":
+            watch(args.node, args.board, args.flash, release)
         case "erase":
-            erase(args.node, args.board)
+            erase(args.node, args.board, args.settings)
         case "test":
             if args.test_command == "host":
                 test_host(args.update_docs)
             else:
                 test_target(args.node, args.board, args.keep)
         case "check":
-            check()
+            check(args.fast)
         case "format":
             format_code(args.check)
         case "docs":
