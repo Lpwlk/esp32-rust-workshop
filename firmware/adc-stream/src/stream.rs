@@ -41,6 +41,7 @@
 //! |---|---|
 //! | `info` | six lines: chip, build, ADC, network, stream, uptime (the node firmware's `info`, compact) |
 //! | `verbose [on\|off]` | one detail line per second (timings, ring level, DMA), without slowing the stream |
+//! | `pwm [freq=HZ] [duty=%] [on\|off]` | the PWM generator on GPIO20 ([`crate::pwm`]): `pwm 1000 25` is 1 kHz at 25 %; no argument tells its state |
 //! | `reboot` | software reset of the chip |
 //! | `help` | the list above |
 //!
@@ -69,6 +70,8 @@ use crate::{
     blog,
     board_log::{self, Level},
     dma::{self, AdcDma},
+    pwm::{self, Pwm},
+    pwm_plan,
 };
 
 /// UDP port of the board.
@@ -148,16 +151,55 @@ fn parse_start(text: &str) -> Option<Request> {
 }
 
 /// What a datagram from the computer asks.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 enum Command {
     Start(Request),
     Stop,
     Info,
     /// `verbose`: toggle; `verbose on` / `verbose off`.
     Verbose(Option<bool>),
+    /// `pwm ...`; `None` when the arguments make no sense.
+    Pwm(Option<PwmArgs>),
     Reboot,
     Help,
     Unknown,
+}
+
+/// What a `pwm` command changes (nothing at all: it asks for the state).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct PwmArgs {
+    freq: Option<f32>,
+    duty: Option<f32>,
+    on: Option<bool>,
+}
+
+/// `pwm [freq=HZ] [duty=PCT] [on|off]`, or the numbers alone: `pwm 1000 25`.
+fn parse_pwm<'a>(words: impl Iterator<Item = &'a str>) -> Option<PwmArgs> {
+    let mut args = PwmArgs::default();
+    let mut bare = 0;
+    for word in words {
+        match word {
+            "on" => args.on = Some(true),
+            "off" => args.on = Some(false),
+            _ => {
+                let number = |text: &str| text.parse::<f32>().ok().filter(|v| v.is_finite());
+                match word.split_once('=') {
+                    Some(("freq" | "f" | "hz", v)) => args.freq = Some(number(v)?),
+                    Some(("duty" | "d", v)) => args.duty = Some(number(v)?),
+                    Some(_) => return None,
+                    None => {
+                        match bare {
+                            0 => args.freq = Some(number(word)?),
+                            1 => args.duty = Some(number(word)?),
+                            _ => return None,
+                        }
+                        bare += 1;
+                    }
+                }
+            }
+        }
+    }
+    Some(args)
 }
 
 fn parse(text: &str) -> Command {
@@ -169,6 +211,7 @@ fn parse(text: &str) -> Command {
         Some("stop") => Command::Stop,
         Some("info") => Command::Info,
         Some("reboot") => Command::Reboot,
+        Some("pwm") => Command::Pwm(parse_pwm(words)),
         Some("help") => Command::Help,
         Some("verbose") => match words.next() {
             None => Command::Verbose(None),
@@ -359,6 +402,8 @@ pub async fn run(spawner: Spawner) -> ! {
     // an ADC problem can't be confused with a network one.
     let mut adc_parts = Some((p.GPIO43, p.ADC1));
     let mut adc: Option<AdcDma> = None;
+    // The PWM generator (RMT channel 0 on GPIO20): idle (low) until the page asks.
+    let mut pwm = Pwm::new(p.RMT, p.GPIO20);
 
     // trng::enable() is the node's business: the seed only picks TCP/UDP port numbers here.
     let rng = Rng::new();
@@ -409,6 +454,17 @@ pub async fn run(spawner: Spawner) -> ! {
         dma::CHANNEL
     );
     blog!(Level::Info, "UDP {a}.{b}.{c}.{d}:{PORT} · static address, no DHCP");
+    if pwm.is_some() {
+        blog!(
+            Level::Info,
+            "PWM generator on GPIO{} (RMT) · {} Hz to {} kHz · off until `pwm`",
+            pwm::PIN,
+            pwm_plan::MIN_HZ,
+            pwm_plan::MAX_HZ / 1000.0
+        );
+    } else {
+        blog!(Level::Warn, "PWM generator: the RMT could not be set up");
+    }
 
     let mut rx_meta = [PacketMetadata::EMPTY; 4];
     let mut rx_buf = [0u8; 256];
@@ -486,7 +542,7 @@ pub async fn run(spawner: Spawner) -> ! {
                                 log_sent = board_log::oldest_seq();
                             }
                         }
-                        let mut reply = heapless::String::<96>::new();
+                        let mut reply = heapless::String::<160>::new();
                         let _ = core::fmt::Write::write_fmt(
                             &mut reply,
                             format_args!(
@@ -495,6 +551,19 @@ pub async fn run(spawner: Spawner) -> ! {
                                 u8::from(board_log::verbose())
                             ),
                         );
+                        if let Some(pwm) = pwm.as_ref() {
+                            let s = pwm.state();
+                            let _ = core::fmt::Write::write_fmt(
+                                &mut reply,
+                                format_args!(
+                                    " pwm={} pwm_hz={:.4} pwm_duty={:.3} pwm_pin={}",
+                                    u8::from(s.on),
+                                    s.asked_hz,
+                                    s.duty,
+                                    pwm::PIN
+                                ),
+                            );
+                        }
                         let _ = socket.send_to(reply.as_bytes(), meta.endpoint).await;
                     }
                     Command::Stop => {
@@ -524,6 +593,82 @@ pub async fn run(spawner: Spawner) -> ! {
                         let text = if on { "verbose on: one detail line per second" } else { "verbose off" };
                         say(&socket, meta.endpoint, Level::Reply, format_args!("{text}")).await;
                     }
+                    Command::Pwm(args) => {
+                        let Some(pwm) = pwm.as_mut() else {
+                            say(
+                                &socket,
+                                meta.endpoint,
+                                Level::Warn,
+                                format_args!("pwm: the generator is not available"),
+                            )
+                            .await;
+                            continue;
+                        };
+                        let Some(args) = args else {
+                            say(
+                                &socket,
+                                meta.endpoint,
+                                Level::Warn,
+                                format_args!("pwm [freq=HZ] [duty=%] [on|off] (or `pwm 1000 25`)"),
+                            )
+                            .await;
+                            continue;
+                        };
+                        let now = pwm.state();
+                        let changes = args.freq.is_some() || args.duty.is_some();
+                        let freq = args.freq.unwrap_or(now.asked_hz);
+                        let duty = args.duty.unwrap_or(now.duty);
+                        let on = args.on.unwrap_or(changes || now.on);
+                        if changes || args.on.is_some() {
+                            match pwm.apply(freq, duty, on) {
+                                Ok(_) => {}
+                                Err(why) => {
+                                    say(
+                                        &socket,
+                                        meta.endpoint,
+                                        Level::Error,
+                                        format_args!(
+                                            "pwm: {why} ({} Hz to {} kHz)",
+                                            pwm_plan::MIN_HZ,
+                                            pwm_plan::MAX_HZ / 1000.0
+                                        ),
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                            }
+                        }
+                        let s = pwm.state();
+                        if s.on {
+                            say(
+                                &socket,
+                                meta.endpoint,
+                                Level::Reply,
+                                format_args!(
+                                    "pwm on · {:.4} Hz · duty {:.3} % · GPIO{} · period {} ticks of {} ns",
+                                    s.hz,
+                                    s.duty,
+                                    pwm::PIN,
+                                    s.period,
+                                    u32::from(s.divider) * 25 / 2
+                                ),
+                            )
+                            .await;
+                        } else {
+                            say(
+                                &socket,
+                                meta.endpoint,
+                                Level::Reply,
+                                format_args!(
+                                    "pwm off · GPIO{} low · set to {:.4} Hz, duty {:.3} %",
+                                    pwm::PIN,
+                                    s.asked_hz,
+                                    s.duty
+                                ),
+                            )
+                            .await;
+                        }
+                    }
                     Command::Reboot => {
                         say(&socket, meta.endpoint, Level::Reply, format_args!("rebooting…")).await;
                         if let Some(adc) = adc.as_mut() {
@@ -538,7 +683,9 @@ pub async fn run(spawner: Spawner) -> ! {
                             &socket,
                             meta.endpoint,
                             Level::Reply,
-                            format_args!("commands: info · verbose [on|off] · reboot · help"),
+                            format_args!(
+                                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · reboot · help"
+                            ),
                         )
                         .await;
                     }

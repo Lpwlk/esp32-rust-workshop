@@ -15,7 +15,13 @@ python3 scripts/dev.py fft --demo             # the page with a simulated board 
 The computer's Ethernet port (a USB-C adapter is fine) needs an address in the board's subnet
 (`192.168.77.1`, netmask `255.255.255.0`), cabled to the board's RJ45. The tool is
 [`tools/adc-fft/adc_fft.py`](../../tools/adc-fft/adc_fft.py); `dev.py fft --help` lists its options
-(`--rate`, `--fft`, `--no-browser`, `--http-port`, `--host 0.0.0.0` to look from another computer...).
+(`--rate`, `--fft`, `--no-browser`, `--http-port`, `--lan` to look from a phone...). The page **keeps your settings**
+between runs, in `~/.config/adc-fft/settings.json` (`--settings FILE`, `--no-save`, `--reset-settings`): see
+[the ADC app page of the docs](../../docs/book/adc-stream.md) for everything the page does.
+
+Checks, from this folder: `cargo build --release && cargo clippy --release -- -D warnings`, `cargo fmt`, the PWM
+arithmetic with `rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_test && /tmp/pwm_plan_test`, and the page's
+`python3 ../../tools/adc-fft/adc_fft.py --selftest`.
 
 ## How it works
 
@@ -23,6 +29,7 @@ The computer's Ethernet port (a USB-C adapter is fine) needs an address in the b
 |---|---|
 | [`src/dma.rs`](src/dma.rs) | the ADC's **continuous mode with DMA**: the ADC's own timer triggers every conversion (the 40 MHz crystal divided: exactly regular sampling instants) and the LP AHB GDMA stores the results in a ring of buffers. Written against the registers, following ESP-IDF's `adc_continuous` (`~/.espressif/v6.1/esp-idf`): esp-hal has no continuous ADC for the S31 and doesn't expose that DMA. The chip's limits are 611 Hz to 83 333 Hz. |
 | [`src/stream.rs`](src/stream.rs) | the UDP protocol (`start rate=20000 n=256` from the computer every second; sample datagrams back, with the exact rate in the header) and the main loop |
+| [`src/pwm.rs`](src/pwm.rs), [`src/pwm_plan.rs`](src/pwm_plan.rs) | the PWM generator: the RMT's transmitter in loop mode (esp-hal has no LEDC for the S31), and its arithmetic (tested on the computer: `rustc --edition 2024 --test src/pwm_plan.rs`) |
 | [`src/board_log.rs`](src/board_log.rs) | the board's log: in colour on the USB console, kept in a short history, and sent to the computer (`LOG1` datagrams) for the page's terminal |
 | the Ethernet bring-up | `esp32_rust_workshop_eth::net` (PHY, EMAC, network stack), reused from [`firmware/ethernet`](../ethernet) |
 
@@ -51,6 +58,7 @@ The terminal under the page's "Board log" has a prompt: what you type goes to th
 |---|---|
 | `info` | six lines, the node firmware's boot card in short: chip and MAC, build, ADC, network and link, stream (rate, datagrams, losses, DMA stalls), uptime |
 | `verbose [on\|off]` | one detail line per second: datagrams, longest burst, longest `send_to`, longest pass of the main loop, ring level, DMA buffers and stalls, log lines sent |
+| `pwm [freq=HZ] [duty=%] [on\|off]` | the **PWM generator** on GPIO20 (`D0` of header J2), see below; `pwm 1000 25` is 1 kHz at 25 %, `pwm` alone tells its state |
 | `reboot` | software reset; the page's keep-alive restarts the stream and re-applies verbose mode |
 | `help` | the list |
 
@@ -59,3 +67,16 @@ integer operations and two clock reads per datagram, whether verbose is on or no
 formatted and sent per second, through the same bounded path as the other log lines (at most 6 per pass,
 after the samples' turn). Nothing is written per sample or per datagram. Anyone on the network can send these
 commands (there is no authentication: this is a bench tool on a point-to-point cable).
+
+## PWM generator (to feed the ADC a known signal)
+
+The page's **PWM generator** card (or `pwm` in the terminal) makes a square wave on **GPIO20**, the pin
+labelled `D0` on header J2: wire it to `43` to read it back in the spectrum and the waveform. It runs on the
+RMT (one channel, loop mode, no CPU): 0.2 Hz to 1 MHz, any duty from 0 to 100 %, the period a whole number of
+12.5 ns ticks at 80 MHz (6 ns of error at most, 0.0005 % at 1 kHz). Changing a value restarts the wave; off, the
+pin idles low. It starts off at every boot. Put an RC low-pass (cut-off well below the sample rate) between
+the two pins to read the duty cycle as a level, or none to see the edges and the harmonics fold back.
+
+- The pin also drives breadboard LED 1 if it is wired (the node apps use GPIO20 for it), which makes a
+  dimmer for the duty cycle at a few hundred Hz.
+- The wave has not been measured on a board yet: the ADC reading it back through a wire is the test.
