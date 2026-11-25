@@ -164,8 +164,8 @@ What happens under the hood (`workshop_core::persist`, tested on the host):
   saved node-A's settings ignores them.
 - **Where**: the first 4 KB sector of the `nvs` partition (0x9000). This firmware
   doesn't use ESP-IDF's NVS, so the area is free. `espflash flash` doesn't write
-  it, so **saved settings survive reflashing**; `python3 scripts/dev.py erase a`
-  wipes them along with everything else.
+  it, so **saved settings survive reflashing**; `python3 scripts/dev.py erase a --settings`
+  erases just them (`erase a` wipes them along with everything else).
 
 ## esp-rs crate settings
 
@@ -199,7 +199,7 @@ project keeps the defaults. Each crate lists its options in its `esp_config.yml`
 | change the addresses or use TCP | Ethernet: `[net]` in the presets of **both** nodes, or `PRESET_NODE_A=node-a-tcp`... |
 | show less (or more) in the console | `verbose silent`, `verbose live`, `verbose frames`, `verbose wire` |
 | see the network frames (Ethernet) | `trace events`, `trace frames`, with `trace compact` / `layers` / `inside-out` and `dump 64` |
-| graph the network traffic (Ethernet) | `dash` (bars, chart, mix), `dash mini` / `normal` / `full` / `off`, `window 2min` (shown while `trace` is on) |
+| graph the network traffic (Ethernet) | `dash` (bars, chart, mix), `dash mini` / `normal` / `full` / `off`, `window 2min` (works with the trace on or off; off at boot) |
 | fill the network with traffic (Ethernet) | `gen start 2Mbit size=512 for=30s`, then `gen rate 50Mbit`, `gen pause`, `gen stop` |
 | change the colors of the console | `[colors]` in the preset, build time ([Colors](console.md#colors)) |
 | set the peer's LED or setting from here | `write /leds/1 on`, `write /config/verbose frames` |

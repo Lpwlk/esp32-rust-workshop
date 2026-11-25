@@ -81,6 +81,26 @@ python3 scripts/dev.py fft                   # the page (or `fft --demo` without
 `dev.py` flashes any of the three firmwares from the repository root, with `--app eth` (default), `--app uart`
 or `--app adc`: no need to `cd` into a firmware folder.
 
+The page has a spectrum, a waveform with an oscilloscope trigger, a harmonics view (with aliasing shown), a waterfall,
+a digital filter, measurements, a status box for the link and global colour themes, and the board's log with a command line; the board can also play a **PWM wave** (RMT, GPIO20) to give its ADC a signal you
+know. **Your settings are kept** in `~/.config/adc-fft/settings.json`: rebuild, restart, change the port, and the
+page comes back as you left it (`--settings FILE`, `--no-save`, `--reset-settings`, or *Reset all* in the page).
+Everything about it: [the ADC app page](https://lpwlk.github.io/esp32-rust-workshop/adc-stream/).
+
+## A dashboard for both boards
+
+The Ethernet and UART apps are driven from the USB console of each board. `dev.py dash` opens both consoles for you
+and puts a page around them ([`tools/node-dash/`](tools/node-dash)): the consoles as you know them (colours, live
+line, traffic dashboard, a command line with history), every CLI command as a control (verbose level, RGB pattern,
+LEDs, tx mode and period, baud, burst, traffic generator, network trace, the peer's address space, the settings
+table with `set` / `save` / `forget` / `reset`, and pull / push of the peer's whole config over the Ethernet or UART link), and charts read from what the boards print (frames per second, round-trip
+time, interval between data frames, losses, burst and generator results). Nothing changes in the firmware.
+
+```sh
+python3 scripts/dev.py dash                  # node A and node B (`boards assign`), close `monitor` first
+python3 scripts/dev.py dash --demo [uart]    # two simulated nodes, no hardware
+```
+
 ## What it looks like (Ethernet)
 
 Every scene below is a real recording of two boards, made by `python3 scripts/record_demos.py`.
@@ -210,16 +230,50 @@ The short version: **rustup** picks the compiler, **cargo** builds, **espflash**
 `critical-section` shares data with interrupts. The logic that needs none of them, `workshop-core`, builds for the
 chip *and* for your computer, which is why most of the tests don't need a board.
 
-**Why two Cargo workspaces.** The UART app is a member of the root workspace and builds on released crates. The Ethernet
+**Why four Cargo workspaces.** The UART app is a member of the root workspace and builds on released crates. The Ethernet
 driver for the S31 is merged in esp-hal but not released, so the Ethernet app pins esp-hal to a commit and has
-**its own workspace** (own `Cargo.lock`, own `target/`); two esp-hal versions can't live in one. Both use
-`workshop-core` by path. When a release ships the driver, they can merge.
+**its own workspace** (own `Cargo.lock`, own `target/`); two esp-hal versions can't live in one. The ADC app
+(`firmware/adc-stream/`) and the Ferrite port (`firmware/ferrite-esp32s31/`) do the same, and the ADC app reuses the
+Ethernet app's bring-up by path. They all use `workshop-core` by path. When a release ships the driver, they can merge.
+Run `cargo` **in the folder** of the one you want, or let `dev.py --app …` do it.
 
 > [!WARNING]
 > **ESP32-S31 support is young.** esp-hal marks the chip as early-stage, and
 > probe-rs 0.32 writes a wrong minimum chip revision into the images it flashes.
 > Flash with **espflash**; use probe-rs only to attach (RTT, debugging). See the
 > [Rust & Cargo guide](https://lpwlk.github.io/esp32-rust-workshop/guide-rust/#flash-run-debug).
+
+## Tools and workflows
+
+**Rust tools** (all but the first two are optional):
+
+| Tool | For | Command |
+|---|---|---|
+| `rustup` | the toolchain of `rust-toolchain.toml`, installed on the first `cargo` | `rustup show` |
+| `cargo` + `rustc` | build, run, test; `.cargo/config.toml` sets the target and the flashing runner | `cargo build --release` |
+| `espflash` | flash and serial console (the runner); `save-image` for releases | `cargo install espflash --locked` |
+| `probe-rs`, `cargo-embed` | RTT console and debugging, attach only | `cargo install probe-rs-tools --locked` |
+| `rustfmt`, `clippy` | style (`rustfmt.toml`, 120 columns) and lints (`-D warnings` in CI) | `cargo fmt --all`, `cargo clippy --release -- -D warnings` |
+| `rustdoc` | the API pages of the site | `cargo doc -p workshop-core --target host-tuple --open` |
+| `cargo-binutils` | `cargo size`; `scripts/memsize.py` does the same table | `cargo install cargo-binutils --locked` |
+| `cargo test-host`, `cargo presets`, `cargo test-target` | aliases: tests on your computer, the TOML presets tool, tests on a board | see [Development](#development) |
+
+**Python tools** (`python3 scripts/dev.py setup` once; they all run in `.venv`): `scripts/dev.py` (boards, flash, tests,
+docs, git), Zensical (this site), black (formatting), `tools/adc-fft` (the ADC page), `tools/node-dash` (the nodes'
+dashboard), `tools/wireshark` (Lua dissectors: `wsnode`, `wsgen`, `wsadc`), `scripts/record_demos.py` (the GIFs).
+
+| I want to… | Run |
+|---|---|
+| check what is installed and plugged in | `python3 scripts/dev.py doctor` |
+| flash and watch a node | `python3 scripts/dev.py [--app eth\|uart\|adc] flash a -m` |
+| test without a board | `cargo test-host` |
+| see the ADC spectrum, or both nodes on a page | `python3 scripts/dev.py fft [--demo]`, `python3 scripts/dev.py dash [--demo]` |
+| format and check everything before a push | `python3 scripts/dev.py format`, then `python3 scripts/dev.py check` |
+| preview the docs | `python3 scripts/dev.py docs serve --open` |
+| release | bump `version` in `Cargo.toml`, then `git tag vX.Y.Z && git push origin vX.Y.Z` |
+
+The four Cargo workspaces, every job of CI and the checklist "when you change…" are on the
+[Tools and workflows](https://lpwlk.github.io/esp32-rust-workshop/tools/) page.
 
 ## Repository layout
 
@@ -230,14 +284,16 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 ├── firmware/
 │   ├── uart/                    the UART app: src/ (hardware glue), tests/ (on-target), presets/, Embed.toml
 │   ├── ethernet/                the Ethernet app (own Cargo workspace): src/, presets/
+│   ├── adc-stream/              the ADC app (own Cargo workspace): continuous ADC + DMA, UDP stream, PWM generator
 │   ├── ferrite-esp32s31/        the Ferrite RTOS port for the S31 (own Cargo workspace): context switch, tick, demo
 │   └── shared/
 │       ├── core/                hardware-free logic, no_std, tested on the host; examples/ run on your computer
 │       ├── ferrite/             the RTOS kernel: tasks, scheduler, semaphore/mutex/queue, tested on the host
 │       └── presets-tool/        host-only: reads and validates the TOML presets (`cargo presets`)
+├── tools/                       computer side, Python: adc-fft/ (the ADC page), node-dash/ (the nodes' dashboard), wireshark/ (Lua dissectors)
 ├── docs/                        the documentation site: book/ (pages; book/reference/ is generated), zensical.toml
-├── scripts/                     dev.py (boards, flash, tests, docs), record.py, record_demos.py, render_demos.py, gifrender.py, memsize.py
-└── .github/                     CI and releases
+├── scripts/                     dev.py + devlib.py + boards.py (boards, flash, tests, docs), memsize.py, record*.py, render_demos.py, gifrender.py, requirements.txt
+└── .github/                     CI (ci.yml) and releases (release.yml)
 ```
 
 ## Documentation
@@ -249,6 +305,8 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 | [Getting started](https://lpwlk.github.io/esp32-rust-workshop/getting-started/) | tools, wiring, flashing, first commands |
 | [The console](https://lpwlk.github.io/esp32-rust-workshop/console/) | every part of the output, the CLI, link tests, RTT |
 | [Ethernet app](https://lpwlk.github.io/esp32-rust-workshop/ethernet/) | the RJ45 link: design, measurements, what is still open |
+| [ADC app](https://lpwlk.github.io/esp32-rust-workshop/adc-stream/) | one board's ADC streamed to a live page, the PWM generator, the saved settings |
+| [Tools and workflows](https://lpwlk.github.io/esp32-rust-workshop/tools/) | every Rust and Python tool, the four workspaces, what to run before a push, CI |
 | [Ferrite](https://lpwlk.github.io/esp32-rust-workshop/ferrite/) | the project's own RTOS in Rust: kernel (host-tested), ESP32-S31 port (21-minute demo and a self-checking test pass on a board) |
 | [Protocols](https://lpwlk.github.io/esp32-rust-workshop/protocols/) | the frames, the three links, and UA-lite: an OPC UA-style address space of LEDs and buttons |
 | [Presets](https://lpwlk.github.io/esp32-rust-workshop/presets/) | the TOML format of a node's settings |
@@ -262,14 +320,18 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 ## Development
 
 ```sh
-cargo test-host                                   # host tests, examples' build, docs and presets freshness
+cargo test-host                                   # host tests (core, Ferrite kernel, presets), examples' build, docs freshness
 cargo presets check                               # every preset loads and validates
 cargo clippy --release --all-features -- -D warnings
-cargo fmt --all                                   # style: rustfmt.toml (firmware/ethernet is its own workspace: cargo fmt there too)
+cargo fmt --all                                   # style: rustfmt.toml; the other three workspaces need `cargo fmt` in their folder
 UPDATE_DOCS=1 cargo test-host                     # regenerate the reference pages
-python3 scripts/dev.py check                      # all of the above plus both firmware builds and the site
+python3 tools/adc-fft/adc_fft.py --selftest       # the ADC page: receiver, FFT, web server, saved settings (no board)
+python3 tools/node-dash/node_dash.py --selftest   # the nodes' dashboard, against two simulated nodes
+python3 scripts/dev.py format                     # cargo fmt (root, Ethernet, ADC) + black, in one go
+python3 scripts/dev.py check                      # all of the above plus the three firmware builds, the PWM arithmetic and the site
 ```
 
-CI checks formatting, runs the host tests and the examples, builds and lints both firmwares for each feature
-combination (with a Flash/RAM report, compared with the target branch on pull requests), then publishes the docs.
-A `v*` tag publishes a release with ready-to-flash firmware for both nodes.
+CI checks formatting (the four workspaces), runs the host tests and the examples, builds and lints the UART, Ethernet
+(four feature sets), ADC and Ferrite firmwares (with a Flash/RAM report, compared with the target branch on pull
+requests), runs the self tests of both Python tools, then publishes the docs. A `v*` tag publishes a release with
+ready-to-flash firmware for both UART nodes.

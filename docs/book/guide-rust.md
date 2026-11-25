@@ -21,7 +21,9 @@ per block, with the copy button at the top right of each block.
 | **`rust-toolchain.toml`** | pins a project's toolchain; rustup installs it on the fly |
 
 In this project, `rust-toolchain.toml` holds `channel = "stable"`,
-`targets = ["riscv32imafc-unknown-none-elf"]` and `components = ["rust-src"]`.
+`targets = ["riscv32imafc-unknown-none-elf"]` and `components = ["rust-src", "llvm-tools"]`. The other tools
+(espflash, probe-rs, rustfmt, clippy, rustdoc, the presets tool) and the four Cargo workspaces are listed in
+[Tools and workflows](tools.md).
 
 ### Anatomy of a project
 
@@ -618,10 +620,23 @@ Build the on-target tests without running them:
 cargo test --test hil --release --no-run
 ```
 
-Format the code:
+Format the code (the Ethernet, ADC and Ferrite-port workspaces are separate: run it in their folders too, or use
+`python3 scripts/dev.py format`):
 
 ```sh
-cargo fmt
+cargo fmt --all
+```
+
+The ADC app's PWM arithmetic has no hardware in it, so `rustc` tests it directly:
+
+```sh
+cd firmware/adc-stream && rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_test && /tmp/pwm_plan_test
+```
+
+The ADC page's self test (receiver, FFT, web server, saved settings, board commands), no board needed:
+
+```sh
+python3 tools/adc-fft/adc_fft.py --selftest
 ```
 
 ### Inspection
@@ -713,7 +728,7 @@ image has the wrong minimum revision, see the probe-rs pitfall):
 python3 scripts/dev.py test target a
 ```
 
-Everything CI runs, locally (tests, clippy, build, site):
+Everything CI runs, locally (tests, clippy, the three firmware builds, the Python tools' self tests, site):
 
 ```sh
 python3 scripts/dev.py check
@@ -725,6 +740,32 @@ Erase a board's whole flash:
 python3 scripts/dev.py erase a
 ```
 
+Flash another firmware from the repository root (`--app` goes before the command): the UART app, or the ADC streamer:
+
+```sh
+python3 scripts/dev.py --app uart flash a -m
+python3 scripts/dev.py --app adc flash a -m
+```
+
+Live spectrum of the ADC app in the browser (`--demo`: a simulated board; your settings are kept in
+`~/.config/adc-fft/settings.json`, `--reset-settings` forgets them):
+
+```sh
+python3 scripts/dev.py fft
+```
+
+Dashboard of both nodes (Ethernet or UART app) in the browser, `--demo` for two simulated ones:
+
+```sh
+python3 scripts/dev.py dash
+```
+
+Build only, and Flash / RAM used:
+
+```sh
+python3 scripts/dev.py build a
+python3 scripts/dev.py size a
+```
 Preview the site locally (http://localhost:3000), reloaded on every change:
 
 ```sh

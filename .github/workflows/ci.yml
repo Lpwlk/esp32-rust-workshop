@@ -132,6 +132,11 @@ jobs:
         run: cargo build --release --locked
       - name: Clippy (ADC streaming firmware)
         run: cargo clippy --release --locked -- -D warnings
+      # The PWM generator's arithmetic has no hardware in it: rustc builds its tests for this computer.
+      - name: PWM generator arithmetic (host tests)
+        run: |
+          rustc --edition 2024 --test src/pwm_plan.rs -o "$RUNNER_TEMP/pwm_plan_test"
+          "$RUNNER_TEMP/pwm_plan_test"
 
   adc-fft:
     name: ADC spectrum tool (tools/adc-fft)
@@ -142,9 +147,22 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install numpy plotly
-      # Receiver, FFT, web server and the page's endpoints, against a simulated board (no hardware).
+      # Receiver, FFT, web server, the page's endpoints and the saved settings, against a simulated board.
       - name: Self test
         run: python tools/adc-fft/adc_fft.py --selftest
+
+  node-dash:
+    name: Node dashboard (tools/node-dash)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install pyserial plotly
+      # Console parser (on the firmware's exact bytes), web server and controls, against two simulated nodes.
+      - name: Self test
+        run: python tools/node-dash/node_dash.py --selftest
 
   firmware:
     name: Firmware (${{ matrix.features.name }})

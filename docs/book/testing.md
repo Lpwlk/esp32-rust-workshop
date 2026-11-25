@@ -5,7 +5,7 @@ Four levels, from the fastest to the closest to the hardware:
 | Level | Command | Runs on | What it proves | Time |
 |---|---|---|---|---|
 | Host tests | `cargo test-host` | your computer | the logic is right (protocol, address space, config, CLI, debouncing, presets…) | ~1 s |
-| Lints and build | `python3 scripts/dev.py check` | your computer | what CI checks: presets, clippy, both firmware builds (UART and Ethernet), docs site | ~2 min |
+| Lints and build | `python3 scripts/dev.py check` | your computer | what CI checks: presets, clippy, both firmware builds (UART and Ethernet), docs site (`check --fast`: without the builds and the site) | ~2 min |
 | On-target tests | `python3 scripts/dev.py test target a` | one board | the RISC-V core gives the same results; the hardware behaves as assumed | ~30 s |
 | System test | `python3 scripts/dev.py flash all` (Ethernet) or `--app uart flash all` | two boards | the whole thing: link, CLI, LEDs, bursts, the address space | by hand |
 
@@ -164,16 +164,20 @@ with the three wires.
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-1. **format**: `cargo fmt --all -- --check`, and `cargo fmt -- --check` in `firmware/ethernet` (its own workspace);
+1. **format**: `cargo fmt --all -- --check`, and `cargo fmt -- --check` in `firmware/ethernet`, `firmware/adc-stream`
+   and `firmware/ferrite-esp32s31` (their own workspaces);
 2. **host tests**: `cargo test-host` (unit, property, doc tests, presets, docs freshness),
    the [examples](examples.md) (each one runs, with its `assert!`s), clippy on
    `workshop-core` and `workshop-presets` with `-D warnings`, and `cargo presets check`;
 3. **firmware** (UART app): `cargo build --release` and clippy with `-D warnings`, for each
    Cargo feature combination (default, none, all, `rtt` alone), plus the Flash / RAM
    table in the job summary;
-4. **Ethernet firmware**: the same for `firmware/ethernet`, for default, none and all features, built with the UDP and
-   with the TCP presets;
-5. **site**: the documentation, once formatting and host tests pass (see
+4. **Ethernet firmware**: the same for `firmware/ethernet`, for default, none, all and `ferrite` features, built with
+   the UDP and with the TCP presets; the **Ferrite port** (`firmware/ferrite-esp32s31`) is built and linted too;
+5. **ADC app**: `firmware/adc-stream` built and linted, its PWM arithmetic tested on the computer
+   (`rustc --edition 2024 --test src/pwm_plan.rs`), and the `--selftest` of the ADC page (`tools/adc-fft`) and of the
+   nodes' dashboard (`tools/node-dash`): receiver, FFT, web server, saved settings, commands, against simulated boards;
+6. **site**: the documentation, once formatting and host tests pass (see
    [Formatting and generated docs](automation.md)).
 
 `python3 scripts/dev.py check` runs the same steps locally, in the same order. The

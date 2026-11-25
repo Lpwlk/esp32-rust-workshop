@@ -142,13 +142,20 @@ the new status line; `record.py` records them again with the commands of [the co
 
 `.github/workflows/ci.yml`:
 
-1. **format**: `cargo fmt --all -- --check`, and the same in `firmware/ethernet`;
+1. **format**: `cargo fmt --all -- --check`, and `cargo fmt -- --check` in each of the other workspaces:
+   `firmware/ethernet`, `firmware/adc-stream` and `firmware/ferrite-esp32s31`;
 2. **host-tests**: `cargo test-host` (including the freshness check and the presets), every
    example of `firmware/shared/core/examples/` (the code shown on the
    [Examples](examples.md) page), clippy on the core and the presets tool, and `cargo presets check`;
-3. **firmware-eth**: the Ethernet app, built (with the UDP presets, then the TCP ones) and linted with
-   `-D warnings` for default, no and all features;
-4. **firmware**: release build of the UART nodes and clippy, for four Cargo feature
+3. **ferrite-port**: the Ferrite port for the S31 and its demo are built and linted (the kernel itself is
+   tested by the host tests);
+4. **firmware-eth**: the Ethernet app, built (with the UDP presets, then the TCP ones) and linted with
+   `-D warnings` for default, no, all and `ferrite` features;
+5. **firmware-adc**: the [ADC app](adc-stream.md), built and linted, and the tests of its PWM arithmetic
+   (`rustc --test`, no hardware);
+6. **adc-fft** and **node-dash**: the `--selftest` of each Python tool, against simulated boards (the ADC page's
+   one also checks the saved settings);
+7. **firmware**: release build of the UART nodes and clippy, for four Cargo feature
    combinations (default, none, all, `rtt` alone). The default build also:
     - writes a **Flash / RAM table** in the job summary (`scripts/memsize.py`); on a
       pull request, the target branch is built too and each line shows the change
@@ -156,14 +163,14 @@ the new status line; `record.py` records them again with the commands of [the co
     - on a push to `main`, keeps `node-a` / `node-b` (ELF) as the artifact
       `firmware-<commit>` for 30 days: flash a past commit without rebuilding it
       (`gh run download`, then `espflash flash --chip esp32s31 node-a`);
-5. **site** (once 1 and 2 pass, without waiting for the firmware matrix):
+8. **site** (once 1 and 2 pass, without waiting for the firmware matrix):
    `zensical build --clean -f docs/zensical.ci.toml`, then `cargo doc` for the core and the two firmwares, copied into
    `docs/site/api/core/`, `docs/site/api/firmware-eth/` and `docs/site/api/firmware/` (separate folders: rustdoc outputs
    in one folder would overwrite each other's search index). The footer of every
    page says which commit it was built from, with a link: CI adds `build_commit`,
    `build_sha` and `build_date` to a copy of `docs/zensical.toml`, read by
    `docs/templates/partials/copyright.html`;
-6. **deploy** (pushes to `main` only): publishes `docs/site/` on GitHub Pages, about
+9. **deploy** (pushes to `main` only): publishes `docs/site/` on GitHub Pages, about
    two minutes after the push.
 
 So the published documentation always matches the last commit of `main`, and

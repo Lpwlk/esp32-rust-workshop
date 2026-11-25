@@ -67,6 +67,16 @@ hide:
 
     [:lucide-arrow-right: Configuration](configuration.md)
 
+-   :lucide-audio-waveform:{ .lg .middle } __The ADC on your screen__
+
+    ---
+
+    One board samples an analog pin at up to 83 kS/s with the ADC's DMA and streams it over Ethernet: a live
+    spectrum, waveform and waterfall in your browser, a digital filter, a real PWM generator to feed it a known
+    signal, and settings that survive a restart.
+
+    [:lucide-arrow-right: The ADC app](adc-stream.md)
+
 -   :lucide-flask-conical:{ .lg .middle } __Tested on your computer__
 
     ---
@@ -157,6 +167,14 @@ Header J2 labels are GPIO numbers. Full details, resistor values and pins to avo
 -   :lucide-blocks:{ .lg .middle } [__Architecture__](architecture.md)
 
     The crates, the main loop, frame reception, link tests.
+
+-   :lucide-audio-waveform:{ .lg .middle } [__The ADC app__](adc-stream.md)
+
+    The ADC streamed to a live page, the PWM generator and the page's saved settings.
+
+-   :lucide-wrench:{ .lg .middle } [__Tools and workflows__](tools.md)
+
+    Every Rust and Python tool, the four Cargo workspaces, what to run before a push, CI.
 
 -   :lucide-timer:{ .lg .middle } [__Ferrite RTOS__](ferrite.md)
 
