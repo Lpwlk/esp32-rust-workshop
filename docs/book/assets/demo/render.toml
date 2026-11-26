@@ -42,3 +42,9 @@ colors = 256
 # Example: show the long boot card smaller, so all of it fits.
 # [eth-boot]
 # font_size = 12
+
+# The long ones of `dev.py`: played faster, in a smaller font.
+[dev-check]
+font_size = 14
+speed = 2.5
+colors = 64
