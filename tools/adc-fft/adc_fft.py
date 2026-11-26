@@ -63,10 +63,17 @@ LEVELS = (
 )  # what the board's level numbers mean
 REPLY_MAGIC = b"RPL1"  # the answer to a command: the layout of LOG1, never replayed, seq 0
 # Commands the page may send to the board (`start` and `stop` are this tool's own business).
-BOARD_COMMANDS = ("info", "verbose", "pwm", "reboot", "help")
+BOARD_COMMANDS = ("info", "verbose", "pwm", "pot", "reboot", "help")
 # `pwm [freq=HZ] [duty=%] [on|off]` (or `pwm 1000 25`): what the board's generator on GPIO20 accepts.
 PWM_ARG = re.compile(r"on|off|(?:(?:freq|f|hz|duty|d)=)?[0-9]+(?:\.[0-9]*)?(?:e[+-]?[0-9]+)?", re.I)
 PWM_MIN_HZ, PWM_MAX_HZ = 0.2, 1_000_000.0
+# `pot [off|freq|duty] [min=N] [max=N]`: the potentiometer on GPIO44 sets the generator's frequency or duty cycle.
+POT_ARG = re.compile(r"off|freq|duty|(?:min|max)=[0-9]+(?:\.[0-9]*)?(?:e[+-]?[0-9]+)?", re.I)
+POT = struct.Struct(
+    "<4sBxHHxxf"
+)  # "POT1", mode, position (1/100 %), averaged code, the value the generator was given
+POT_MAGIC = b"POT1"
+POT_MODES = ("off", "freq", "duty")
 MAX_SCOPE = 16384  # samples of the waveform at most
 # The S31's SAR is differential: 0 V reads about ZERO, the full scale is FULL (esp-hal's constants).
 ZERO_CODE = 2198
@@ -75,6 +82,9 @@ HALF_SCALE = FULL_SCALE - ZERO_CODE  # amplitude of a full-scale sine, in codes
 KEEPALIVE_S = 1.0
 # The ADC's continuous mode (DMA) on the ESP32-S31: 611 Hz to 83 333 Hz (SOC_ADC_SAMPLE_FREQ_THRES_*).
 MIN_RATE_HZ, MAX_RATE_HZ = 611, 83_333
+POT_MAX_RATE_HZ = (
+    MAX_RATE_HZ // 2
+)  # the ADC alternates the two pins: the signal gets half the conversions
 HISTORY = 65536  # samples kept: twice the largest FFT
 PAGE = Path(__file__).with_name("adc_fft.html")
 DEFAULT_RATE_HZ = 20_000
@@ -223,6 +233,10 @@ class Stream:
         self.want_verbose: bool | None = None  # what the user asked: re-applied after a reboot
         # The board's PWM generator, as its `ok` says ({on, freq, duty, pin}); None for a firmware without one.
         self.board_pwm: dict | None = None
+        # The potentiometer: the mode and range from the board's `ok`, and the live reading from its `POT1` datagrams.
+        self.board_pot: dict | None = None
+        self._pot_live: dict | None = None
+        self._pot_live_at = 0.0
         self.last_rx = 0.0  # time.monotonic() of the last datagram
         self._arrivals: list[float] = []
         self.logs: collections.deque = collections.deque(maxlen=1000)
@@ -276,11 +290,13 @@ class Stream:
                 return "verbose [on|off]"
         if words[0] == "pwm" and not all(PWM_ARG.fullmatch(w) for w in words[1:]):
             return "pwm [freq=HZ] [duty=%] [on|off]"
+        if words[0] == "pot" and not all(POT_ARG.fullmatch(w) for w in words[1:]):
+            return "pot [off|freq|duty] [min=N] [max=N]"
         self.host_log("cmd", text)
         try:
             self.sock.sendto(text.encode(), self.board)
-            if words[0] == "pwm":
-                self._send_request()  # its `ok` carries the generator's new state
+            if words[0] in ("pwm", "pot"):
+                self._send_request()  # its `ok` carries the generator's and the knob's new state
         except OSError as e:
             return f"not sent: {e.strerror or e}"
         return None
@@ -360,12 +376,15 @@ class Stream:
                 self._on_ok(self.board_info)
             elif datagram.startswith(MAGIC) and len(datagram) >= HEADER.size:
                 self._on_samples(datagram)
+            elif datagram.startswith(POT_MAGIC) and len(datagram) >= POT.size:
+                self._on_pot(datagram)
             elif datagram.startswith((LOG_MAGIC, REPLY_MAGIC)) and len(datagram) >= LOG.size:
                 self._on_log(datagram)
 
     def _on_ok(self, info: str) -> None:
         """The board's answer to `start` says whether verbose is on: after a reboot it is off again."""
         pwm: dict = {}
+        pot: dict = {}
         for word in info.split():
             if word.startswith("verbose="):
                 self.board_verbose = word.endswith("1")
@@ -377,14 +396,44 @@ class Stream:
                     pwm["freq" if key == "pwm_hz" else "duty"] = float(value)
                 elif key == "pwm_pin":
                     pwm["pin"] = int(value)
+                elif key == "pot":
+                    pot["mode"] = value
+                elif key == "pot_pin":
+                    pot["pin"] = int(value)
+                elif key in ("pot_lo", "pot_hi"):
+                    pot["lo" if key == "pot_lo" else "hi"] = float(value)
             except ValueError:
                 pass
         self.board_pwm = pwm if "on" in pwm else None
+        self.board_pot = pot if pot.get("mode") in POT_MODES else None
         if self.want_verbose is not None and self.board_verbose != self.want_verbose:
             try:
                 self.sock.sendto(b"verbose on" if self.want_verbose else b"verbose off", self.board)
             except OSError:
                 pass
+
+    def _on_pot(self, datagram: bytes) -> None:
+        _, mode, position, code, value = POT.unpack_from(datagram)
+        if mode < len(POT_MODES):
+            with self.lock:
+                self._pot_live = {
+                    "mode": POT_MODES[mode],
+                    "position": position / 100.0,  # % of the knob's travel
+                    "code": code,
+                    "value": value,  # Hz or %, what the generator was given
+                }
+                self._pot_live_at = time.monotonic()
+
+    def pot_state(self) -> dict | None:
+        """The potentiometer for the page: the board's mode and range, plus the live reading while it arrives."""
+        with self.lock:
+            if self.board_pot is None:
+                return None
+            state = dict(self.board_pot)
+            if self._pot_live and time.monotonic() - self._pot_live_at < 1.0:
+                state.update(self._pot_live)
+                state["live"] = True
+            return state
 
     def _on_samples(self, datagram: bytes) -> None:
         _, seq, rate_mhz, dropped, count, _pin = HEADER.unpack_from(datagram)
@@ -1327,6 +1376,7 @@ class Analyzer:
                 "board": st.board_info,
                 "verbose": st.board_verbose,
                 "pwm": st.board_pwm,
+                "pot": st.pot_state(),
                 "addr": f"{st.board[0]}:{st.board[1]}",
                 "age": round(st.age(), 3),  # seconds since the last datagram
                 "dgram": st.dgram_bytes,  # UDP payload of a sample datagram, bytes
@@ -1960,9 +2010,13 @@ class FakeBoard:
     `drop_every=N` skips every Nth datagram (a lost one), to exercise the gap handling. `hum` adds mains
     hum (50.04 Hz and two odd harmonics) of that amplitude in codes, for the demo of the hum removal.
     `breathe` makes the amplitude swell and burst over time (see `gain`), for the demo of the autoscale.
+    `wired` is the breadboard of the docs: the generator's pin is wired to the ADC input (what the generator makes
+    is the signal while it is on) and a potentiometer on GPIO44 (`knob`, 0 to 1: it wanders unless a test sets it).
     """
 
-    def __init__(self, drop_every: int = 0, hum: float = 0.0, breathe: bool = False):
+    def __init__(
+        self, drop_every: int = 0, hum: float = 0.0, breathe: bool = False, wired: bool = False
+    ):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", 0))
         self.sock.settimeout(0.01)
@@ -1981,7 +2035,12 @@ class FakeBoard:
             "on": False,
             "freq": 1000.0,
             "duty": 50.0,
-        }  # the generator on GPIO20 (no effect on the signal)
+        }  # the generator on GPIO20 (the signal only when `wired`)
+        self.wired = wired
+        self.knob: float | None = (
+            None  # a fixed position of the potentiometer; None: it wanders slowly
+        )
+        self.pot = {"mode": "off", "freq": (100.0, 5000.0), "duty": (0.0, 100.0)}
         self.stop_flag = threading.Event()
         self.t0 = time.monotonic()
         self.history: list[tuple[int, int, int, str]] = (
@@ -2041,15 +2100,19 @@ class FakeBoard:
             reply("verbose on: one detail line per second" if self.verbose else "verbose off")
         elif words[0] == "pwm":
             self._pwm_command(words[1:], reply)
+        elif words[0] == "pot":
+            self._pot_command(words[1:], reply)
         elif words[0] == "reboot":
             reply("rebooting…")
             self.reboots += 1
             self.verbose = False
             self.pwm["on"] = False
+            self.pot["mode"] = "off"
             return True
         elif words[0] == "help":
             reply(
-                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · reboot · help"
+                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · "
+                "pot [off|freq|duty] [min=N] [max=N] · reboot · help"
             )
         else:
             reply(f"{' '.join(words)!r}: not a command (try `help`)", 2)
@@ -2091,6 +2154,78 @@ class FakeBoard:
         else:
             reply(f"pwm off · GPIO20 low · set to {p['freq']:.4f} Hz, duty {p['duty']:.3f} %")
 
+    def _pot_command(self, args: list[str], reply) -> None:
+        """The firmware's `pot [off|freq|duty] [min=N] [max=N]`, without the hardware."""
+        mode, low, high = None, None, None
+        for word in args:
+            key, eq, value = word.partition("=")
+            try:
+                if word in POT_MODES:
+                    mode = word
+                elif eq and key == "min":
+                    low = float(value)
+                elif eq and key == "max":
+                    high = float(value)
+                else:
+                    raise ValueError
+            except ValueError:
+                reply("pot [off|freq|duty] [min=N] [max=N] (Hz for freq, % for duty)", 2)
+                return
+        now = mode or self.pot["mode"]
+        if (low is not None or high is not None) and now == "off":
+            reply("pot: pick freq or duty before a range", 3)
+            return
+        if low is not None or high is not None:
+            key = "duty" if now == "duty" else "freq"
+            old = self.pot[key]
+            new = (old[0] if low is None else low, old[1] if high is None else high)
+            floor, ceiling = (0.0, 100.0) if key == "duty" else (PWM_MIN_HZ, PWM_MAX_HZ)
+            if not all(floor <= v <= ceiling for v in new):
+                reply(
+                    "pot: duty is 0 to 100 %" if key == "duty" else "pot: frequency out of range", 3
+                )
+                return
+            if new[0] == new[1]:
+                reply("pot: min and max are the same", 3)
+                return
+            self.pot[key] = new
+        if mode is not None:
+            self.pot["mode"] = mode
+            if mode != "off":
+                self.pwm["on"] = True
+        p = self.pot
+        if p["mode"] == "off":
+            reply("pot off · GPIO44 not read · `pot freq` or `pot duty` turns it on")
+        elif p["mode"] == "freq":
+            reply(
+                f"pot freq · {p['freq'][0]:g} to {p['freq'][1]:g} Hz · GPIO44 · "
+                f"the duty stays {self.pwm['duty']:.1f} %"
+            )
+        else:
+            reply(
+                f"pot duty · {p['duty'][0]:g} to {p['duty'][1]:g} % · GPIO44 · "
+                f"the frequency stays {self.pwm['freq']:.1f} Hz"
+            )
+
+    def knob_position(self) -> float:
+        """Where the simulated potentiometer is: fixed by `knob`, or wandering between 10 % and 90 %."""
+        if self.knob is not None:
+            return self.knob
+        return 0.5 + 0.4 * math.sin(2 * math.pi * (time.monotonic() - self.t0) / 24.0)
+
+    def _follow_knob(self) -> float:
+        """What the firmware does a few times a second: the generator takes the knob's value. Returns the position."""
+        position = self.knob_position()
+        mode = self.pot["mode"]
+        if mode != "off" and self.pwm["on"]:
+            if mode == "freq":
+                low, high = self.pot["freq"]
+                self.pwm["freq"] = low * (high / low) ** position
+            else:
+                low, high = self.pot["duty"]
+                self.pwm["duty"] = low + (high - low) * position
+        return position
+
     def close(self) -> None:
         self.stop_flag.set()
         self._thread.join(timeout=1)
@@ -2105,6 +2240,8 @@ class FakeBoard:
         due = 0.0
         heard = 0.0
         next_stat = 0.0
+        next_pot = 0.0
+        running_pot = False  # whether the conversions in progress include the potentiometer's pin
         while not self.stop_flag.is_set():
             try:
                 text, addr = self.sock.recvfrom(128)
@@ -2116,7 +2253,11 @@ class FakeBoard:
                         min(max(int(opts.get("n", 256)), 16), 700),
                     )
                     heard = time.monotonic()
-                    if (addr, new) != (client, request):
+                    pot_on = self.pot["mode"] != "off"
+                    if pot_on:
+                        new = (min(new[0], POT_MAX_RATE_HZ), new[1])
+                    if (addr, new) != (client, request) or pot_on != running_pot:
+                        running_pot = pot_on
                         first = addr != client
                         client, request, seq, index, due = addr, new, 0, 0, time.monotonic()
                         next_stat = time.monotonic() + 2
@@ -2132,6 +2273,8 @@ class FakeBoard:
                     rate_hz, count = new
                     reply = f"ok rate_mhz={rate_hz * 1000} n={count} pin=43 zero={ZERO_CODE} full={FULL_SCALE} verbose={int(self.verbose)}"
                     reply += f" pwm={int(self.pwm['on'])} pwm_hz={self.pwm['freq']:.4f} pwm_duty={self.pwm['duty']:.3f} pwm_pin=20"
+                    low, high = self.pot["duty" if self.pot["mode"] == "duty" else "freq"]
+                    reply += f" pot={self.pot['mode']} pot_pin=44 pot_lo={low:g} pot_hi={high:g}"
                     self.sock.sendto(reply.encode(), addr)
                 elif words[:1] == ["stop"]:
                     client = None
@@ -2143,6 +2286,21 @@ class FakeBoard:
                 client = None
                 continue
             rate_hz, count = request
+            if running_pot and time.monotonic() >= next_pot:
+                next_pot = time.monotonic() + 0.1
+                position = self._follow_knob()
+                given = self.pwm["duty" if self.pot["mode"] == "duty" else "freq"]
+                code = ZERO_CODE + position * HALF_SCALE
+                self.sock.sendto(
+                    POT.pack(
+                        POT_MAGIC,
+                        POT_MODES.index(self.pot["mode"]),
+                        round(position * 10000),
+                        round(code),
+                        given,
+                    ),
+                    client,
+                )
             if time.monotonic() >= next_stat:
                 next_stat += 2
                 self._send_log(
@@ -2154,7 +2312,13 @@ class FakeBoard:
                 )
             while time.monotonic() >= due:
                 t = (index + np.arange(count)) / rate_hz
-                volts = gen_signal(self.signal, t, rng)
+                if self.wired and self.pwm["on"]:
+                    # GPIO20 wired to GPIO43: a 0 to 3.3 V rectangle (0 V is ZERO_CODE), with a little noise.
+                    half = HALF_SCALE / 2
+                    wave = gen_tone("pwm", self.pwm["freq"], half, duty=self.pwm["duty"])
+                    volts = gen_signal(gen_spec(wave, dc=half, noise=3), t, rng)
+                else:
+                    volts = gen_signal(self.signal, t, rng)
                 codes = np.clip(ZERO_CODE + volts, 0, FULL_SCALE).astype("<u2")
                 index += count
                 due += count / rate_hz
@@ -2916,11 +3080,82 @@ def selftest() -> int:
         command("pwm freq=abc") == 400 and command("pwm ; reboot") == 400,
         "pwm arguments are checked before they are sent",
     )
+
+    # The potentiometer: the board's mode and range, the live reading, what it does to the generator.
+    def pot(f: dict) -> dict:
+        return f["stats"]["pot"] or {}
+
+    board.knob = 0.25
+    check(command("pot") == 200, "pot without argument asks for the state")
+    f = next_frame(resp, lambda f: pot(f).get("mode") == "off")
+    check(
+        f is not None and pot(f)["pin"] == 44 and not pot(f).get("live"),
+        "the board's `ok` reports the potentiometer (off, GPIO44, no reading)",
+    )
+    check(command("pwm off") == 200 and command("pot freq min=200 max=2000") == 200, "pot freq")
+    f = next_frame(resp, lambda f: pot(f).get("live") and pot(f)["mode"] == "freq")
+    check(
+        f is not None and (pot(f)["lo"], pot(f)["hi"]) == (200, 2000) and pot(f)["position"] == 25,
+        "the page gets the mode, the range and the knob's live position",
+    )
+    expected = (
+        200 * 10**0.25
+    )  # a logarithmic range: a quarter of the way up is a quarter of the decades
+    check(
+        f is not None and abs(pot(f)["value"] - expected) < 0.5,
+        f"it gave the generator {expected:.1f} Hz",
+    )
+    f = next_frame(
+        resp,
+        lambda f: (f["stats"]["pwm"] or {}).get("on") is True
+        and abs(f["stats"]["pwm"]["freq"] - expected) < 0.5,
+    )
+    check(f is not None, "turning the knob on starts the generator, at the knob's frequency")
+    stream.set_rate(60000)
+    deadline = time.monotonic() + 5
+    while abs(stream.fs - POT_MAX_RATE_HZ) > 1 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    check(
+        abs(stream.fs - POT_MAX_RATE_HZ) <= 1,
+        f"the conversions alternate: the signal's rate stops at {POT_MAX_RATE_HZ} Hz",
+    )
+    stream.set_rate(20000)
+    check(command("pot duty min=10 max=60") == 200, "pot duty min=10 max=60")
+    f = next_frame(resp, lambda f: pot(f).get("live") and pot(f)["mode"] == "duty")
+    check(
+        f is not None and pot(f)["value"] == 22.5, "a linear range: a quarter of 10 to 60 is 22.5 %"
+    )
+    f = next_frame(resp, lambda f: (f["stats"]["pwm"] or {}).get("duty") == 22.5)
+    check(
+        f is not None and abs(f["stats"]["pwm"]["freq"] - expected) < 0.5,
+        "the duty follows the knob, the frequency stays what `pot freq` left",
+    )
+    board.knob = 1.0
+    f = next_frame(resp, lambda f: (f["stats"]["pwm"] or {}).get("duty") == 60)
+    check(f is not None, "the end of the travel gives the end of the range")
+    check(command("pot freq max=9e9") == 200, "an out-of-range limit reaches the board")
+    next_frame(resp, lambda f: saw("frequency out of range", "error"))
+    check(saw("frequency out of range", "error"), "and the board refuses it")
+    check(
+        command("pot freq min=abc") == 400
+        and command("pot ; reboot") == 400
+        and command("pot fast") == 400,
+        "pot arguments are checked before they are sent",
+    )
+    check(command("pot off") == 200, "pot off")
+    f = next_frame(resp, lambda f: pot(f).get("mode") == "off" and not pot(f).get("live"))
+    check(f is not None, "off: no more readings")
+    check(command("pot freq") == 200, "pot freq again")
+    next_frame(resp, lambda f: pot(f).get("mode") == "freq")
+
     check(command("reboot") == 200, "reboot")
     f = next_frame(
-        resp, lambda f: board.reboots == 2 and (f["stats"]["pwm"] or {}).get("on") is False
+        resp,
+        lambda f: board.reboots == 2
+        and (f["stats"]["pwm"] or {}).get("on") is False
+        and pot(f).get("mode") == "off",
     )
-    check(f is not None, "the generator is off again after a reboot")
+    check(f is not None, "the generator and the potentiometer are off again after a reboot")
 
     resp.close()
     events.close()
@@ -3172,6 +3407,11 @@ def main() -> int:
     ap.add_argument("--no-browser", action="store_true", help="don't open the page")
     ap.add_argument("--demo", action="store_true", help="use a simulated board on this computer")
     ap.add_argument(
+        "--wire",
+        action="store_true",
+        help="with --demo: the simulated PWM pin is wired to the input and a potentiometer wanders (docs/book/wiring.md)",
+    )
+    ap.add_argument(
         "--selftest", action="store_true", help="test receiver, FFT and web server, no browser"
     )
     args = ap.parse_args()
@@ -3201,7 +3441,7 @@ def main() -> int:
         rate = DEFAULT_RATE_HZ
     rate = min(max(rate, MIN_RATE_HZ), MAX_RATE_HZ)
 
-    fake = FakeBoard(hum=150.0, breathe=True) if args.demo else None
+    fake = FakeBoard(hum=150.0, breathe=True, wired=args.wire) if args.demo else None
     if fake and isinstance(prefs.get("gen"), dict):
         fake.set_signal(prefs.get("gen"))
     board = ("127.0.0.1", fake.port) if fake else (args.board, args.port)

@@ -137,6 +137,10 @@ jobs:
         run: |
           rustc --edition 2024 --test src/pwm_plan.rs -o "$RUNNER_TEMP/pwm_plan_test"
           "$RUNNER_TEMP/pwm_plan_test"
+      - name: Potentiometer arithmetic (host tests)
+        run: |
+          rustc --edition 2024 --test src/pot.rs -o "$RUNNER_TEMP/pot_test"
+          "$RUNNER_TEMP/pot_test"
 
   adc-fft:
     name: ADC spectrum tool (tools/adc-fft)

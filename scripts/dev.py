@@ -682,6 +682,12 @@ def check(fast: bool) -> None:
         ),
         ("ADC app: run those tests", [str(ROOT / "target" / "pwm_plan_test")]),
         (
+            "ADC app: the potentiometer's arithmetic (host)",
+            "rustc --edition 2024 --test src/pot.rs -o ../../target/pot_test".split(),
+            APP_DIRS["adc"],
+        ),
+        ("ADC app: run those tests", [str(ROOT / "target" / "pot_test")]),
+        (
             "adc-fft self test (receiver, FFT, web server, saved settings)",
             [str(VENV_PYTHON), str(FFT_TOOL), "--selftest"],
         ),

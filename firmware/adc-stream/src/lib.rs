@@ -3,6 +3,7 @@
 //! (`tools/adc-fft/adc_fft.py`).
 //!
 //! - [`dma`]: the ADC's continuous mode with DMA (611 Hz to 83.3 kHz, hardware-timed);
+//! - [`pot`]: a potentiometer on GPIO44 that sets the generator's frequency or duty cycle;
 //! - [`pwm`]: a PWM generator on GPIO20 (RMT in loop mode) to feed the ADC a known signal, from the page;
 //! - [`stream`]: the UDP protocol (`start` / `stop` from the computer, sample datagrams back) and the main loop;
 //! - [`board_log`]: the board's log, in colour on the USB console and sent to the computer's page.
@@ -12,6 +13,7 @@
 
 pub mod board_log;
 pub mod dma;
+pub mod pot;
 pub mod pwm;
 pub mod pwm_plan;
 pub mod stream;

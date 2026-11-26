@@ -214,6 +214,18 @@
   .pwmrow .num-in { width: 96px; }
   .pwmrow .readout { align-self: center; flex: 1; min-width: 200px; margin: 0; }
   #c-pwm.nogen .pwmrow { opacity: 0.45; pointer-events: none; }
+  /* The potentiometer owns the frequency or the duty cycle: those controls show it but don't take input. */
+  #c-pwm.pot-freq .own-f, #c-pwm.pot-duty .own-d { opacity: 0.45; pointer-events: none; }
+  #c-pot.nopot .potrow { opacity: 0.45; pointer-events: none; }
+  .potrow { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: end; margin: 6px 0 2px; }
+  .potrow .num-in { width: 96px; }
+  .potlive { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); gap: 6px 18px; align-items: center; margin: 8px 0 2px; }
+  .knob { position: relative; height: 12px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+  .knob > i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); transition: width 0.08s linear; }
+  #pot-spark { width: 100%; height: 56px; display: block; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); }
+  .potlive .readout { grid-column: 1 / -1; }
+  @media (max-width: 640px) { .potlive { grid-template-columns: 1fr; } }
+  .chip.pot { border-color: var(--accent); }
   .genrow { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: end; margin: 3px 0; }
   .genrow:not(:first-child) .lab { display: none; }
   .genrow input[type="checkbox"] { margin: 0 0 6px; width: 15px; height: 15px; }
@@ -286,6 +298,7 @@
       <span class="chip" id="status" role="status" aria-live="polite"></span>
       <span class="chip" id="boardchip" title="The analog input and the board's address"><span class="k">Board</span><span id="boardinfo">waiting for the board</span></span>
       <span class="chip pwm hidden" id="pwmchip" title="The board's PWM generator is running"><span class="k">PWM</span><b id="pwmchip-t"></b></span>
+      <span class="chip pot hidden" id="potchip" title="The potentiometer sets the generator's frequency or duty cycle"><span class="k">Pot</span><b id="potchip-t"></b></span>
       <label class="chip" title="Colour theme: the traces, the waterfall and the accent of the buttons, sliders and selections"><span class="k">Colours</span>
         <select id="palette" aria-label="Colour theme">
           <option value="default">Blue + orange</option><option value="scope">Oscilloscope</option>
@@ -324,6 +337,7 @@
         <dt>Per datagram</dt><dd id="s-n">–</dd>
         <dt>Verbose log</dt><dd id="s-verb">–</dd>
         <dt>PWM generator</dt><dd id="s-pwm">–</dd>
+        <dt>Potentiometer</dt><dd id="s-pot">–</dd>
       </dl></section>
       <section aria-label="This tool"><h3>This tool</h3><dl>
         <dt>Mode</dt><dd id="s-mode">–</dd>
@@ -450,13 +464,31 @@
     </div>
     <div class="pwmrow">
       <div class="group"><span class="lab">Output</span><button id="pwm-on" aria-pressed="false" title="Starts or stops the wave; off, the pin stays low">Off</button></div>
-      <div class="group"><span class="lab">Frequency (Hz)</span><input type="number" class="num-in" id="pwm-f" min="0.2" max="1000000" step="any" value="1000" aria-label="PWM frequency, Hz"></div>
-      <div class="group"><span class="lab">&nbsp;</span><input type="range" id="pwm-fs" min="-0.699" max="6" step="0.001" aria-label="PWM frequency, logarithmic"></div>
-      <div class="group"><span class="lab">Common</span><select id="pwm-fp" aria-label="Frequency presets"><option value="">Choose…</option><option>1</option><option>10</option><option>50</option><option>100</option><option>440</option><option>1000</option><option>5000</option><option>10000</option><option>20000</option><option>40000</option></select></div>
-      <div class="group"><span class="lab">Duty (%)</span><input type="number" class="num-in" id="pwm-d" min="0" max="100" step="any" value="50" aria-label="PWM duty cycle, percent"></div>
-      <div class="group"><span class="lab">&nbsp;</span><input type="range" id="pwm-ds" min="0" max="100" step="0.1" aria-label="PWM duty cycle"></div>
-      <div class="group"><span class="lab">&nbsp;</span><div class="seg" id="pwm-dp"><button data-d="10">10</button><button data-d="25">25</button><button data-d="50">50</button><button data-d="75">75</button><button data-d="90">90</button></div></div>
+      <div class="group own-f"><span class="lab">Frequency (Hz)</span><input type="number" class="num-in" id="pwm-f" min="0.2" max="1000000" step="any" value="1000" aria-label="PWM frequency, Hz"></div>
+      <div class="group own-f"><span class="lab">&nbsp;</span><input type="range" id="pwm-fs" min="-0.699" max="6" step="0.001" aria-label="PWM frequency, logarithmic"></div>
+      <div class="group own-f"><span class="lab">Common</span><select id="pwm-fp" aria-label="Frequency presets"><option value="">Choose…</option><option>1</option><option>10</option><option>50</option><option>100</option><option>440</option><option>1000</option><option>5000</option><option>10000</option><option>20000</option><option>40000</option></select></div>
+      <div class="group own-d"><span class="lab">Duty (%)</span><input type="number" class="num-in" id="pwm-d" min="0" max="100" step="any" value="50" aria-label="PWM duty cycle, percent"></div>
+      <div class="group own-d"><span class="lab">&nbsp;</span><input type="range" id="pwm-ds" min="0" max="100" step="0.1" aria-label="PWM duty cycle"></div>
+      <div class="group own-d"><span class="lab">&nbsp;</span><div class="seg" id="pwm-dp"><button data-d="10">10</button><button data-d="25">25</button><button data-d="50">50</button><button data-d="75">75</button><button data-d="90">90</button></div></div>
       <p class="readout" id="pwm-info" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <section class="card" id="c-pot" aria-label="Potentiometer">
+    <div class="card-head">
+      <h2>Potentiometer</h2>
+      <p class="hint">A knob on <b>GPIO44</b> (<code>44</code> of header J2, wiper; the ends go to <code>3V3</code> and <code>G</code>) sets the generator's <b>frequency</b> or its <b>duty cycle</b> between two limits, and the spectrum follows it. The other number stays what the generator above says. While it is on, the ADC alternates the two pins: the sample rate stops at 41.6 kS/s.</p>
+    </div>
+    <div class="potrow">
+      <div class="group"><span class="lab">The knob sets</span><div class="seg" id="pot-mode"><button data-m="off">Nothing</button><button data-m="freq">Frequency</button><button data-m="duty">Duty cycle</button></div></div>
+      <div class="group"><span class="lab" id="pot-lo-l">From (Hz)</span><input type="number" class="num-in" id="pot-lo" step="any" aria-label="Value at the GND end of the knob"></div>
+      <div class="group"><span class="lab" id="pot-hi-l">To (Hz)</span><input type="number" class="num-in" id="pot-hi" step="any" aria-label="Value at the 3V3 end of the knob"></div>
+      <div class="group"><span class="lab">&nbsp;</span><button id="pot-swap" title="Turn the knob the other way: swap the two limits">⇄ Reverse</button></div>
+    </div>
+    <div class="potlive">
+      <div><span class="lab">Knob</span><div class="knob" id="pot-knob" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Potentiometer position"><i id="pot-fill"></i></div></div>
+      <canvas id="pot-spark" aria-label="What the knob gave the generator, last 30 seconds"></canvas>
+      <p class="readout" id="pot-info" aria-live="polite"></p>
     </div>
   </section>
 
@@ -759,7 +791,7 @@
     <div class="term-wrap"><div id="term" class="term" role="log" aria-live="off" tabindex="0"></div></div>
     <form class="cmdline" id="cmdform" autocomplete="off">
       <span class="prompt">›</span>
-      <input id="cmd" type="text" spellcheck="false" maxlength="64" placeholder="info · verbose [on|off] · pwm [freq=Hz] [duty=%] [on|off] · reboot · help · clear" aria-label="Command for the board">
+      <input id="cmd" type="text" spellcheck="false" maxlength="64" placeholder="info · verbose [on|off] · pwm [freq=Hz] [duty=%] [on|off] · pot [off|freq|duty] [min=N] [max=N] · reboot · help · clear" aria-label="Command for the board">
     </form>
   </section>
 </main>
@@ -784,7 +816,7 @@ const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, w
              harm: "off", labels: 1, view: "all", sstyle: "line", swidth: "auto", wstyle: "line", wwidth: "auto",
              cmap: "theme", cmrev: false, col: {}, palette: "default", wunit: "codes", mvcode: 0.7, keepdc: false,
              wrange: 0, amargin: 5, adamp: 1, wx: false, wsrc: "filtered", f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
-             f_host: true, follow: true, pwmf: 1000, pwmd: 50, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
+             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
              avol: 70, amute: false, aauto: false, afilt: false, fold: {} };
 // Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
 function adopt(saved) {
@@ -1550,6 +1582,7 @@ function setStatus(f) {
   if (pin) $("boardinfo").innerHTML = `<b>GPIO${pin[1]}</b> · ${f.stats.addr}`;
   $("verbose").setAttribute("aria-pressed", String(f.stats.verbose === true));
   pwmSync(f.stats.pwm === undefined ? null : f.stats.pwm, f.fs);
+  potSync(f.stats.pot === undefined ? null : f.stats.pot, f.fs);
 }
 
 // ---- the strip under the title and the status box --------------------------------------------------
@@ -1598,6 +1631,8 @@ function setApp(f) {
   set("s-n", n ? `${n[1]} samples` : st.count ? `${st.count} samples` : "–");
   set("s-verb", st.verbose === true ? "on" : st.verbose === false ? "off" : "–");
   set("s-pwm", pw === undefined || pw === null ? "no generator in this firmware" : pw.on ? `${fmtHz(pw.freq)} at ${+pw.duty.toFixed(1)} % on GPIO${pw.pin}` : "off");
+  const po = st.pot;
+  set("s-pot", po === undefined || po === null ? "no potentiometer in this firmware" : po.mode === "off" ? `off (GPIO${po.pin})` : `sets the ${po.mode === "duty" ? "duty cycle" : "frequency"}, ${fmtNum(po.lo)} to ${fmtNum(po.hi)} ${po.mode === "duty" ? "%" : "Hz"}` + (po.live ? ` · knob at ${po.position.toFixed(1)} %` : ""));
   set("s-mode", `${s.paused ? "paused" : "live"} · ${a.demo ? "simulated board" : "real board"}`);
   set("s-an", `FFT ${s.fft} · ${s.window} · average ${s.avg === 1 ? "off" : s.avg} · hold ${s.hold ? "on" : "off"}`);
   const FN = { lowpass: "low-pass", highpass: "high-pass", bandpass: "band-pass", bandstop: "band-stop" };
@@ -1819,6 +1854,121 @@ function pwmSync(board, fs) {
   if (info.dataset.t !== txt) { info.dataset.t = txt; info.innerHTML = txt; }
 }
 
+// ---- the potentiometer (GPIO44): the `pot` command; mode and range come back in the board's `ok`, the live
+// position in its POT1 datagrams (about ten a second) ----------------------------------------------------------
+const pot = { mode: "off", sent: 0, timer: null, trace: [] };  // trace: [seconds, value] of the last 30 s
+const POT_SPAN_S = 30;
+function potRange(mode) { return mode === "duty" ? [ui.potdl, ui.potdh] : [ui.potfl, ui.potfh]; }
+function potSend(mode, now) {
+  clearTimeout(pot.timer);
+  const go = () => {
+    pot.timer = null; pot.sent = performance.now(); pot.mode = mode;
+    const [lo, hi] = potRange(mode);
+    sendCommand(mode === "off" ? "pot off" : `pot ${mode} min=${+lo.toPrecision(9)} max=${+hi.toPrecision(9)}`);
+    potShow();
+  };
+  if (now) go(); else pot.timer = setTimeout(go, 400);  // typing a number sends once, not per key
+}
+function potShow() {
+  for (const b of $("pot-mode").children) b.setAttribute("aria-pressed", String(b.dataset.m === pot.mode));
+  const unit = pot.mode === "duty" ? "%" : "Hz";
+  $("pot-lo-l").textContent = `From (${unit})`; $("pot-hi-l").textContent = `To (${unit})`;
+  const [lo, hi] = potRange(pot.mode);
+  if (document.activeElement !== $("pot-lo")) $("pot-lo").value = +lo.toPrecision(7);
+  if (document.activeElement !== $("pot-hi")) $("pot-hi").value = +hi.toPrecision(7);
+  $("pot-lo").disabled = $("pot-hi").disabled = $("pot-swap").disabled = pot.mode === "off";
+  $("c-pwm").classList.toggle("pot-freq", pot.mode === "freq");
+  $("c-pwm").classList.toggle("pot-duty", pot.mode === "duty");
+}
+$("pot-mode").onclick = (e) => { if (e.target.dataset.m) potSend(e.target.dataset.m, true); };
+function potLimit(i, text) {
+  const v = parseFloat(text);
+  if (!Number.isFinite(v)) return;
+  const [kl, kh] = pot.mode === "duty" ? ["potdl", "potdh"] : ["potfl", "potfh"];
+  const key = i ? kh : kl;
+  const [min, max] = pot.mode === "duty" ? [0, 100] : [PWM_MIN, PWM_MAX];
+  ui[key] = Math.min(max, Math.max(min, v));
+  if (ui[kl] === ui[kh]) ui[key] *= i ? 1.01 : 0.99;  // the board refuses an empty range
+  saveUi(); potSend(pot.mode);
+}
+$("pot-lo").oninput = (e) => potLimit(0, e.target.value);
+$("pot-hi").oninput = (e) => potLimit(1, e.target.value);
+$("pot-lo").onchange = $("pot-hi").onchange = () => potShow();
+$("pot-swap").onclick = () => {
+  const [kl, kh] = pot.mode === "duty" ? ["potdl", "potdh"] : ["potfl", "potfh"];
+  [ui[kl], ui[kh]] = [ui[kh], ui[kl]];
+  saveUi(); potSend(pot.mode, true);
+};
+// The trace: what the knob gave the generator. Frequencies on a log axis (the knob's own scale), duty linear.
+function potDraw() {
+  const cv = $("pot-spark"), dpr = window.devicePixelRatio || 1;
+  const w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+  if (!w || !h) return;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const g = cv.getContext("2d"), css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, w, h);
+  const now = performance.now() / 1000, pts = pot.trace.filter((p) => now - p[0] <= POT_SPAN_S);
+  if (pts.length < 2) return;
+  const log = pot.mode === "freq", f = (v) => (log ? Math.log10(Math.max(v, 1e-3)) : v);
+  const ys = pts.map((p) => f(p[1]));
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5; }
+  g.strokeStyle = css.getPropertyValue("--accent").trim() || "#2a7"; g.lineWidth = 1.6 * dpr; g.lineJoin = "round";
+  g.beginPath();
+  pts.forEach((p, i) => {
+    const x = w - ((now - p[0]) / POT_SPAN_S) * w, y = h - 4 * dpr - ((f(p[1]) - lo) / (hi - lo)) * (h - 8 * dpr);
+    if (i) g.lineTo(x, y); else g.moveTo(x, y);
+  });
+  g.stroke();
+}
+// What the board says. We follow its mode unless the user has just chosen one.
+function potSync(board, fs) {
+  const missing = board === null && frame && frame.status === "streaming";
+  $("c-pot").classList.toggle("nopot", missing);
+  const chip = $("potchip"), live = !!(board && board.mode !== "off");
+  chip.classList.toggle("hidden", !live);
+  if (!board) {
+    $("pot-info").textContent = missing ? "This board's firmware has no potentiometer input: flash the new one." : "Waiting for the board…";
+    return;
+  }
+  if (performance.now() - pot.sent > 1500 && !pot.timer) {
+    pot.mode = board.mode;
+    if (board.mode !== "off") {
+      const [kl, kh] = board.mode === "duty" ? ["potdl", "potdh"] : ["potfl", "potfh"];
+      if (document.activeElement !== $("pot-lo") && document.activeElement !== $("pot-hi")) { ui[kl] = board.lo; ui[kh] = board.hi; }
+    }
+    potShow();
+  }
+  const unit = board.mode === "duty" ? "%" : "Hz";
+  let txt;
+  if (board.mode === "off") {
+    txt = `Off: GPIO${board.pin} is not read, and the ADC samples the signal alone at the full rate.`;
+    $("pot-fill").style.width = "0"; pot.trace.length = 0; pot.traced = "off";
+  } else if (!board.live) {
+    txt = `${board.mode === "duty" ? "Duty cycle" : "Frequency"} from ${fmtNum(board.lo)} to ${fmtNum(board.hi)} ${unit} · waiting for a reading…`;
+  } else {
+    const shown = board.mode === "duty" ? `${board.value.toFixed(1)} %` : fmtHz(board.value);
+    txt = `Knob at <b>${board.position.toFixed(1)} %</b> of its travel → ${board.mode === "duty" ? "duty" : "frequency"} <b>${shown}</b>` +
+      ` (from ${fmtNum(board.lo)} to ${fmtNum(board.hi)} ${unit}${board.mode === "freq" ? ", logarithmic" : ""}) · reading ${board.code}`;
+    $("pot-fill").style.width = board.position + "%";
+    $("pot-knob").setAttribute("aria-valuenow", board.position.toFixed(1));
+    $("potchip-t").textContent = `${board.mode === "duty" ? "duty" : "freq"} ${shown}`;
+    if (pot.traced !== board.mode) { pot.trace.length = 0; pot.traced = board.mode; }  // Hz and % don't share a trace
+    const t = performance.now() / 1000, last = pot.trace[pot.trace.length - 1];
+    if (!last || t - last[0] > 0.08) pot.trace.push([t, board.value]);
+    while (pot.trace.length && t - pot.trace[0][0] > POT_SPAN_S + 1) pot.trace.shift();
+    // The generator's controls show what the knob made of them.
+    if (performance.now() - pwm.sent > 1500 && !pwm.timer) {
+      if (board.mode === "freq") pwm.f = board.value; else pwm.d = board.value;
+      pwmShow();
+    }
+  }
+  if ($("pot-info").dataset.t !== txt) { $("pot-info").dataset.t = txt; $("pot-info").innerHTML = txt; }
+  potDraw();
+}
+function fmtNum(v) { return +v.toPrecision(5); }
+potShow();
+
 // ---- signal generator (demo only: the server answers /api/gen when it simulates the board) --------------
 const GEN_FIELDS = {  // which inputs a kind uses
   sine: ["freq", "amp", "phase"], square: ["freq", "amp", "phase"], pwm: ["freq", "amp", "duty", "phase"],
@@ -1951,7 +2101,7 @@ function makeFoldable(el, key, after) {
   setFolded(el, key, !!ui.fold[key]);
 }
 if (!ui.fold || typeof ui.fold !== "object") ui.fold = {};
-for (const id of ["c-acq", "c-filter", "c-gen", "c-pwm", "c-spec", "c-scope", "c-lines", "c-hist", "c-harms", "watercard", "logcard"]) makeFoldable($(id), id);
+for (const id of ["c-acq", "c-filter", "c-gen", "c-pwm", "c-pot", "c-spec", "c-scope", "c-lines", "c-hist", "c-harms", "watercard", "logcard"]) makeFoldable($(id), id);
 for (const tile of document.querySelectorAll(".tile")) makeFoldable(tile, "tile-" + tile.querySelector(".label").textContent.trim().toLowerCase().replace(/[^a-z]+/g, "-"));
 // The Measurements title folds or unfolds all the tiles at once (each one is still its own).
 {

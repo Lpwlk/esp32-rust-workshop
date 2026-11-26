@@ -42,8 +42,12 @@
 //! | `info` | six lines: chip, build, ADC, network, stream, uptime (the node firmware's `info`, compact) |
 //! | `verbose [on\|off]` | one detail line per second (timings, ring level, DMA), without slowing the stream |
 //! | `pwm [freq=HZ] [duty=%] [on\|off]` | the PWM generator on GPIO20 ([`crate::pwm`]): `pwm 1000 25` is 1 kHz at 25 %; no argument tells its state |
+//! | `pot [off\|freq\|duty] [min=N] [max=N]` | the potentiometer on GPIO44 ([`crate::pot`]) sets the generator's frequency (Hz) or duty cycle (%) between `min` and `max`; no argument tells its state |
 //! | `reboot` | software reset of the chip |
 //! | `help` | the list above |
+//!
+//! While the potentiometer is on, the board also sends a `POT1` datagram ten times a second ([`pot::encode`]: the
+//! mode, the knob's position, the value it gave the generator), and the samples come at half the conversion rate.
 //!
 //! The S31's SAR is differential: 0 V reads about [`ZERO_CODE`] and the full scale is
 //! [`FULL_SCALE`], so the computer removes the mean before the FFT anyway.
@@ -70,6 +74,7 @@ use crate::{
     blog,
     board_log::{self, Level},
     dma::{self, AdcDma},
+    pot::{self, Mode},
     pwm::{self, Pwm},
     pwm_plan,
 };
@@ -160,6 +165,8 @@ enum Command {
     Verbose(Option<bool>),
     /// `pwm ...`; `None` when the arguments make no sense.
     Pwm(Option<PwmArgs>),
+    /// `pot ...`; `None` when the arguments make no sense.
+    Pot(Option<pot::Change>),
     Reboot,
     Help,
     Unknown,
@@ -212,6 +219,7 @@ fn parse(text: &str) -> Command {
         Some("info") => Command::Info,
         Some("reboot") => Command::Reboot,
         Some("pwm") => Command::Pwm(parse_pwm(words)),
+        Some("pot") => Command::Pot(pot::parse(words)),
         Some("help") => Command::Help,
         Some("verbose") => match words.next() {
             None => Command::Verbose(None),
@@ -230,8 +238,53 @@ async fn say(socket: &UdpSocket<'_>, to: IpEndpoint, level: Level, args: core::f
     let _ = socket.send_to(&out[..len], to).await;
 }
 
+/// What `pot` answers: the mode, its range, and the generator's other number (the one the knob leaves alone).
+async fn say_pot(socket: &UdpSocket<'_>, to: IpEndpoint, config: &pot::Config, generator: Option<pwm::State>) {
+    let (low, high) = config.range();
+    let pin = pot::PIN;
+    match (config.mode, generator) {
+        (Mode::Off, _) => {
+            say(
+                socket,
+                to,
+                Level::Reply,
+                format_args!("pot off · GPIO{pin} not read · `pot freq` or `pot duty` turns it on"),
+            )
+            .await
+        }
+        (Mode::Freq, Some(s)) => {
+            say(
+                socket,
+                to,
+                Level::Reply,
+                format_args!("pot freq · {low} to {high} Hz · GPIO{pin} · the duty stays {:.1} %", s.duty),
+            )
+            .await
+        }
+        (Mode::Duty, Some(s)) => {
+            say(
+                socket,
+                to,
+                Level::Reply,
+                format_args!("pot duty · {low} to {high} % · GPIO{pin} · the frequency stays {:.1} Hz", s.asked_hz),
+            )
+            .await
+        }
+        (mode, None) => {
+            say(
+                socket,
+                to,
+                Level::Warn,
+                format_args!("pot {}: there is no generator to drive in this firmware", mode.name()),
+            )
+            .await
+        }
+    }
+}
+
 /// What the `info` command reports about the stream (the rest it reads from the chip).
 struct StreamInfo {
+    pot_mode: Mode,
     client: Option<(IpEndpoint, Request)>,
     rate_mhz: u32,
     packets: u32,
@@ -247,6 +300,7 @@ async fn info(socket: &UdpSocket<'_>, to: IpEndpoint, s: &StreamInfo) {
     let [a, b, c, d] = ADDRESS;
     let phy = net::link_state();
     let up = Clock::now().as_secs();
+    let pot_mode = s.pot_mode;
 
     say(
         socket,
@@ -301,8 +355,10 @@ async fn info(socket: &UdpSocket<'_>, to: IpEndpoint, s: &StreamInfo) {
         to,
         Reply,
         format_args!(
-            "adc    GPIO{PIN} (ADC1 ch{}) · DMA continuous · {MIN_RATE_HZ}-{MAX_RATE_HZ} Hz · 0 V = {ZERO_CODE}, full {FULL_SCALE}",
-            dma::CHANNEL
+            "adc    GPIO{PIN} (ADC1 ch{}) · DMA continuous · {MIN_RATE_HZ}-{MAX_RATE_HZ} Hz · 0 V = {ZERO_CODE}, full {FULL_SCALE} · pot GPIO{} {}",
+            dma::CHANNEL,
+            pot::PIN,
+            pot_mode.name()
         ),
     )
     .await;
@@ -400,8 +456,16 @@ pub async fn run(spawner: Spawner) -> ! {
 
     // The ADC and its DMA are set up at the first `start`, once the network is known to work: that way
     // an ADC problem can't be confused with a network one.
-    let mut adc_parts = Some((p.GPIO43, p.ADC1));
+    let mut adc_parts = Some((p.GPIO43, p.GPIO44, p.ADC1));
     let mut adc: Option<AdcDma> = None;
+    // The potentiometer: what it does, its averaged reading, and when the generator last followed it. `adc_pot` is
+    // whether the running conversions include its pin.
+    let mut pot_config = pot::Config::DEFAULT;
+    let mut knob = pot::Filter::new();
+    let mut follower = pot::Follower::default();
+    let mut adc_pot = false;
+    let mut pot_followed_at = Clock::now();
+    let mut pot_sent_at = Clock::now();
     // The PWM generator (RMT channel 0 on GPIO20): idle (low) until the page asks.
     let mut pwm = Pwm::new(p.RMT, p.GPIO20);
 
@@ -454,6 +518,12 @@ pub async fn run(spawner: Spawner) -> ! {
         dma::CHANNEL
     );
     blog!(Level::Info, "UDP {a}.{b}.{c}.{d}:{PORT} · static address, no DHCP");
+    blog!(
+        Level::Info,
+        "potentiometer on GPIO{} (ADC1 channel {}) · off until `pot freq` or `pot duty`",
+        pot::PIN,
+        pot::CHANNEL
+    );
     if pwm.is_some() {
         blog!(
             Level::Info,
@@ -507,15 +577,20 @@ pub async fn run(spawner: Spawner) -> ! {
                     Command::Start(req) => {
                         last_heard = Clock::now();
                         // A different request (or a different computer) restarts the stream; the same one is the keep-alive.
-                        if client != Some((meta.endpoint, req)) {
+                        // So does the potentiometer being turned on or off: the ADC's conversions change.
+                        let pot_on = pot_config.mode != Mode::Off;
+                        if client != Some((meta.endpoint, req)) || adc_pot != pot_on {
                             let new_client = client.map(|(endpoint, _)| endpoint) != Some(meta.endpoint);
-                            if let Some((gpio, adc1)) = adc_parts.take() {
-                                adc = Some(AdcDma::new(gpio, adc1));
+                            if let Some((gpio, pot_gpio, adc1)) = adc_parts.take() {
+                                adc = Some(AdcDma::new(gpio, pot_gpio, adc1));
                                 blog!(Level::Info, "ADC1 and the LP-GDMA channel set up");
                             }
                             if let Some(adc) = adc.as_mut() {
-                                rate_mhz = adc.start(req.rate_hz);
+                                rate_mhz = adc.start(req.rate_hz, pot_on);
                             }
+                            adc_pot = pot_on;
+                            knob.reset();
+                            follower.reset();
                             client = Some((meta.endpoint, req));
                             seq = 0;
                             TAIL.store(HEAD.load(Ordering::Relaxed), Ordering::Relaxed);
@@ -537,12 +612,21 @@ pub async fn run(spawner: Spawner) -> ! {
                                 pps,
                                 mbit
                             );
+                            if pot_on {
+                                blog!(
+                                    Level::Info,
+                                    "potentiometer {} on GPIO{}: the conversions alternate, the signal is sampled at {:.1} Hz",
+                                    pot_config.mode.name(),
+                                    pot::PIN,
+                                    rate_mhz as f32 / 1000.0
+                                );
+                            }
                             if new_client {
                                 // A new reader gets the history first (the boot banner included).
                                 log_sent = board_log::oldest_seq();
                             }
                         }
-                        let mut reply = heapless::String::<160>::new();
+                        let mut reply = heapless::String::<256>::new();
                         let _ = core::fmt::Write::write_fmt(
                             &mut reply,
                             format_args!(
@@ -564,6 +648,15 @@ pub async fn run(spawner: Spawner) -> ! {
                                 ),
                             );
                         }
+                        let (pot_low, pot_high) = pot_config.range();
+                        let _ = core::fmt::Write::write_fmt(
+                            &mut reply,
+                            format_args!(
+                                " pot={} pot_pin={} pot_lo={pot_low} pot_hi={pot_high}",
+                                pot_config.mode.name(),
+                                pot::PIN
+                            ),
+                        );
                         let _ = socket.send_to(reply.as_bytes(), meta.endpoint).await;
                     }
                     Command::Stop => {
@@ -577,6 +670,7 @@ pub async fn run(spawner: Spawner) -> ! {
                     }
                     Command::Info => {
                         let s = StreamInfo {
+                            pot_mode: pot_config.mode,
                             client,
                             rate_mhz,
                             packets,
@@ -669,6 +763,34 @@ pub async fn run(spawner: Spawner) -> ! {
                             .await;
                         }
                     }
+                    Command::Pot(change) => {
+                        let Some(change) = change else {
+                            say(
+                                &socket,
+                                meta.endpoint,
+                                Level::Warn,
+                                format_args!("pot [off|freq|duty] [min=N] [max=N] (Hz for freq, % for duty)"),
+                            )
+                            .await;
+                            continue;
+                        };
+                        if let Err(why) = pot_config.apply(&change, pwm_plan::MIN_HZ, pwm_plan::MAX_HZ) {
+                            say(&socket, meta.endpoint, Level::Error, format_args!("pot: {why}")).await;
+                            continue;
+                        }
+                        if change != pot::Change::default() {
+                            // The next reading is followed whatever it is. Turning the knob on starts the wave:
+                            // there is nothing to see on the input otherwise.
+                            follower.reset();
+                            if let (Some(pwm), true) =
+                                (pwm.as_mut(), pot_config.mode != Mode::Off && change.mode.is_some())
+                            {
+                                let s = pwm.state();
+                                let _ = pwm.apply(s.asked_hz, s.duty, true);
+                            }
+                        }
+                        say_pot(&socket, meta.endpoint, &pot_config, pwm.as_ref().map(Pwm::state)).await;
+                    }
                     Command::Reboot => {
                         say(&socket, meta.endpoint, Level::Reply, format_args!("rebooting…")).await;
                         if let Some(adc) = adc.as_mut() {
@@ -684,7 +806,7 @@ pub async fn run(spawner: Spawner) -> ! {
                             meta.endpoint,
                             Level::Reply,
                             format_args!(
-                                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · reboot · help"
+                                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · pot [off|freq|duty] [min=N] [max=N] · reboot · help"
                             ),
                         )
                         .await;
@@ -708,7 +830,7 @@ pub async fn run(spawner: Spawner) -> ! {
 
         // Finished DMA buffers into the ring.
         if let Some(adc) = adc.as_mut()
-            && adc.drain(push)
+            && adc.drain(push, |code| knob.push(code))
         {
             DROPPED.fetch_add(1, Ordering::Relaxed);
         }
@@ -747,6 +869,32 @@ pub async fn run(spawner: Spawner) -> ! {
                 IDLE_STOP_MS / 1000
             );
             continue;
+        }
+
+        // The potentiometer: the generator follows the knob when it has moved, and the page is told where it is.
+        if adc_pot && pot_followed_at.elapsed() > Wait::from_millis(40) {
+            pot_followed_at = Clock::now();
+            if let Some(position) = knob.position(ZERO_CODE, FULL_SCALE) {
+                if follower.moved(position)
+                    && let (Some(pwm), Some(value)) = (pwm.as_mut(), pot_config.value(position))
+                {
+                    let s = pwm.state();
+                    if s.on {
+                        let (freq, duty) =
+                            if pot_config.mode == Mode::Duty { (s.asked_hz, value) } else { (value, s.duty) };
+                        let _ = pwm.apply(freq, duty, true);
+                    }
+                }
+                if pot_sent_at.elapsed() > Wait::from_millis(100) {
+                    pot_sent_at = Clock::now();
+                    let given = pwm.as_ref().map_or(0.0, |pwm| {
+                        let s = pwm.state();
+                        if pot_config.mode == Mode::Duty { s.duty } else { s.hz }
+                    });
+                    let datagram = pot::encode(pot_config.mode, position, knob.code().unwrap_or(0.0), given);
+                    let _ = socket.send_to(&datagram, endpoint).await;
+                }
+            }
         }
 
         // Losses are said as they happen (at most once a second), not only in the statistics.
