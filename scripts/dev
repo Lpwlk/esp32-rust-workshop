@@ -2,8 +2,8 @@
 # `dev build -v` instead of `python3 scripts/dev.py build -v`.
 #
 # Runs scripts/dev.py with the Python of the repository's .venv (so the script doesn't have to
-# start the system Python first and relaunch itself), and from any folder. Before `dev setup`
-# has created the .venv, it falls back on python3.
+# start the system Python first and relaunch itself), and from any folder. Before the .venv
+# exists, it takes the first Python 3.13 or newer it finds (dev.py creates the .venv).
 #
 # Put it on your PATH once, e.g.:   ln -s "$PWD/scripts/dev" ~/.local/bin/dev
 # (a symlink is followed back to the repository, so it keeps working from anywhere).
@@ -19,4 +19,10 @@ root=$(cd "$(dirname "$src")/.." && pwd)
 if [ -x "$root/.venv/bin/python" ]; then
     exec "$root/.venv/bin/python" "$root/scripts/dev.py" "$@"
 fi
-exec python3 "$root/scripts/dev.py" "$@"
+for python in python3.13 python3.14 python3; do
+    if command -v "$python" >/dev/null 2>&1 && "$python" -c 'import sys; sys.exit(sys.version_info < (3, 13))' 2>/dev/null; then
+        exec "$python" "$root/scripts/dev.py" "$@"
+    fi
+done
+echo "dev needs Python 3.13 or newer: https://www.python.org/downloads/" >&2
+exit 1

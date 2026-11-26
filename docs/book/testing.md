@@ -7,7 +7,7 @@ Four levels, from the fastest to the closest to the hardware:
 | Host tests | `cargo test-host` | your computer | the logic is right (protocol, address space, config, CLI, debouncing, presets…) | ~1 s |
 | Lints and build | `python3 scripts/dev.py check` | your computer | what CI checks: presets, clippy, both firmware builds (UART and Ethernet), docs site (`check --fast`: without the builds and the site) | ~2 min |
 | On-target tests | `python3 scripts/dev.py test target a` | one board | the RISC-V core gives the same results; the hardware behaves as assumed | ~30 s |
-| System test | `python3 scripts/dev.py flash all` (Ethernet) or `--app uart flash all` | two boards | the whole thing: link, CLI, LEDs, bursts, the address space | by hand |
+| System test | `python3 scripts/dev.py flash all` (Ethernet) or `flash all --app uart` | two boards | the whole thing: link, CLI, LEDs, bursts, the address space | by hand |
 
 The split follows the code: everything that doesn't touch a peripheral lives in
 `firmware/shared/core` and is tested on the host; only the hardware glue (UART,
@@ -158,7 +158,7 @@ Wire the boards first ([Wiring](wiring.md)). What to look at:
 | `watch /buttons/jumper` | a line each time the other board's jumper changes; `unwatch` stops it |
 
 On Ethernet the system test is `python3 scripts/dev.py flash all`, with a cable between the two RJ45 ports;
-`PRESET=node-a-tcp`/`node-b-tcp` runs it over TCP instead of UDP. On UART it is `python3 scripts/dev.py --app uart flash all`,
+`PRESET=node-a-tcp`/`node-b-tcp` runs it over TCP instead of UDP. On UART it is `python3 scripts/dev.py flash all --app uart`,
 with the three wires.
 ## Continuous integration
 

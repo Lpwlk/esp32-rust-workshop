@@ -2,7 +2,7 @@
 """Live spectrum (FFT) of the ADC samples streamed by the `adc-stream` firmware, in your browser.
 
     python3 scripts/dev.py setup                       # once: numpy and plotly go in .venv
-    python3 scripts/dev.py --app adc flash -m          # flash the board (firmware/adc-stream/)
+    python3 scripts/dev.py flash -m --app adc          # flash the board (firmware/adc-stream/)
     python3 scripts/dev.py fft                         # then, on the computer (or this file with .venv/bin/python)
 
 The board is at 192.168.77.20 (UDP port 7100): give your computer's Ethernet port an address in

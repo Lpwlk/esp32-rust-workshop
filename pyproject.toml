@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "esp32-rust-workshop-dev"
+version = "0.1.0"
+description = "The dev tool of this repository: `dev flash all --app eth`"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+dev = "dev:main"
+
+[tool.setuptools]
+package-dir = { "" = "scripts" }
+py-modules = ["dev"]

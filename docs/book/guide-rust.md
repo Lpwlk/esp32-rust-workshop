@@ -740,11 +740,11 @@ Erase a board's whole flash:
 python3 scripts/dev.py erase a
 ```
 
-Flash another firmware from the repository root (`--app` goes before the command): the UART app, or the ADC streamer:
+Flash another firmware from the repository root (`--app` is an option of the command): the UART app, or the ADC streamer:
 
 ```sh
-python3 scripts/dev.py --app uart flash a -m
-python3 scripts/dev.py --app adc flash a -m
+python3 scripts/dev.py flash a -m --app uart
+python3 scripts/dev.py flash a -m --app adc
 ```
 
 Live spectrum of the ADC app in the browser (`--demo`: a simulated board; your settings are kept in

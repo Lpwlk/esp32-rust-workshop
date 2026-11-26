@@ -63,7 +63,7 @@ to skip the question, or let `scripts/dev.py` tell the boards apart by MAC addre
 python3 scripts/dev.py setup                       # once: Python venv for the tools
 python3 scripts/dev.py boards assign a 6C:1A       # this board is node A
 python3 scripts/dev.py flash a -m                  # build, flash, monitor (+ Flash/RAM table): Ethernet app
-python3 scripts/dev.py --app uart flash a -m       # the same for the UART app
+python3 scripts/dev.py flash a -m --app uart       # the same for the UART app
 python3 scripts/dev.py check                       # everything CI checks, locally
 ```
 
@@ -74,7 +74,7 @@ Ethernet to your computer, which draws a live spectrum in the browser (Plotly). 
 [`firmware/adc-stream/`](firmware/adc-stream), computer side [`tools/adc-fft/`](tools/adc-fft).
 
 ```sh
-python3 scripts/dev.py --app adc flash a -m  # node A's board (or b)
+python3 scripts/dev.py flash a -m --app adc  # node A's board (or b)
 python3 scripts/dev.py fft                   # the page (or `fft --demo` without a board)
 ```
 
@@ -235,7 +235,7 @@ driver for the S31 is merged in esp-hal but not released, so the Ethernet app pi
 **its own workspace** (own `Cargo.lock`, own `target/`); two esp-hal versions can't live in one. The ADC app
 (`firmware/adc-stream/`) and the Ferrite port (`firmware/ferrite-esp32s31/`) do the same, and the ADC app reuses the
 Ethernet app's bring-up by path. They all use `workshop-core` by path. When a release ships the driver, they can merge.
-Run `cargo` **in the folder** of the one you want, or let `dev.py --app …` do it.
+Run `cargo` **in the folder** of the one you want, or let `dev.py … --app …` do it.
 
 > [!WARNING]
 > **ESP32-S31 support is young.** esp-hal marks the chip as early-stage, and
@@ -265,7 +265,7 @@ dashboard), `tools/wireshark` (Lua dissectors: `wsnode`, `wsgen`, `wsadc`), `scr
 | I want to… | Run |
 |---|---|
 | check what is installed and plugged in | `python3 scripts/dev.py doctor` |
-| flash and watch a node | `python3 scripts/dev.py [--app eth\|uart\|adc] flash a -m` |
+| flash and watch a node | `python3 scripts/dev.py flash a -m [--app eth\|uart\|adc]` |
 | test without a board | `cargo test-host` |
 | see the ADC spectrum, or both nodes on a page | `python3 scripts/dev.py fft [--demo]`, `python3 scripts/dev.py dash [--demo]` |
 | format and check everything before a push | `python3 scripts/dev.py format`, then `python3 scripts/dev.py check` |

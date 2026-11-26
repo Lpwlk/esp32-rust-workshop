@@ -6,6 +6,7 @@
 
 # Python tooling (scripts/dev.py)
 /.venv
+*.egg-info/
 __pycache__/
 /scripts/logs
 /.boards.json

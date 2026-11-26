@@ -17,7 +17,7 @@ give the ADC a signal you know.
 
 ```sh
 python3 scripts/dev.py setup                 # once: numpy and plotly go in the .venv
-python3 scripts/dev.py --app adc flash a -m  # build, flash node A's board (or b), open its console
+python3 scripts/dev.py flash a -m --app adc  # build, flash node A's board (or b), open its console
 python3 scripts/dev.py fft                   # on the computer: the page, http://127.0.0.1:8050
 python3 scripts/dev.py fft --demo            # the same page with a simulated board: no hardware at all
 ```

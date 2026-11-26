@@ -31,7 +31,7 @@ handshake, every header decoded, `dump 64` for 64 raw bytes of each). `dash` dra
 | other addresses, port, names | copy a preset, edit it ([`docs/book/presets.md`](../docs/book/presets.md)) |
 | RTT console through the probe | `--features rtt` |
 | without saved settings / watchdog | `--no-default-features` (then add what you want) |
-| the helper script | `python3 ../scripts/dev.py --app eth flash a` (or `b`, `all`) |
+| the helper script | `python3 ../scripts/dev.py flash a --app eth` (or `b`, `all`) |
 
 ## How it is organised
 

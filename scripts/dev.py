@@ -4,25 +4,26 @@
     python3 scripts/dev.py setup                 # once: .venv (Python 3.13) + requirements
     python3 scripts/dev.py doctor                # tools, Rust target, boards: what's missing
 
-  Three firmwares, chosen with `--app` (the option goes before the command; nobody needs to `cd` anywhere):
+  Three firmwares, chosen with `--app`, an option of the command like any other (`dev flash all --app eth --rtt`;
+  the command always comes first, and nobody needs to `cd` anywhere):
     eth   board-to-board over Ethernet: nodes a and b (default)        firmware/ethernet/
     uart  board-to-board over a UART: nodes a and b                    firmware/uart/
     adc   board-to-computer: the ADC streamed over Ethernet (adc-stream): nodes a or b   firmware/adc-stream/
 
   Boards (node = a | b, the boards registered with `boards assign`; every app runs on either of them):
-    python3 scripts/dev.py --app uart flash a -m  # the UART app instead
-    python3 scripts/dev.py --app adc flash b -m  # the ADC streamer on node B's board, then its console
+    python3 scripts/dev.py flash a -m --app uart  # the UART app instead
+    python3 scripts/dev.py flash b -m --app adc  # the ADC streamer on node B's board, then its console
     python3 scripts/dev.py fft                   # the live spectrum page (Plotly) for adc-stream, in the browser
     python3 scripts/dev.py fft --demo            # the same with a simulated board
     python3 scripts/dev.py dash                  # the dashboard of both boards (eth or uart app): their consoles, as controls and charts
-    python3 scripts/dev.py --app uart dash       # the same for the UART app (the page reads the app from the boards anyway)
+    python3 scripts/dev.py dash --app uart       # the same for the UART app (an option of the page: the page reads the app from the boards anyway)
     python3 scripts/dev.py dash --demo [uart]    # the same with two simulated nodes
     python3 scripts/dev.py boards                # plugged boards: MAC, port, probe, node
     python3 scripts/dev.py boards assign a 6C:1A # this board is node A (remembered)
     python3 scripts/dev.py build [a|b] [-v]      # firmware, release (both by default); -v / -vv: cargo's verbose
     python3 scripts/dev.py size [a|b]            # flash / RAM used (also after each build)
     python3 scripts/dev.py flash a [-m]          # build + flash with espflash (+ monitor)
-    python3 scripts/dev.py flash all             # both nodes: one build, both boards flashed at the same time
+    python3 scripts/dev.py flash all [--rtt]     # both nodes: one build, both boards flashed at the same time
     python3 scripts/dev.py watch [a|b] [-f]      # rebuild on every saved source file (-f: reflash node a|b too)
     python3 scripts/dev.py monitor a             # serial console + CLI, backtraces decoded
     python3 scripts/dev.py reset a               # restart the firmware: no build, no flashing
@@ -59,9 +60,12 @@ keep the terminal. The colors are a theme: set ACTIVE_THEME in scripts/devthemes
 cargo commands (the rustc and linker command lines, to see what a build really runs) and shows
 cargo's own output, live, instead of the bar.
 
-Shorter to type: `scripts/dev` runs this script from any folder, with the .venv's Python.
-Link it once onto your PATH (`ln -s "$PWD/scripts/dev" ~/.local/bin/dev`) and `dev build -v`,
-`dev flash a -m`, `dev check --fast` work as they are written above, minus the `python3 scripts/dev.py`.
+Needs a released Python 3.13 or newer to start; the first command creates .venv by itself.
+
+Shorter to type: `pipx install --editable .` from the repository (or `uv tool install --editable .`) makes
+a `dev` command that runs this script from any folder: `dev flash all --app eth --rtt`, `dev check --fast`...
+without pipx, `scripts/dev` does the same on macOS and Linux: link it once onto your PATH
+(`ln -s "$PWD/scripts/dev" ~/.local/bin/dev`). The command comes first, its options (`--app`) after it.
 
 A command that ends by itself after 30 s or more (build, flash, check, test, ...) raises a desktop
 notification, so you can look away; `DEV_NOTIFY=0` turns that off.
@@ -90,8 +94,9 @@ VENV = ROOT / ".venv"
 VENV_BIN = VENV / ("Scripts" if os.name == "nt" else "bin")
 VENV_PYTHON = VENV_BIN / "python"
 REQUIREMENTS = SCRIPTS / "requirements.txt"
-# Zensical's dependencies don't support Python 3.15 yet: take the first one found.
-PYTHON_CANDIDATES = ["python3.13", "python3.12", "python3.14"]
+MINIMUM_PYTHON = (3, 13)
+# Zensical's dependencies don't support Python 3.15 yet (an alpha): the first released one found.
+PYTHON_CANDIDATES = ["python3.13", "python3.14", "python3"]
 COMMIT_TYPES = ["feat", "fix", "chore", "refactor", "test", "docs"]
 
 CHIP = "esp32s31"
@@ -129,13 +134,26 @@ def in_venv() -> bool:
     return Path(sys.prefix).resolve() == VENV.resolve()
 
 
+def usable_python(name: str) -> str | None:
+    """The path of interpreter `name` when it is a released Python of the minimum version or newer."""
+    path = shutil.which(name)
+    if not path:
+        return None
+    released = f"sys.version_info >= {MINIMUM_PYTHON} and sys.version_info.releaselevel == 'final'"
+    check = subprocess.run(
+        [path, "-c", f"import sys; sys.exit(not ({released}))"], capture_output=True
+    )
+    return path if check.returncode == 0 else None
+
+
 def setup(python: str | None) -> None:
     candidates = [python] if python else PYTHON_CANDIDATES
-    interpreter = next(
-        (shutil.which(name) for name in candidates if name and shutil.which(name)), None
-    )
+    interpreter = next(filter(None, map(usable_python, candidates)), None)
     if not interpreter:
-        sys.exit(f"No suitable Python found (tried {', '.join(candidates)}).")
+        sys.exit(
+            f"dev needs Python {MINIMUM_PYTHON[0]}.{MINIMUM_PYTHON[1]} or newer, released "
+            f"(tried {', '.join(candidates)}): https://www.python.org/downloads/"
+        )
     print(f"• creating {VENV.relative_to(ROOT)} with {interpreter}")
     subprocess.run([interpreter, "-m", "venv", "--clear", str(VENV)], check=True)
     pip_command = [str(VENV_PYTHON), "-m", "pip", "--disable-pip-version-check"]
@@ -143,7 +161,7 @@ def setup(python: str | None) -> None:
     subprocess.run([*pip_command, "install", "--quiet", "--upgrade", "pip"], check=True)
     print(f"• installing {REQUIREMENTS.relative_to(ROOT)}")
     subprocess.run([*pip_command, "install", "--quiet", "-r", str(REQUIREMENTS)], check=True)
-    print("✓ ready: python3 scripts/dev.py doctor")
+    print("✓ .venv ready (`dev doctor` lists what else is missing)")
 
 
 def requirement_names() -> list[str]:
@@ -403,13 +421,13 @@ def flash(node: str, selector: str | None, monitor: bool, rtt: bool, release: bo
         task(flash_label(node, board), flash_command(board, node, False, release))
 
 
-def flash_all(release: bool) -> None:
+def flash_all(release: bool, rtt: bool) -> None:
     from boards import BoardError, resolve
     from devlib import done, fmt_secs, log, print_output, run_parallel
 
     if APP == "adc":
         log.error(
-            "`flash all` is for the two nodes of the eth / uart apps: the ADC app runs on one board, `dev.py --app adc flash a|b`."
+            "`flash all` is for the two nodes of the eth / uart apps: the ADC app runs on one board, `dev.py flash a|b --app adc`."
         )
         raise SystemExit(1)
 
@@ -425,7 +443,7 @@ def flash_all(release: bool) -> None:
         log.error("Nodes A and B are the same board: assign the other one.")
         raise SystemExit(1)
     # One cargo run for both: the shared crates compile once and the two links run side by side.
-    cargo_build(list(NODES), rtt=False, release=release)
+    cargo_build(list(NODES), rtt=rtt, release=release)
     labels = {node: flash_label(node, boards[node]) for node in NODES}
     started_at = time.monotonic()
     results = run_parallel(
@@ -884,17 +902,28 @@ def dash(tool_arguments: list[str]) -> None:
         "node dashboard: [path]tools/node-dash/node_dash.py[/] (Ctrl+C to stop; `dev.py dash --help` for options). "
         "Close `monitor` first: one program per serial port."
     )
-    if APP == "adc":
-        sys.exit(
-            "The ADC app has its own page: `dev.py fft`. `dash` is for --app eth or --app uart."
-        )
-    # `dev.py --app uart dash`: the page starts on that app (it also reads it from the boards' `config`).
-    if "--app" in sys.argv[1:] and "--app" not in tool_arguments:
-        tool_arguments = ["--app", APP, *tool_arguments]
     stream([str(VENV_PYTHON), "-u", str(DASH_TOOL), *tool_arguments])
 
 
+def add_app_argument(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--app",
+        choices=("uart", "eth", "adc"),
+        default="eth",
+        help="the firmware: eth (default, board-to-board over Ethernet), uart (board-to-board over a UART) or adc (adc-stream: one board to a computer)",
+    )
+
+
+def add_preset_argument(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--preset",
+        metavar="NAME",
+        help="build firmware/<app>/presets/NAME.toml instead of node-a / node-b",
+    )
+
+
 def add_node_argument(command_parser: argparse.ArgumentParser, optional: bool = False) -> None:
+    add_app_argument(command_parser)
     if optional:
         command_parser.add_argument("node", nargs="?", choices=NODES, help="a or b")
     else:
@@ -922,20 +951,9 @@ def add_verbose_argument(command_parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     root_parser = argparse.ArgumentParser(
-        prog="dev.py",
+        prog="dev",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    root_parser.add_argument(
-        "--app",
-        choices=("uart", "eth", "adc"),
-        default="eth",
-        help="firmware that build / size / flash / monitor / erase work on: eth (default, board-to-board over Ethernet), uart (board-to-board over a UART) or adc (adc-stream: one board to a computer)",
-    )
-    root_parser.add_argument(
-        "--preset",
-        metavar="NAME",
-        help="build firmware/<app>/presets/NAME.toml instead of node-a / node-b",
     )
     commands = root_parser.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -967,6 +985,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_command_parser.add_argument(
         "--rtt", action="store_true", help="with the RTT console (feature rtt)"
     )
+    add_app_argument(build_command_parser)
+    add_preset_argument(build_command_parser)
     add_debug_argument(build_command_parser)
     add_verbose_argument(build_command_parser)
 
@@ -974,6 +994,7 @@ def build_parser() -> argparse.ArgumentParser:
         "size", help="flash and RAM used by the firmware (GCC-style table)"
     )
     size_parser.add_argument("node", nargs="?", choices=NODES, help="a or b (default: both)")
+    add_app_argument(size_parser)
     add_debug_argument(size_parser)
 
     flash_parser = commands.add_parser(
@@ -994,6 +1015,8 @@ def build_parser() -> argparse.ArgumentParser:
     flash_parser.add_argument(
         "--rtt", action="store_true", help="with the RTT console (feature rtt)"
     )
+    add_app_argument(flash_parser)
+    add_preset_argument(flash_parser)
     add_debug_argument(flash_parser)
     add_verbose_argument(flash_parser)
 
@@ -1004,6 +1027,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     rtt_parser = commands.add_parser("rtt", help="RTT build + flash, then the cargo-embed console")
     add_node_argument(rtt_parser)
+    add_preset_argument(rtt_parser)
     add_verbose_argument(rtt_parser)
 
     erase_parser = commands.add_parser(
@@ -1029,6 +1053,7 @@ def build_parser() -> argparse.ArgumentParser:
         "With --flash the board is flashed after each good build (one node: a or b).",
     )
     add_node_argument(watch_parser, optional=True)
+    add_preset_argument(watch_parser)
     watch_parser.add_argument(
         "-f", "--flash", action="store_true", help="flash the node after each build"
     )
@@ -1148,6 +1173,11 @@ def notify_if_long(command: str, started_at: float, succeeded: bool) -> None:
 def main() -> None:
     # Everything after `fft` / `dash` belongs to the tool (argparse would choke on its options).
     command_line_arguments = sys.argv[1:]
+    if command_line_arguments[:1] and command_line_arguments[0].startswith("-"):
+        if command_line_arguments[0] not in ("-h", "--help"):
+            sys.exit(
+                "The command comes first, its options after it: dev <command> [options], e.g. dev flash all --app eth --rtt"
+            )
     tool_arguments: list[str] = []
     for tool_command in ("fft", "dash"):
         if tool_command in command_line_arguments:
@@ -1165,7 +1195,8 @@ def main() -> None:
         return
     if not in_venv():
         if not VENV_PYTHON.exists():
-            sys.exit("No .venv yet: run `python3 scripts/dev.py setup` first.")
+            print("No .venv yet: creating it (once, about a minute).")
+            setup(None)
         os.execv(VENV_PYTHON, [str(VENV_PYTHON), __file__, *sys.argv[1:]])
 
     sys.path.insert(0, str(SCRIPTS))
@@ -1176,7 +1207,7 @@ def main() -> None:
             sys.exit("pyserial is missing from .venv: run `python3 scripts/dev.py update`.")
 
     global APP, PRESET, VERBOSE
-    APP, PRESET = args.app, args.preset
+    APP, PRESET = getattr(args, "app", "eth"), getattr(args, "preset", None)
     VERBOSE = getattr(args, "verbose", 0)
     import devlib
 
@@ -1211,7 +1242,7 @@ def run_command(args: argparse.Namespace, release: bool) -> None:
             dash(args.tool_args)
         case "flash":
             if args.node == "all":
-                flash_all(release)
+                flash_all(release, args.rtt)
             else:
                 flash(args.node, args.board, args.monitor, args.rtt, release)
         case "monitor":

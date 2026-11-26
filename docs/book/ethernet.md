@@ -30,7 +30,7 @@ esp32-rust-workshop/
 | presets | `firmware/ethernet/presets/` | `firmware/uart/presets/` |
 | esp-hal | `main`, pinned to a commit | 1.2.2 (crates.io) |
 | main loop | async (esp-rtos + embassy-net) | blocking |
-| helper script | `dev.py flash a` | `dev.py --app uart flash a` |
+| helper script | `dev.py flash a` | `dev.py flash a --app uart` |
 
 !!! info "Why not one workspace"
     The EMAC driver for the ESP32-S31 is merged in esp-hal (PR #6192) but isn't in a release yet, and it

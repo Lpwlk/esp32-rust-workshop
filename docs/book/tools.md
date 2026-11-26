@@ -38,7 +38,7 @@ to them (default target, runner).
 |---|---|---|---|
 | repository root: `firmware/uart/`, `firmware/shared/{core,ferrite,presets-tool}` | the UART app and the hardware-free crates | `cargo run --release --bin node-a` (in `firmware/uart/`) · `cargo test-host` | `cargo clippy --release -- -D warnings` · `cargo fmt --all` |
 | `firmware/ethernet/` | the Ethernet app (`--features ferrite` runs it on the Ferrite RTOS) | `cargo run --release --bin node-a` | same, in that folder |
-| `firmware/adc-stream/` | the ADC app ([page](adc-stream.md)); reuses the Ethernet bring-up by path | `cargo build --release` · `dev.py --app adc flash a -m` | same, in that folder |
+| `firmware/adc-stream/` | the ADC app ([page](adc-stream.md)); reuses the Ethernet bring-up by path | `cargo build --release` · `dev.py flash a -m --app adc` | same, in that folder |
 | `firmware/ferrite-esp32s31/` | the Ferrite port for the S31: context switch, tick, `demo` and `stress` examples ([page](ferrite.md)) | `cargo run --release --example demo` | same, in that folder |
 
 `python3 scripts/dev.py format` formats the root workspace, the Ethernet and ADC apps and the Python; CI also checks
@@ -72,16 +72,21 @@ sources (a node, a setting, a status, the ADC header). Details: `tools/wireshark
 
 ## Workflows
 
-Every command below is written `dev.py …` for short. To type just `dev build -v` instead of
-`python3 scripts/dev.py build -v`, link the launcher onto your `PATH` once:
+Every command below is written `dev.py …` for short. The command always comes first and its options after it, `--app`
+included: `dev flash all --app eth --rtt`, never `dev --app eth flash all`. The only requirement is a released
+**Python 3.13 or newer** (the first run creates the project's `.venv` by itself, once).
+
+To type `dev` instead of `python3 scripts/dev.py`, install it once, from the repository (the install is a link to the
+repository, so `git pull` updates it):
 
 ```sh
-ln -s "$PWD/scripts/dev" ~/.local/bin/dev     # from the repository; any folder on your PATH works
+pipx install --editable .                     # needs pipx; or: uv tool install --editable .
 dev doctor                                    # from anywhere
 ```
 
-`scripts/dev` follows the link back to the repository and uses the `.venv`'s Python (before `dev setup`
-has created it, it falls back on `python3`). It is a shell script: on Windows keep `python scripts\dev.py`.
+On macOS and Linux the launcher works too, without pipx: `ln -s "$PWD/scripts/dev" ~/.local/bin/dev`. It follows the
+link back to the repository, and uses the `.venv`'s Python (before it exists, the first Python 3.13 or newer it finds).
+It is a shell script: on Windows use the pipx install, or `python scripts\dev.py`.
 
 `-v` (or `-vv`) after `build`, `flash`, `watch`, `rtt`, `test`, `check` or `docs build|api` is cargo's own:
 it prints the `rustc` and linker command lines, to see what a build really runs, and shows cargo's output live
@@ -119,14 +124,14 @@ there by copying one and changing its colors.
 |---|---|
 | set up a computer | `rustup`, `cargo install espflash --locked`, `python3 scripts/dev.py setup`, `python3 scripts/dev.py doctor` (it lists what is missing, with the command) |
 | tell the boards apart | `dev.py boards assign a 6C:1A` (the end of the MAC), once per board |
-| flash and watch a node | `dev.py flash a -m` (Ethernet), `dev.py --app uart flash a -m`, `dev.py --app adc flash a -m` |
+| flash and watch a node | `dev.py flash a -m` (Ethernet), `dev.py flash a -m --app uart`, `dev.py flash a -m --app adc` |
 | flash both | `dev.py flash all` (one build for both nodes, then both boards are flashed at the same time) |
 | rebuild every time I save | `dev.py watch` (both nodes), `dev.py watch a --flash` (also reflash node A after each good build) |
 | restart a board | `dev.py reset a` (no build, no flashing) |
 | forget the saved settings | `dev.py erase a --settings` (only the `nvs` partition; `dev.py erase a` wipes the whole flash) |
 | look at the console again | `dev.py monitor a` (backtraces decoded); one program per serial port |
 | debug with a probe | `dev.py rtt a` (RTT build, espflash, then cargo-embed) |
-| try a preset | `PRESET_NODE_A=fast cargo run --release --bin node-a`, or `dev.py --preset fast flash a` |
+| try a preset | `PRESET_NODE_A=fast cargo run --release --bin node-a`, or `dev.py flash a --preset fast` |
 | test the logic without a board | `cargo test-host`, or `dev.py test host` (`-u` regenerates the reference pages) |
 | test on a board | `dev.py test target a` (then it reflashes the firmware) |
 | see a live ADC spectrum | `dev.py fft` (or `--demo`) |

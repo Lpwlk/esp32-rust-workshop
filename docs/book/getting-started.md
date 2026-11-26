@@ -31,10 +31,10 @@ target. `rust-toolchain.toml` pins the channel, the target and the components, s
 === "Project scripts"
 
     `scripts/dev.py` wraps the daily tasks (boards, flashing, tests, docs). It needs
-    Python 3.12 to 3.14 and sets up its own `.venv`:
+    Python 3.13 or newer and sets up its own `.venv`:
 
     ```sh
-    python3 scripts/dev.py setup     # once: .venv + scripts/requirements.txt
+    python3 scripts/dev.py setup     # once: .venv + scripts/requirements.txt (the first command does it by itself)
     python3 scripts/dev.py doctor    # tools, Rust target, boards: what's missing
     python3 scripts/dev.py -h        # every command
     ```
@@ -91,8 +91,8 @@ Plug each board by its **USB Serial/JTAG** USB-C port.
     python3 scripts/dev.py monitor a     # console only, backtraces decoded
     ```
 
-    These work on the **Ethernet app**. For the UART one, put `--app uart` before the command
-    (`python3 scripts/dev.py --app uart flash a -m`); `--preset node-a-tcp` picks a preset (TCP instead of UDP).
+    These work on the **Ethernet app**. For the UART one, add `--app uart` to the command
+    (`python3 scripts/dev.py flash a -m --app uart`); `--preset node-a-tcp` picks a preset (TCP instead of UDP).
 
     The assignment is kept in `.boards.json` (not committed: it describes your desk).
     After each build, the script prints the flash and RAM used.
