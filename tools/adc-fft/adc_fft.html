@@ -532,6 +532,20 @@
           <option value="1">off</option><option value="2">× 2</option><option value="4">× 4</option>
           <option value="8">× 8</option><option value="16">× 16</option><option value="32">× 32</option>
         </select></div>
+      <div class="group"><span class="lab">Steady</span>
+        <select id="ssteady" aria-label="Steady the spectrum on screen" title="Calms the trace and the labels without slowing the display: small wiggles are smoothed, a new line shows at once. Display only: readouts, peak hold and waterfall don't change">
+          <option value="0">off</option><option value="0.15">light</option><option value="0.4">medium</option>
+          <option value="1">strong</option><option value="2.5">very strong</option>
+        </select></div>
+      <div class="group"><span class="lab">Response</span>
+        <select id="sresp" aria-label="How the steadied trace follows changes" title="Quick rise: a jump of more than 12 dB shows at once, the rest is smoothed both ways. Slow fall: every rise shows at once and the trace sinks gently (peaks are easy to read, the noise reads higher)">
+          <option value="quick">quick rise</option><option value="fall">slow fall</option>
+        </select></div>
+      <div class="group"><span class="lab">Smooth across</span>
+        <select id="soct" aria-label="Smoothing across frequency" title="Averages neighbouring bins over a fraction of an octave, like an audio analyser: shows the shape of the noise, and lowers and widens narrow lines (their labels keep the true level)">
+          <option value="0">off</option><option value="48">1/48 octave</option><option value="24">1/24 octave</option>
+          <option value="12">1/12 octave</option><option value="6">1/6 octave</option><option value="3">1/3 octave</option>
+        </select></div>
       <div class="group"><span class="lab">Frequency axis</span>
         <div class="row">
           <select id="range" aria-label="Frequency range">
@@ -585,6 +599,8 @@
       <div class="group"><span class="lab">Floor <b class="num" id="floorv">−100 dB</b></span>
         <div class="row"><input id="floor" type="range" min="-140" max="-40" step="5" value="-100" aria-label="Floor of the dB scale">
           <button id="fitfloor" title="Put the floor 15 dB under the noise floor">Fit</button></div></div>
+      <div class="group"><span class="lab">Noise floor</span>
+        <div class="row"><button id="sfloor" aria-pressed="false" title="A line at the measured noise floor (the median of the bins)">Line</button></div></div>
     </div>
     <p class="readout" id="spec-cur"></p>
     <div id="spec" class="plot"></div>
@@ -751,8 +767,13 @@
     <div class="toolbar">
       <div class="group"><span class="lab">Time span</span>
         <select id="wspan" aria-label="Waterfall time span">
-          <option value="6">6 s</option><option value="12">12 s</option>
-          <option value="30">30 s</option><option value="60">1 min</option>
+          <option value="3">3 s</option><option value="6">6 s</option><option value="12">12 s</option>
+          <option value="30">30 s</option><option value="60">1 min</option><option value="120">2 min</option>
+          <option value="300">5 min</option><option value="600">10 min</option><option value="1800">30 min</option>
+        </select></div>
+      <div class="group"><span class="lab">A row keeps</span>
+        <select id="wrow" aria-label="What a waterfall row keeps of the spectra since the previous one" title="A row stands for all the spectra since the one before (many of them on a long span). Peak: nothing short is missed. Average: a calmer picture. Latest: just the last one">
+          <option value="peak">the peak</option><option value="mean">the average</option><option value="last">the latest</option>
         </select></div>
       <div class="group"><span class="lab">Colour floor <b class="num" id="wfloorv">−100 dB</b></span>
         <input id="wfloor" type="range" min="-140" max="-40" step="5" value="-100" aria-label="Floor of the colour scale"></div>
@@ -834,7 +855,7 @@ const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, w
              harm: "off", labels: 1, view: "all", sstyle: "line", swidth: "auto", wstyle: "line", wwidth: "auto",
              cmap: "theme", cmrev: false, col: {}, palette: "default", wunit: "codes", mvcode: 0.7, keepdc: false,
              wrange: 0, amargin: 5, adamp: 1, wx: false, wsrc: "filtered", f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
-             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, size: {}, split: 0, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
+             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, size: {}, split: 0, ssteady: 0, sresp: "quick", soct: 0, sfloor: false, wrow: "peak", hn: 16, hscale: "dbc", href: "none", statusOpen: true,
              avol: 70, amute: false, aauto: false, afilt: false, fold: {}, order: [] };
 // Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
 function adopt(saved) {
@@ -867,6 +888,8 @@ let frame = null, drawn = null, lastSettings = "", cur = {};
 let xsKey = "", xs = [];
 const WATER_ROWS = 120;
 let rows = [], rowsKey = "", lastRowAt = 0, lastLinesAt = 0;
+let rowSoFar = null;                    // the spectra gathered for the next row
+let waterStale = false, lastWaterAt = 0;  // rows not drawn yet, and when it was last drawn
 let ref = null; // a spectrum kept for comparison: {df, y}
 let wref = null; // a waveform kept for comparison: {fs, y}
 // Trace colours: the theme's unless the user picked one (the palette select or a colour input).
@@ -980,7 +1003,12 @@ function viewRange(id, key, label) {
 viewSelect("range", "range", true);
 viewSelect("harm", "harm", false);
 viewSelect("labels", "labels", true);
-viewSelect("wspan", "wspan", true, () => { rows = []; });
+viewSelect("wspan", "wspan", true, () => { rowsKey = ""; });
+viewSelect("wrow", "wrow", false, () => { rowsKey = ""; });
+viewSelect("ssteady", "ssteady", true);
+viewSelect("sresp", "sresp", false);
+viewSelect("soct", "soct", true);
+viewToggle("sfloor", "sfloor");
 viewSelect("sstyle", "sstyle", false);
 viewSelect("swidth", "swidth", false);
 viewSelect("wstyle", "wstyle", false);
@@ -1037,7 +1065,7 @@ $("mvcode").value = ui.mvcode;
 $("mvcode").onchange = (e) => { ui.mvcode = +e.target.value > 0 ? +e.target.value : 0.7; e.target.value = ui.mvcode; cursors.wave = []; saveUi(); drawn = null; };
 unitsChanged();
 $("hum").onchange = (e) => post({ hum: e.target.value });
-viewSelect("wsrc", "wsrc", false, () => { rows = []; });
+viewSelect("wsrc", "wsrc", false, () => { rowsKey = ""; });
 
 // Digital filter: type buttons, two log-scale sliders (1 Hz up to the Nyquist frequency), steepness, underlay.
 const FILTER_NAMES = { off: "Off", lowpass: "Low-pass", highpass: "High-pass", bandpass: "Band-pass", bandstop: "Band-stop" };
@@ -1219,7 +1247,7 @@ viewRange("wfloor", "wfloor", "wfloorv");
 
 $("refset").onclick = () => {
   if (!frame || !frame.spec) return;
-  ref = { df: frame.spec.df, y: frame.spec.y.slice() };
+  ref = { df: frame.spec.df, y: (shownSpec ? shownSpec.y : frame.spec.y).slice() };  // what you see
   $("refclear").classList.remove("hidden"); drawn = null;
 };
 $("refclear").onclick = () => { ref = null; $("refclear").classList.add("hidden"); drawn = null; };
@@ -1333,6 +1361,64 @@ const COLOUR_SCALES = {
   cividis: ["#00224e", "#123570", "#3b496c", "#575d6d", "#707173", "#8a8678", "#a69d75", "#c4b56e", "#e4cf5b", "#ffea46"],
 };
 
+// What the spectrum plot shows of a frame: smoothed across frequency (`soct`), then steadied over time
+// (`ssteady`, a time constant in seconds). Both are only for the eyes: the server's readouts are untouched.
+const JUMP_DB = 12;   // "quick rise": a bin that goes up by more than this is a new signal, not noise
+// Mean power of the bins within a 1/n octave around each bin (running sums: one pass whatever the width).
+function smoothOctave(y, n) {
+  const sum = new Float64Array(y.length + 1), out = new Array(y.length);
+  for (let i = 0; i < y.length; i++) sum[i + 1] = sum[i] + 10 ** (y[i] / 10);
+  const half = 2 ** (1 / (2 * n));
+  for (let i = 0; i < y.length; i++) {
+    const a = Math.min(i, Math.ceil(i / half)), b = Math.max(i, Math.min(y.length - 1, Math.floor(i * half)));
+    out[i] = 10 * Math.log10(Math.max((sum[b + 1] - sum[a]) / (b + 1 - a), 1e-30));
+  }
+  return out;
+}
+// One trace's memory: moves `state` towards `y` by the share `k` of the way; what rises more than `jump` dB gets
+// there at once (`jump` 0: every rise does). A new line keeps growing while the FFT window fills with it, in steps
+// that may be smaller than `jump`: after a jump the bin goes on rising at once until `now + window` (`open[i]`).
+function ease(state, y, k, jump, open, now, window) {
+  for (let i = 0; i < y.length; i++) {
+    const v = y[i], s = state[i];
+    if (v - s > jump) { open[i] = now + window; state[i] = v; }
+    else state[i] = v > s && now < open[i] ? v : s + k * (v - s);
+  }
+}
+let shaped = null;      // { key, frame, at, y, raw, floor }: the memory, and the last frame taken in
+let shownSpec = null;   // { y, raw, floor }: what is on screen
+function shapeSpectrum(f) {
+  const st = f.settings, tau = ui.ssteady;
+  const key = [f.spec.y.length, f.spec.df, st.window, st.hum, st.filt, st.filt_f1, st.filt_f2, st.filt_sharp, !!f.spec.raw,
+               ui.soct, tau, ui.sresp].join("|");
+  // A redraw of the frame already taken in (a theme or axis change, a paused board) moves nothing.
+  if (shaped && shaped.key === key && (shaped.frame === f || f.frozen)) return shaped;
+  const across = (y) => (ui.soct ? smoothOctave(y, ui.soct) : y);
+  const y = across(f.spec.y), raw = f.spec.raw ? across(f.spec.raw) : null;
+  const floor = f.metrics ? f.metrics.floor_db : null, now = performance.now();
+  if (!shaped || shaped.key !== key || !(tau > 0)) {
+    shaped = { key, frame: f, at: now, y: y.slice(), raw: raw && raw.slice(), floor,
+               open: new Float64Array(y.length), openRaw: raw && new Float64Array(raw.length) };
+  } else {
+    const k = 1 - Math.exp(-(now - shaped.at) / 1000 / tau), jump = ui.sresp === "fall" ? 0 : JUMP_DB;
+    const window = jump ? (1000 * st.fft) / f.fs + 100 : 0;   // ms
+    ease(shaped.y, y, k, jump, shaped.open, now, window);
+    if (raw) ease(shaped.raw, raw, k, jump, shaped.openRaw, now, window);
+    if (floor !== null) shaped.floor = shaped.floor === null ? floor : shaped.floor + k * (floor - shaped.floor);
+    shaped.frame = f; shaped.at = now;
+  }
+  return shaped;
+}
+// Labels that change 25 times a second can't be read: while steadied they hold for half a second, unless the
+// strongest line moves to another frequency.
+let heldLines = null;   // { at, lines, peak }
+function steadyLines(f) {
+  const now = performance.now(), lines = f.lines || [], pk = f.peak;
+  const moved = !heldLines || !heldLines.peak !== !pk || (pk && Math.abs(pk.f - heldLines.peak.f) > 3 * f.spec.df);
+  if (!(ui.ssteady > 0) || moved || now - heldLines.at > 500) heldLines = { at: now, lines, peak: pk };
+  return heldLines;
+}
+
 function drawSpectrum(f) {
   const s1 = css("--series-1"), s2 = css("--series-2"), surface = css("--surface-1"), ink = css("--text-primary");
   const muted = css("--text-muted");
@@ -1347,8 +1433,10 @@ function drawSpectrum(f) {
   L.showlegend = !!(f.settings.hold || refOk);
   L.legend = { orientation: "h", x: 1, xanchor: "right", y: 1.08, font: { color: css("--text-secondary") } };
 
+  shownSpec = shapeSpectrum(f);
+  const held = steadyLines(f);
   // Peak labels (the server's lines, at full resolution).
-  const top = (f.lines || []).slice(0, ui.labels);
+  const top = held.lines.slice(0, ui.labels);
   L.annotations = top.map((ln, i) => ({
     x: ax(ln.f / 1000), y: ln.db, xref: "x", yref: "y", showarrow: false, xanchor: "left", xshift: 8,
     yshift: 14 + (i % 2) * 14,
@@ -1357,7 +1445,7 @@ function drawSpectrum(f) {
   }));
 
   // Harmonic markers: dotted lines at multiples of a fundamental.
-  const f0 = ui.harm === "peak" ? (f.peak ? f.peak.f : 0) : ui.harm === "off" ? 0 : +ui.harm;
+  const f0 = ui.harm === "peak" ? (held.peak ? held.peak.f : 0) : ui.harm === "off" ? 0 : +ui.harm;
   L.shapes = [];
   if (f0 > 0) {
     for (let k = 1; k <= 60 && k * f0 / 1000 <= hi; k++) {
@@ -1370,7 +1458,7 @@ function drawSpectrum(f) {
                            text: `f₀ ${fmtHz(f0)}`, font: { color: muted, size: 11 } });
     }
   }
-  const pk = f.peak;
+  const pk = held.peak;
   const width = lineWidth(ui.swidth, f.settings.fft / 2);
   const c1 = colour("spec"), c2 = colour("hold"), cf = css("--series-3");
   const st = f.settings, filtOn = st.filt !== "off";
@@ -1383,6 +1471,11 @@ function drawSpectrum(f) {
     }
   }
   L.showlegend = !!(f.settings.hold || refOk || f.spec.resp || f.spec.raw);
+  if (ui.sfloor && shownSpec.floor !== null) {
+    L.shapes.push({ type: "line", xref: "paper", yref: "y", x0: 0, x1: 1, y0: shownSpec.floor, y1: shownSpec.floor, line: { color: muted, width: 1.2, dash: "dashdot" } });
+    L.annotations.push({ x: 1, y: shownSpec.floor, xref: "paper", yref: "y", xanchor: "right", yanchor: "bottom", showarrow: false,
+                         text: `noise floor ${fmtDb(shownSpec.floor)}`, font: { color: ink, size: 11 }, bgcolor: alpha(surface, 0.8) });
+  }
   cursors.spec.forEach((c, k) => {
     const xk = ax(c.f / 1000);
     L.shapes.push({ type: "line", xref: "x", yref: "paper", x0: xk, x1: xk, y0: 0, y1: 1, line: { color: ink, width: 1, dash: "dash" } });
@@ -1397,12 +1490,12 @@ function drawSpectrum(f) {
                  fill: "tonexty", fillcolor: alpha(cf, 0.12), hoverinfo: "skip" });
   }
   if (f.spec.raw) {
-    under.push({ x, y: f.spec.raw, type: "scatter", mode: "lines", name: "Unfiltered", line: { color: alpha(muted, 0.85), width: Math.min(width, 1.1) },
+    under.push({ x, y: shownSpec.raw, type: "scatter", mode: "lines", name: "Unfiltered", line: { color: alpha(muted, 0.85), width: Math.min(width, 1.1) },
                  hovertemplate: "%{x:.3f} kHz · %{y:.1f} dB<extra>unfiltered</extra>" });
   }
   const traces = [
     ...under,
-    ...curve(ui.sstyle, x, f.spec.y, c1, width, ui.floor, "Spectrum", "%{x:.3f} kHz · %{y:.1f} dB<extra></extra>"),
+    ...curve(ui.sstyle, x, shownSpec.y, c1, width, ui.floor, "Spectrum", "%{x:.3f} kHz · %{y:.1f} dB<extra></extra>"),
     { x, y: f.spec.hold || [], type: "scatter", mode: "lines", name: "Peak hold",
       line: { color: c2, width: Math.min(width, 1.5) }, visible: f.settings.hold ? true : "legendonly",
       showlegend: f.settings.hold, hovertemplate: "%{x:.3f} kHz · %{y:.1f} dB<extra>hold</extra>" },
@@ -1637,18 +1730,20 @@ function drawWater(f) {
   const L = baseLayout();
   const dfk = f.spec.df / 1000, x = xsFor(f.spec.y.length, dfk), nyq = f.fs / 2000;
   const hi = ui.range ? Math.min(ui.range / 1000, nyq) : nyq;
-  const every = (ui.wspan * 1000) / WATER_ROWS;
-  const age = rows.map((_, i) => (i * every) / 1000);
-  L.uirevision = `${f.fs}|${ui.logx}|${ui.range}|${theme}`;
+  const minutes = ui.wspan >= 120, unit = minutes ? 60000 : 1000, every = (ui.wspan * 1000) / WATER_ROWS;
+  const age = rows.map((_, i) => (i * every) / unit);
+  L.uirevision = `${f.fs}|${ui.logx}|${ui.range}|${ui.wspan}|${theme}`;
   L.xaxis = { ...L.xaxis, title: { text: "frequency (kHz)" }, type: ui.logx ? "log" : "linear",
               range: ui.logx ? [Math.log10(Math.max(dfk, hi / 1000)), Math.log10(hi)] : [0, hi] };
-  L.yaxis = { ...L.yaxis, title: { text: "seconds ago" }, autorange: "reversed" };
+  // The axis is the whole span from the start: the picture fills it from the top instead of rescaling as it grows.
+  L.yaxis = { ...L.yaxis, title: { text: minutes ? "minutes ago" : "seconds ago" },
+              range: [(ui.wspan * 1000) / unit, -every / 2 / unit], autorange: false };
   L.hovermode = "closest";
   Plotly.react("water", [{
     type: "heatmap", x, y: age, z: rows, zmin: ui.wfloor, zmax: 0, colorscale: stops, zsmooth: false,
     colorbar: { thickness: 10, len: 0.9, outlinewidth: 0, tickfont: { color: css("--text-secondary"), size: 11 },
                 ticksuffix: " dB" },
-    hovertemplate: "%{x:.2f} kHz · %{y:.1f} s ago<br>%{z:.1f} dB<extra></extra>",
+    hovertemplate: `%{x:.2f} kHz · %{y:.${minutes ? 2 : 1}f} ${minutes ? "min" : "s"} ago<br>%{z:.1f} dB<extra></extra>`,
   }], L, plotCfg);
 }
 
@@ -1769,15 +1864,36 @@ function setTiles(f) {
     : `${fmtInt(st.packets)} received · none lost`;
 }
 
+// A row gathers every spectrum since the previous one, so that on a long span (a row every 15 s on 30 min) a
+// short burst still shows. `kind`: their peak, their mean (in power) or only the last.
+function gather(soFar, y, kind) {
+  if (!soFar || kind === "last") return { n: 1, v: kind === "mean" ? y.map((d) => 10 ** (d / 10)) : y.slice() };
+  const v = soFar.v;
+  if (kind === "mean") for (let i = 0; i < v.length; i++) v[i] += 10 ** (y[i] / 10);
+  else for (let i = 0; i < v.length; i++) if (y[i] > v[i]) v[i] = y[i];
+  soFar.n++;
+  return soFar;
+}
+const rowOf = (g, kind) => (kind === "mean" ? g.v.map((p) => Math.round(100 * Math.log10(Math.max(p / g.n, 1e-30))) / 10) : g.v);
+
+// The rows are slots of equal length (span / WATER_ROWS) counted back from the newest. Frames don't arrive exactly
+// when a slot ends, so a row fills every slot that has passed (two, when the slots are shorter than the frames):
+// the time axis stays true, and the picture stays evenly spaced (uneven rows are 3 times slower to draw).
 function pushWater(f) {
   const st = f.settings;
-  const key = `${f.spec.y.length}|${f.spec.df}|${st.filt}|${st.filt_f1}|${st.filt_f2}|${st.hum}|${ui.wsrc}`;
-  if (key !== rowsKey) { rowsKey = key; rows = []; }
-  const now = performance.now();
-  if (now - lastRowAt < (ui.wspan * 1000) / WATER_ROWS) return false;
-  lastRowAt = now;
-  rows.unshift(ui.wsrc === "raw" && f.spec.raw ? f.spec.raw : f.spec.y);
-  if (rows.length > WATER_ROWS) rows.pop();
+  const key = `${f.spec.y.length}|${f.spec.df}|${st.filt}|${st.filt_f1}|${st.filt_f2}|${st.hum}|${ui.wsrc}|${ui.wrow}|${ui.wspan}`;
+  if (key !== rowsKey) { rowsKey = key; rows = []; rowSoFar = null; lastRowAt = 0; }
+  rowSoFar = gather(rowSoFar, ui.wsrc === "raw" && f.spec.raw ? f.spec.raw : f.spec.y, ui.wrow);
+  const now = performance.now(), every = (ui.wspan * 1000) / WATER_ROWS;
+  if (lastRowAt && now - lastRowAt < every) return false;
+  // after a pause or a hidden tab: one row, not a long smear of it
+  const fresh = !lastRowAt || now - lastRowAt > Math.max(3 * every, 1000);
+  const slots = fresh ? 1 : Math.floor((now - lastRowAt) / every);
+  lastRowAt = fresh ? now : lastRowAt + slots * every;
+  const row = rowOf(rowSoFar, ui.wrow);
+  for (let i = 0; i < slots; i++) rows.unshift(row);
+  if (rows.length > WATER_ROWS) rows.length = WATER_ROWS;
+  rowSoFar = null;
   return true;
 }
 
@@ -1808,7 +1924,10 @@ function render(f, force) {
   const now = performance.now();
   if (force || now - lastLinesAt > 300) { lastLinesAt = now; guard("lines", () => drawLines(f)); }
   const pushed = f.frozen ? false : pushWater(f);
-  if (ui.water && (pushed || force)) guard("waterfall", () => drawWater(f));
+  // The waterfall is the heaviest plot (up to half a million cells): about 8 redraws a second at most, however
+  // fast its rows come, so that a short span doesn't slow the other plots down. No row is lost, only drawings.
+  waterStale = waterStale || pushed;
+  if (ui.water && (force || (waterStale && now - lastWaterAt >= 110))) { lastWaterAt = now; waterStale = false; guard("waterfall", () => drawWater(f)); }
 }
 
 // ---- the board's log ----------------------------------------------------------------------

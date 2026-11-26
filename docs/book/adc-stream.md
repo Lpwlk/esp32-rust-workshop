@@ -93,11 +93,45 @@ dark or auto (follows your system).
 | **PWM generator** | the board's real generator on GPIO20, see below |
 | **Potentiometer** | what the knob on GPIO44 sets (frequency, duty cycle or nothing), its two limits and a **Reverse** button, the knob's position as a bar, the reading, and the last 30 seconds of what it gave the generator; the generator's own control for that number greys out while the knob owns it |
 | **Harmonics** | the strongest line and its multiples as bars (dB below the line, or below full scale); harmonics above half the sample rate are **hatched**, drawn where they fold back to; the noise floor; an ideal square, triangle or sawtooth as diamonds to compare with; a summary (THD, even/odd) |
-| **Spectrum** | dB or linear, log or linear frequency, peak hold, a reference trace, A/B cursors, harmonic markers (strongest line, 50 or 60 Hz mains), autoscale |
+| **Spectrum** | dB or linear, log or linear frequency, peak hold, a reference trace, A/B cursors, harmonic markers (strongest line, 50 or 60 Hz mains), autoscale, a noise-floor line, and options to [calm the picture](#a-calmer-spectrum) |
 | **Waveform** | the last milliseconds of samples, with an oscilloscope-style **trigger** (edge, tone or pattern lock; slope, level, position; auto or normal), averaging, min/max envelope with a sliding window, mains hum removal, units in codes, % or mV |
 | **Strongest lines**, **Code histogram** | the peaks of the spectrum, and how the raw ADC codes are distributed (clipping, stuck bits) |
-| **Waterfall** | the spectrum over time, with a colour scale per theme. Like the other plots it is **resizable** ([how](tools.md#arranging-the-two-dashboards)) |
+| **Waterfall** | the spectrum over time, **3 s to 30 min** ([long spans](#the-waterfalls-time-span)), with a colour scale per theme. Like the other plots it is **resizable** ([how](tools.md#arranging-the-two-dashboards)) |
 | **Board log** | what the board prints, filterable, and a prompt for its [commands](#board-commands) |
+
+### A calmer spectrum
+
+A single FFT's noise jumps by several dB from one frame to the next, and the labels change with it. Four settings of the
+*Spectrum* card help, none of which slows the display down:
+
+| Setting | What it does |
+| --- | --- |
+| **Steady** (off, light to very strong) | smooths each bin over time on screen (0.15 to 2.5 s), and holds the peak labels for half a second (they move at once when the strongest line changes frequency) |
+| **Response** | *quick rise*: a bin that jumps by more than 12 dB, a new line, shows at once and keeps rising while the FFT window fills; the rest is smoothed both ways. *slow fall*: every rise shows at once and the trace sinks gently: easy to read peaks, but the noise reads a few dB higher |
+| **Smooth across** (1/48 to 1/3 octave) | averages neighbouring bins, as an audio analyser does: the shape of the noise. It lowers and widens narrow lines (their labels keep the true level) |
+| **Noise floor** | a line at the measured noise floor |
+
+**Steady or Averaging?** *Averaging* is done by the tool, in power, over a number of frames: it measures better (the
+readouts, harmonics and waterfall use it) but everything lags by those frames, and a tone that stops sinks slowly.
+*Steady* only changes what the spectrum plot draws. On the simulated board (25 frames/s, FFT 1024 to 4096 at 20 kS/s):
+
+| | noise bin, change per frame | a new tone is fully shown after | a tone that stops has fallen 30 dB after |
+| --- | --- | --- | --- |
+| nothing | about 5 dB | at once | 0.1 s |
+| Averaging × 16 | 0.3 dB | 0.6 s | 3.1 s |
+| Steady medium | 0.65 dB | 0.1 s | 0.25 s |
+| Steady strong | 0.25 dB | 0.1 s | 0.5 s |
+
+(One run on one computer: the times include what the FFT window itself needs.)
+
+### The waterfall's time span
+
+The picture has 120 rows whatever the span, so a row stands for 25 ms (3 s) to 15 s (30 min) and **all the spectra of
+that time**. *A row keeps* chooses what of them: **the peak** (the default: a short burst still shows), **the average**
+(calmer, a short burst is weaker) or **the latest** only (short events between two rows are missed). The axis shows the
+whole span from the start, in minutes from 2 min up, and fills from the top; changing the span or what a row keeps starts
+over. The history lives in the page: a reload, or hiding the tab, doesn't keep or fill it.
+The picture itself is redrawn about 8 times a second at most (no row is lost): it is the heaviest plot of the page.
 
 ### Fold what you don't need
 
