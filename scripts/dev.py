@@ -791,7 +791,8 @@ def docs_serve(port: int, open_browser: bool) -> None:
             "-a",
             f"localhost:{port}",
         ]
-        + (["--open"] if open_browser else [])
+        + (["--open"] if open_browser else []),
+        serves=("docs site", r"^Serving .+ on (https?://\S+)"),
     )
 
 
@@ -809,27 +810,44 @@ def docs_build(regenerate_reference: bool) -> None:
         "build the docs site",
         [str(VENV_BIN / "zensical"), "build", "--clean", "-f", "docs/zensical.toml"],
     )
-    done(f"site in [path]{(ROOT / 'docs' / 'site').relative_to(ROOT)}/[/]")
+    done(
+        f"site in [path]{(ROOT / 'docs' / 'site').relative_to(ROOT)}/[/] "
+        "[muted](to read it: `dev.py docs serve`)[/]"
+    )
 
 
 def docs_api(open_browser: bool) -> None:
-    from devlib import task
+    from devlib import ANSI_ESCAPE, done, task
+
+    pages: list[Path] = []
+
+    def note_page(output: str) -> None:
+        """Keeps the page `cargo doc` says it wrote, for the list at the end."""
+        if found := re.search(r"Generated (/.+?\.html)", ANSI_ESCAPE.sub("", output)):
+            pages.append(Path(found[1]))
 
     task(
         "rustdoc: workshop-core",
         with_verbose(
             ["cargo", "doc", "-p", "workshop-core", "--target", "host-tuple", "--no-deps"]
         ),
+        summarize=note_page,
     )
     task(
         "rustdoc: UART firmware",
         with_verbose(["cargo", "doc", "-p", "esp32-rust-workshop", "--no-deps"]),
+        summarize=note_page,
     )
     task(
         "rustdoc: Ethernet firmware",
         with_verbose(["cargo", "doc", "--no-deps"] + (["--open"] if open_browser else [])),
         working_directory=APP_DIRS["eth"],
+        summarize=note_page,
     )
+    if pages:  # none with -v: cargo's own output has them
+        # the path inside the repository to read, the whole address behind it to click
+        links = [f"[url][link={page.as_uri()}]{page.relative_to(ROOT)}[/link][/]" for page in pages]
+        done("rustdoc pages:\n" + "\n".join(links))
 
 
 def git(*arguments: str) -> str:
@@ -903,7 +921,10 @@ def fft(tool_arguments: list[str]) -> None:
     log.info(
         "live spectrum: [path]tools/adc-fft/adc_fft.py[/] (Ctrl+C to stop; `dev.py fft --help` for options)"
     )
-    stream([str(VENV_PYTHON), "-u", str(FFT_TOOL), *tool_arguments])
+    stream(
+        [str(VENV_PYTHON), "-u", str(FFT_TOOL), *tool_arguments],
+        serves=("ADC dashboard", r"^ADC FFT at (https?://\S+)"),
+    )
 
 
 def dash(tool_arguments: list[str]) -> None:
@@ -914,9 +935,12 @@ def dash(tool_arguments: list[str]) -> None:
         tool_arguments = tool_arguments[1:]
     log.info(
         "node dashboard: [path]tools/node-dash/node_dash.py[/] (Ctrl+C to stop; `dev.py dash --help` for options). "
-        "Close `monitor` first: one program per serial port."
+        "[warning]Close `monitor` first: one program per serial port.[/]"
     )
-    stream([str(VENV_PYTHON), "-u", str(DASH_TOOL), *tool_arguments])
+    stream(
+        [str(VENV_PYTHON), "-u", str(DASH_TOOL), *tool_arguments],
+        serves=("node dashboard", r"^Node dashboard at (https?://\S+)"),
+    )
 
 
 def add_app_argument(command_parser: argparse.ArgumentParser) -> None:

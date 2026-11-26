@@ -153,6 +153,18 @@ instead of the bar. `flash all` has one bar per board, side by side, each replac
 done. The console commands (`monitor`, `flash -m`, `rtt`) and the servers (`fft`, `dash`, `docs serve`) are not wrapped:
 they keep the terminal. Piped (no terminal), there is no bar: only the log lines.
 
+**What stands out.** Web addresses are highlighted wherever the tool prints them, and open with Cmd or Ctrl + click in
+terminals that support links. When `docs serve`, `fft` or `dash` is ready, its address comes again in a block of its own:
+
+```text
+  ➜  ADC dashboard  http://127.0.0.1:8050
+     Cmd/Ctrl + click to open · Ctrl+C to stop
+```
+
+The rest of a server's output stays grey, except its errors (red) and warnings (a port already taken, a settings file it
+can't read), and the serial ports, board address and settings file it names. `docs api` ends with the list of the pages it
+wrote.
+
 The colors are a theme, chosen in the Python files, not on the command line: set `ACTIVE_THEME` in `scripts/devthemes.py`
 to `ocean` (the default), `forest`, `sunset`, `dracula`, `nord` or `mono` (no colors, only bold and dim), or add a theme
 there by copying one and changing its colors.

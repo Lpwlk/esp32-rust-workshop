@@ -11,6 +11,7 @@ attributes (`bold #ff5555`, `italic grey62`).
     error      ERROR lines, failures
     muted      commands, details, the line a command is printing
     highlight  file paths and package names
+    url        web addresses (the dashboards, the docs site): keep them easy to find
     gain       a new version, a smaller size
     loss       an old version, a bigger size
     track      the empty part of the bar
@@ -26,6 +27,7 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "bold red",
         "muted": "grey62",
         "highlight": "yellow",
+        "url": "bold underline bright_cyan",
         "gain": "bold green",
         "loss": "bold red",
         "track": "grey23",
@@ -37,6 +39,7 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "bold red",
         "muted": "grey58",
         "highlight": "khaki1",
+        "url": "bold underline bright_cyan",
         "gain": "bold green",
         "loss": "bold red",
         "track": "grey19",
@@ -48,6 +51,7 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "bold red1",
         "muted": "grey62",
         "highlight": "light_salmon1",
+        "url": "bold underline bright_yellow",
         "gain": "bold chartreuse3",
         "loss": "bold red1",
         "track": "grey23",
@@ -59,6 +63,7 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "bold #ff5555",
         "muted": "#6272a4",
         "highlight": "#ffb86c",
+        "url": "bold underline #8be9fd",
         "gain": "bold #50fa7b",
         "loss": "bold #ff5555",
         "track": "#44475a",
@@ -70,6 +75,7 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "bold #bf616a",
         "muted": "#7b88a1",
         "highlight": "#d08770",
+        "url": "bold underline #8fbcbb",
         "gain": "bold #a3be8c",
         "loss": "bold #bf616a",
         "track": "#3b4252",
@@ -81,6 +87,7 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "bold reverse",
         "muted": "dim",
         "highlight": "italic",
+        "url": "bold underline",
         "gain": "bold",
         "loss": "reverse",
         "track": "dim",

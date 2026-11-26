@@ -16,7 +16,10 @@ A command runs in one of four ways, by what it is for:
   run()      the same, for a command whose output the script reads (pip's JSON, git). A `quiet` one
              (a version check) leaves nothing on screen.
   live()     a command that talks to you or never ends (a serial console): it owns the terminal.
-  stream()   a dev server: its output scrolls until Ctrl+C.
+  stream()   a dev server: its output scrolls until Ctrl+C. The address it serves is repeated in a
+             block of its own, and its errors and warnings keep their colors in the grey output.
+
+Every web address, in a log line or in a server's output, is highlighted and clickable.
 
 `RAW = True` (dev.py sets it with `-v`) turns task() into live(): cargo's own output.
 run_parallel() runs commands side by side, one bar each (two boards flashed at once).
@@ -41,10 +44,11 @@ from pathlib import Path
 from typing import Literal
 
 from rich.console import Console
-from rich.highlighter import NullHighlighter
+from rich.highlighter import Highlighter
 from rich.logging import RichHandler
 from rich.markup import escape
 from rich.progress import BarColumn, Progress, ProgressColumn, SpinnerColumn
+from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
 
@@ -59,6 +63,17 @@ TREE_LAST = " └── "
 RAW = False
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+# A web address or a built page; the punctuation that closes a sentence is not part of it.
+URL = re.compile(r"""(?:https?|file)://[^\s'"<>`)\]]+(?<![.,;:])""")
+
+# In a server's output: the lines that must not pass for background noise, and the facts worth finding.
+ERROR_LINE = re.compile(
+    r"^Traceback \(|^\s*(?:\w+\.)*\w*(?:Error|Exception)\b|(?i:\berror(?::|\[))"
+)
+WARNING_LINE = re.compile(
+    r"(?i)\bwarn(?:ing)?\b|\bcan't\b|\bcannot\b|\bfailed\b|already in use|\b[1-9]\d* issues? found"
+)
+FACT = re.compile(r"/dev/(?:cu|tty)[\w.\-]+|(?<=board )[\d.]+:\d+|(?<=kept in )\S+")
 
 DONE = 25
 logging.addLevelName(DONE, "DONE")
@@ -85,6 +100,7 @@ def build_theme(theme_name: str) -> Theme:
             "command": f"italic {colors['muted']}",
             "path": f"italic {colors['highlight']}",
             "package": f"italic {colors['highlight']}",
+            "url": colors["url"],
             "gain": colors["gain"],
             "loss": colors["loss"],
             "track": colors["track"],
@@ -125,6 +141,18 @@ class LogFileHandler(logging.Handler):
             self.handleError(record)
 
 
+def highlight_urls(text: Text) -> None:
+    """Styles every address in `text` and makes it a link (Cmd or Ctrl + click, where the terminal does links)."""
+    for match in URL.finditer(text.plain):
+        text.stylize("url", *match.span())
+        text.stylize(Style(link=match[0]), *match.span())
+
+
+class UrlHighlighter(Highlighter):
+    def highlight(self, text: Text) -> None:
+        highlight_urls(text)
+
+
 def make_logger() -> logging.Logger:
     LOG_FILE.parent.mkdir(exist_ok=True)
     logger = logging.getLogger("dev")
@@ -137,7 +165,7 @@ def make_logger() -> logging.Logger:
             console=console,
             show_path=False,
             markup=True,
-            highlighter=NullHighlighter(),
+            highlighter=UrlHighlighter(),
             rich_tracebacks=True,
             log_time_format="[%H:%M:%S]",
             omit_repeated_times=False,
@@ -602,18 +630,56 @@ def notify(title: str, message: str) -> None:
         pass
 
 
-def stream(command: list[str]) -> int:
+def server_line(line: str) -> Text:
+    """A line a server printed: grey unless it is an error or a warning (or has its own colors), with the
+    addresses and the facts one looks for (serial ports, the board, where settings go) standing out.
+    """
+    if ANSI_ESCAPE.search(line):
+        text = Text.from_ansi(line)
+    else:
+        if ERROR_LINE.search(line):
+            style = "error"
+        elif WARNING_LINE.search(line):
+            style = "warning"
+        else:
+            style = "muted"
+        text = Text(line, style=style)
+    for match in FACT.finditer(text.plain):
+        text.stylize("path", *match.span())
+    highlight_urls(text)
+    return text
+
+
+def announce(name: str, url: str) -> None:
+    """Where a server can be opened, in a block of its own: the one line to find in its output."""
+    address = Text(url)
+    highlight_urls(address)
+    console.print()
+    console.print(Text.assemble(("  ➜  ", "success"), (f"{name}  ", "bold"), address))
+    console.print("     [muted]Cmd/Ctrl + click to open · Ctrl+C to stop[/]")
+    console.print()
+
+
+def stream(command: list[str], serves: tuple[str, str] | None = None) -> int:
     """Runs a long command (dev server): its output scrolls (and goes to the log file) until
-    Ctrl+C stops it cleanly. Returns its exit code."""
+    Ctrl+C stops it cleanly. Returns its exit code.
+
+    `serves` is (what is served, a pattern with the address as its group): the first line that matches is
+    followed by `announce`."""
     echo(command, suffix="  [muted](Ctrl+C to stop)[/]")
     process = subprocess.Popen(
         command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
     )
+    pattern = re.compile(serves[1]) if serves else None
     try:
         assert process.stdout is not None
         for line in process.stdout:
-            console.print(Text(line.rstrip(), style="muted"))
-            log.debug(escape(line.rstrip()))
+            line = line.rstrip()
+            console.print(server_line(line), soft_wrap=True)  # never break an address in two
+            log.debug(escape(ANSI_ESCAPE.sub("", line)))
+            if serves and pattern and (match := pattern.search(line)):
+                announce(serves[0], match[1])
+                pattern = None
     except KeyboardInterrupt:
         log.info("Ctrl+C: stopping …")
         process.terminate()
