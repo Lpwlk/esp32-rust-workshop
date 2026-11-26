@@ -56,7 +56,7 @@ pyserial, zensical, black, numpy, plotly). `dev.py` relaunches itself there, so 
 | `scripts/memsize.py` | Flash / RAM table of an ELF (CI shows it in the job summary and compares with the target branch) | `dev.py size`, automatic after `build` |
 | **Zensical** | builds this site from `docs/book/` and `docs/zensical.toml` | `dev.py docs serve --open`, `dev.py docs build -r` |
 | **black** | formats the Python (`--line-length 100`) | `dev.py format` |
-| [`tools/adc-fft/`](adc-stream.md) | the ADC app's live page (spectrum, waveform, waterfall, filter, PWM generator); **keeps your settings** between runs | `dev.py fft`, `dev.py fft --demo` |
+| [`tools/adc-fft/`](adc-stream.md) | the ADC app's live page (spectrum, waveform, waterfall, filter, PWM generator, potentiometer); **keeps your settings** between runs | `dev.py fft`, `dev.py fft --demo` |
 | [`tools/node-dash/`](console.md) | a page around the consoles of both nodes (Ethernet or UART app): every CLI command as a control, charts read from what the boards print. Nothing changes in the firmware | `dev.py dash`, `dev.py dash --demo [uart]` |
 | `tools/wireshark/` | Lua dissectors for what the boards put on the cable, see below | `tshark -X lua_script:tools/wireshark/workshop.lua -r capture.pcap` |
 | `scripts/record_demos.py`, `render_demos.py`, `record.py`, `gifrender.py` | record the console GIFs from two real boards (`brew install agg gifsicle`), or re-render saved recordings without a board | `python3 scripts/record_demos.py boot` |
@@ -64,7 +64,7 @@ pyserial, zensical, black, numpy, plotly). `dev.py` relaunches itself there, so 
 ### Wireshark
 
 `tools/wireshark/workshop.lua` decodes `wsnode` (the node and address space frames, UDP and TCP 7000), `wsgen`
-(the traffic generator, UDP 7001) and `wsadc` (the ADC stream: samples, `LOG1`/`RPL1` lines, commands, UDP 7100).
+(the traffic generator, UDP 7001) and `wsadc` (the ADC stream: samples, `LOG1`/`RPL1` lines, `POT1` knob state, commands, UDP 7100).
 Install: `ln -s "$PWD/tools/wireshark/workshop.lua" ~/.local/lib/wireshark/plugins/workshop.lua`, then restart
 Wireshark. `python3 tools/wireshark/make_samples.py` writes two sample captures and
 `python3 tools/wireshark/check.py` runs `tshark` on them and fails when the Lua tables no longer match the Rust
@@ -129,7 +129,7 @@ there by copying one and changing its colors.
 | rebuild every time I save | `dev.py watch` (both nodes), `dev.py watch a --flash` (also reflash node A after each good build) |
 | restart a board | `dev.py reset a` (no build, no flashing) |
 | forget the saved settings | `dev.py erase a --settings` (only the `nvs` partition; `dev.py erase a` wipes the whole flash) |
-| look at the console again | `dev.py monitor a` (backtraces decoded); one program per serial port |
+| look at the console again | `dev.py monitor a` (backtraces decoded, the board is reset once attached so its boot card shows; `--keep` to attach as it is); one program per serial port |
 | debug with a probe | `dev.py rtt a` (RTT build, espflash, then cargo-embed) |
 | try a preset | `PRESET_NODE_A=fast cargo run --release --bin node-a`, or `dev.py flash a --preset fast` |
 | test the logic without a board | `cargo test-host`, or `dev.py test host` (`-u` regenerates the reference pages) |
@@ -152,7 +152,7 @@ Builds and flashes print how long they took. A command that ends by itself after
 also raises a desktop notification; `DEV_NOTIFY=0` turns that off.
 
 `check` runs: host tests and the freshness of the reference pages · clippy on the core · every example · the
-presets · build and clippy of the UART, Ethernet and ADC firmwares · the PWM arithmetic tests · the self tests of
+presets · build and clippy of the UART, Ethernet and ADC firmwares · the PWM and potentiometer arithmetic tests · the self tests of
 `adc_fft.py` and `node_dash.py` · the site. Not in it, because they need a board: `test target`, the
 system test (`flash all`).
 
@@ -171,7 +171,7 @@ page's `ui` object (saved by `/api/prefs`).
 | **host-tests** | `cargo test-host --locked`, the examples, clippy (core, Ferrite, presets), `cargo presets check` |
 | **ferrite-port** | the S31 port and its examples build and lint |
 | **firmware-eth** | the Ethernet app, for default / none / all / `ferrite` features, UDP and TCP presets |
-| **firmware-adc** | the ADC app builds and lints; the PWM arithmetic tests run |
+| **firmware-adc** | the ADC app builds and lints; the PWM and potentiometer arithmetic tests run |
 | **adc-fft**, **node-dash** | the `--selftest` of each Python tool |
 | **firmware** | the UART app for four feature sets, the Flash / RAM table, the ELF files kept 30 days (push to `main`) |
 | **site** → **deploy** | Zensical and rustdoc, published on GitHub Pages from `main` |

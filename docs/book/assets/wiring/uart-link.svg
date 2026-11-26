@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" width="760" role="img" aria-label="UART link between two boards: TX to RX, RX to TX, and the grounds"><title>UART link between two boards: TX to RX, RX to TX, and the grounds</title><rect width="760" height="320" rx="10" fill="#fbfaf6"/><text x="380" y="26" font-size="13" text-anchor="middle" font-weight="700" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">TX of one board goes to RX of the other, and the grounds are shared</text>
+<rect x="30" y="44" width="210" height="220" rx="10" fill="#e6f0ea" stroke="#4b7a62" stroke-width="2"/>
+<text x="44" y="68" font-size="14" text-anchor="start" font-weight="700" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Board A</text>
+<text x="44" y="86" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">node-a · UART app</text>
+<rect x="520" y="44" width="210" height="220" rx="10" fill="#e6f0ea" stroke="#4b7a62" stroke-width="2"/>
+<text x="534" y="68" font-size="14" text-anchor="start" font-weight="700" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Board B</text>
+<text x="534" y="86" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">node-b · UART app</text>
+<circle cx="240" cy="120" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="228" y="124.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">2</text>
+<text x="252" y="112" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 7</text>
+<circle cx="520" cy="120" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="532" y="124.5" font-size="13" text-anchor="start" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">2</text>
+<text x="508" y="112" font-size="10.5" text-anchor="end" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 7</text>
+<text x="214" y="124.5" font-size="11" text-anchor="end" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">TX</text>
+<text x="546" y="124.5" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">TX</text>
+<circle cx="240" cy="180" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="228" y="184.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">3</text>
+<text x="252" y="172" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 10</text>
+<circle cx="520" cy="180" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="532" y="184.5" font-size="13" text-anchor="start" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">3</text>
+<text x="508" y="172" font-size="10.5" text-anchor="end" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 10</text>
+<text x="214" y="184.5" font-size="11" text-anchor="end" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">RX</text>
+<text x="546" y="184.5" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">RX</text>
+<circle cx="240" cy="240" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="228" y="244.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">G</text>
+<text x="252" y="232" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 8</text>
+<circle cx="520" cy="240" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="532" y="244.5" font-size="13" text-anchor="start" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">G</text>
+<text x="508" y="232" font-size="10.5" text-anchor="end" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 8</text>
+<polyline points="240,120 380,120 380,180 520,180" fill="none" stroke="#2a8a52" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="240,180 300,180 300,150 460,150 460,120 520,120" fill="none" stroke="#2b6cc4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="240,240 520,240" fill="none" stroke="#33322f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="380" y="262" font-size="12" text-anchor="middle" font-weight="600" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">ground: always</text><text x="380.0" y="308" font-size="12" text-anchor="middle" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">5 Mbaud: one bit lasts 200 ns, so wires of a few cm. The USB-C of each board goes to the computer.</text></svg>

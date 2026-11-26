@@ -627,10 +627,11 @@ Format the code (the Ethernet, ADC and Ferrite-port workspaces are separate: run
 cargo fmt --all
 ```
 
-The ADC app's PWM arithmetic has no hardware in it, so `rustc` tests it directly:
+The ADC app's PWM and potentiometer arithmetic have no hardware in them, so `rustc` tests them directly:
 
 ```sh
 cd firmware/adc-stream && rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_test && /tmp/pwm_plan_test
+cd firmware/adc-stream && rustc --edition 2024 --test src/pot.rs -o /tmp/pot_test && /tmp/pot_test
 ```
 
 The ADC page's self test (receiver, FFT, web server, saved settings, board commands), no board needed:

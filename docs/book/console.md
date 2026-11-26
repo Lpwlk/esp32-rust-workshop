@@ -536,7 +536,7 @@ types the `--type` commands one key at a time, and writes an asciicast that
 [agg](https://github.com/asciinema/agg) renders and gifsicle compresses.
 
 - `--key '0.8:\x12'` sends ++ctrl+r++: `espflash monitor` doesn't reset the chip
-  by itself, and shows nothing until it does;
+  by itself, and shows nothing until it does (`dev.py monitor` presses it for you);
 - `--start 4.5` drops the boot from the recording, `--trim REGEX` drops lines
   (the ROM and bootloader logs);
 - record from a committed tree, or the boot card shows `+dirty`. The `.cast` files

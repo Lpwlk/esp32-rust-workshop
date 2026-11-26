@@ -20,7 +20,7 @@ between runs, in `~/.config/adc-fft/settings.json` (`--settings FILE`, `--no-sav
 [the ADC app page of the docs](../../docs/book/adc-stream.md) for everything the page does.
 
 Checks, from this folder: `cargo build --release && cargo clippy --release -- -D warnings`, `cargo fmt`, the PWM
-arithmetic with `rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_test && /tmp/pwm_plan_test`, and the page's
+arithmetic with `rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_test && /tmp/pwm_plan_test` (and `src/pot.rs` the same way), and the page's
 `python3 ../../tools/adc-fft/adc_fft.py --selftest`.
 
 ## How it works
@@ -30,6 +30,7 @@ arithmetic with `rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_te
 | [`src/dma.rs`](src/dma.rs) | the ADC's **continuous mode with DMA**: the ADC's own timer triggers every conversion (the 40 MHz crystal divided: exactly regular sampling instants) and the LP AHB GDMA stores the results in a ring of buffers. Written against the registers, following ESP-IDF's `adc_continuous` (`~/.espressif/v6.1/esp-idf`): esp-hal has no continuous ADC for the S31 and doesn't expose that DMA. The chip's limits are 611 Hz to 83 333 Hz. |
 | [`src/stream.rs`](src/stream.rs) | the UDP protocol (`start rate=20000 n=256` from the computer every second; sample datagrams back, with the exact rate in the header) and the main loop |
 | [`src/pwm.rs`](src/pwm.rs), [`src/pwm_plan.rs`](src/pwm_plan.rs) | the PWM generator: the RMT's transmitter in loop mode (esp-hal has no LEDC for the S31), and its arithmetic (tested on the computer: `rustc --edition 2024 --test src/pwm_plan.rs`) |
+| [`src/pot.rs`](src/pot.rs) | the potentiometer on GPIO44: the filter, the knob's position, the log/linear range, the `pot` command's parser and the `POT1` datagram (tested on the computer: `rustc --edition 2024 --test src/pot.rs`) |
 | [`src/board_log.rs`](src/board_log.rs) | the board's log: in colour on the USB console, kept in a short history, and sent to the computer (`LOG1` datagrams) for the page's terminal |
 | the Ethernet bring-up | `esp32_rust_workshop_eth::net` (PHY, EMAC, network stack), reused from [`firmware/ethernet`](../ethernet) |
 
@@ -59,6 +60,7 @@ The terminal under the page's "Board log" has a prompt: what you type goes to th
 | `info` | six lines, the node firmware's boot card in short: chip and MAC, build, ADC, network and link, stream (rate, datagrams, losses, DMA stalls), uptime |
 | `verbose [on\|off]` | one detail line per second: datagrams, longest burst, longest `send_to`, longest pass of the main loop, ring level, DMA buffers and stalls, log lines sent |
 | `pwm [freq=HZ] [duty=%] [on\|off]` | the **PWM generator** on GPIO20 (`D0` of header J2), see below; `pwm 1000 25` is 1 kHz at 25 %, `pwm` alone tells its state |
+| `pot [off\|freq\|duty] [min=N] [max=N]` | the **potentiometer** on GPIO44 sets the PWM's frequency (Hz, log scale) or duty cycle (%), see below; `pot` alone tells its state and the raw conversions |
 | `reboot` | software reset; the page's keep-alive restarts the stream and re-applies verbose mode |
 | `help` | the list |
 
@@ -79,4 +81,18 @@ the two pins to read the duty cycle as a level, or none to see the edges and the
 
 - The pin also drives breadboard LED 1 if it is wired (the node apps use GPIO20 for it), which makes a
   dimmer for the duty cycle at a few hundred Hz.
-- The wave has not been measured on a board yet: the ADC reading it back through a wire is the test.
+- Measured on a board with `D0` wired to `43`: the samples give back 1002 Hz at 50 % for a 1 kHz, 50 % wave.
+
+## Potentiometer (to play with the generator)
+
+A potentiometer on **GPIO44** (`ADC1_CH2`, pin `44` of header J2; the wiper, its ends on 3V3 and GND) sets the
+generator's frequency or its duty cycle: `pot freq min=100 max=5000` (log scale, 100 Hz at the GND end), or
+`pot duty min=0 max=100`; the other number stays what `pwm` set, `min` above `max` turns the knob the other way,
+`pot off` (the default) doesn't read the pin at all. The ADC then alternates the two pins, so the signal is sampled
+at half the conversion rate (41.6 kS/s at most). The board sends the knob's state ten times a second (`POT1`) and
+the page's **Potentiometer** card draws it. Wiring drawing: [the wiring page](../../docs/book/wiring.md).
+
+- Measured on a board: the whole travel reads 2192 down to about 1. The even ADC channels of the S31 read the other
+  way round (0 V is 2198, 3.3 V is 0), where GPIO43 goes from 2198 up to 4393; `pot.rs` takes it into account.
+- With the knob at 59 %, `pot freq min=100 max=5000` gave 1002 Hz on GPIO43, and `pot freq min=300 max=3000`
+  1165 Hz, measured from the samples; `pot duty min=10 max=90` gave 57 %.

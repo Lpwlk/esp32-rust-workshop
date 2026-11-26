@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" width="760" role="img" aria-label="Breadboard of the node apps: a jumper button on GPIO4 and two LEDs on GPIO20 and GPIO21"><title>Breadboard of the node apps: a jumper button on GPIO4 and two LEDs on GPIO20 and GPIO21</title><rect width="760" height="400" rx="10" fill="#fbfaf6"/><rect x="30" y="30" width="230" height="330" rx="10" fill="#e6f0ea" stroke="#4b7a62" stroke-width="2"/>
+<text x="44" y="54" font-size="14" text-anchor="start" font-weight="700" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">ESP32-S31 board</text>
+<text x="44" y="72" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">header J2 (silkscreen: GPIO numbers)</text>
+<circle cx="260" cy="105" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="248" y="109.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">20</text>
+<text x="272" y="97" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 26</text>
+<circle cx="260" cy="175" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="248" y="179.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">21</text>
+<text x="272" y="167" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 27</text>
+<circle cx="260" cy="245" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="248" y="249.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">4</text>
+<text x="272" y="237" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 32</text>
+<circle cx="260" cy="290" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="248" y="294.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">G</text>
+<text x="272" y="282" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 33</text>
+<circle cx="260" cy="330" r="5.5" fill="#c9a227" stroke="#8a6d10" stroke-width="1.5"/>
+<text x="248" y="334.5" font-size="13" text-anchor="end" font-weight="700" fill="#2b2a27" style="font-family:ui-monospace,Menlo,Consolas,monospace">G</text>
+<text x="272" y="322" font-size="10.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">J2 pin 34</text>
+<polyline points="260,105 330,105" fill="none" stroke="#e08a14" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="330,105 344,105" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="344" y="97" width="52" height="16" rx="3" fill="#e8c98a" stroke="#8a6d10" stroke-width="1.5"/>
+<polyline points="396,105 410,105" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="370" y="91" font-size="11.5" text-anchor="middle" font-weight="600" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">330 Ω</text>
+<polyline points="430,105 442,105" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polygon points="442,94 442,116 466,105" fill="#e24a4a" stroke="#2b2a27" stroke-width="1.6"/>
+<polyline points="466,94 466,116" fill="none" stroke="#2b2a27" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="466,105 480,105" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="452,91 460,83" fill="none" stroke="#e24a4a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="460,93 468,85" fill="none" stroke="#e24a4a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="455" y="131" font-size="11.5" text-anchor="middle" font-weight="600" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">LED 1</text>
+<polyline points="480,105 560,105" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="260,175 330,175" fill="none" stroke="#8a55c8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="330,175 344,175" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="344" y="167" width="52" height="16" rx="3" fill="#e8c98a" stroke="#8a6d10" stroke-width="1.5"/>
+<polyline points="396,175 410,175" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="370" y="161" font-size="11.5" text-anchor="middle" font-weight="600" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">330 Ω</text>
+<polyline points="430,175 442,175" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polygon points="442,164 442,186 466,175" fill="#3fae5a" stroke="#2b2a27" stroke-width="1.6"/>
+<polyline points="466,164 466,186" fill="none" stroke="#2b2a27" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="466,175 480,175" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="452,161 460,153" fill="none" stroke="#3fae5a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="460,163 468,155" fill="none" stroke="#3fae5a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="455" y="201" font-size="11.5" text-anchor="middle" font-weight="600" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">LED 2</text>
+<polyline points="480,175 560,175" fill="none" stroke="#2b2a27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="560,105 560,330 260,330" fill="none" stroke="#33322f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="560" cy="175" r="4" fill="#2b2a27"/>
+<text x="572" y="100" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">cathodes</text>
+<text x="572" y="114" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">to GND</text>
+<polyline points="260,245 320,245 320,290 260,290" fill="none" stroke="#2a8a52" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="320" cy="245" r="4" fill="#2b2a27"/>
+<circle cx="320" cy="290" r="4" fill="#2b2a27"/>
+<text x="340" y="262" font-size="12" text-anchor="start" font-weight="600" fill="#2b2a27" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">jumper button: a wire from 4 to G</text>
+<text x="340" y="280" font-size="11.5" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">plugged = pressed, removed = released</text>
+<text x="345" y="218" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">GPIO → 330 Ω → anode (long leg)</text>
+<text x="345" y="232" font-size="11" text-anchor="start" font-weight="400" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">cathode → GND, about 4 mA</text><text x="380.0" y="388" font-size="12" text-anchor="middle" fill="#6b6a64" style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif">The same on the UART app and the Ethernet app. BOOT (GPIO61) is on the board: nothing to wire.</text></svg>

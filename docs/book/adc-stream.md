@@ -12,6 +12,7 @@ give the ADC a signal you know.
 | board | `192.168.77.20`, UDP port 7100; the computer takes `192.168.77.1/24` |
 | analog input | **GPIO43** (`ADC1_CH1`, pin `43` of header J2), 0 to 3.3 V |
 | PWM output | **GPIO20** (`D0` of header J2) |
+| potentiometer | **GPIO44** (`ADC1_CH2`, pin `44` of header J2): sets the PWM's frequency or duty cycle |
 
 ## Run it
 
@@ -54,8 +55,9 @@ board ──UDP──▶ Stream (thread: datagrams → last samples)
 - Above a few kS/s, put an **RC low-pass** on the input (cut-off below half the sample rate), or frequencies above
   it fold back into the spectrum. Keep the input between 0 and 3.3 V.
 
-The datagram formats are documented in `src/stream.rs` (`ADC1` samples, `RPL1` answers) and `src/board_log.rs`
-(`LOG1` log lines). The Wireshark plugin decodes all three: [Tools and workflows](tools.md#wireshark).
+The datagram formats are documented in `src/stream.rs` (`ADC1` samples, `RPL1` answers), `src/board_log.rs`
+(`LOG1` log lines) and `src/pot.rs` (`POT1`, the knob's state, only while the potentiometer is on). The Wireshark
+plugin decodes all four: [Tools and workflows](tools.md#wireshark).
 
 ## The page
 
@@ -86,6 +88,7 @@ dark or auto (follows your system).
 | **Digital filter** | low-pass, high-pass, band-pass, band-stop (FIR, four steepnesses), applied to everything shown, with the unfiltered signal underneath for comparison |
 | **Signal generator** | *demo only*: up to eight simulated waveforms you **add** (*+ Add waveform*) and **remove** (×) one by one (sine, square, PWM, sawtooth, triangle, sweep, noise), hum, noise, DC, presets |
 | **PWM generator** | the board's real generator on GPIO20, see below |
+| **Potentiometer** | what the knob on GPIO44 sets (frequency, duty cycle or nothing), its two limits and a **Reverse** button, the knob's position as a bar, the reading, and the last 30 seconds of what it gave the generator; the generator's own control for that number greys out while the knob owns it |
 | **Harmonics** | the strongest line and its multiples as bars (dB below the line, or below full scale); harmonics above half the sample rate are **hatched**, drawn where they fold back to; the noise floor; an ideal square, triangle or sawtooth as diamonds to compare with; a summary (THD, even/odd) |
 | **Spectrum** | dB or linear, log or linear frequency, peak hold, a reference trace, A/B cursors, harmonic markers (strongest line, 50 or 60 Hz mains), autoscale |
 | **Waveform** | the last milliseconds of samples, with an oscilloscope-style **trigger** (edge, tone or pattern lock; slope, level, position; auto or normal), averaging, min/max envelope with a sliding window, mains hum removal, units in codes, % or mV |
@@ -165,6 +168,7 @@ comes back in the log. Buttons next to the filters do the same for the common on
 | `info` | chip and MAC, build, ADC, network and link, stream (rate, datagrams, losses, DMA stalls), uptime |
 | `verbose [on\|off]` | one detail line per second: datagrams, timings, ring level, DMA buffers. It doesn't slow the stream, and is re-applied after a reboot |
 | `pwm [freq=HZ] [duty=%] [on\|off]` | the PWM generator; `pwm 1000 25` is 1 kHz at 25 %, `pwm` alone tells its state |
+| `pot [off\|freq\|duty] [min=N] [max=N]` | the potentiometer on GPIO44 sets the PWM's frequency or duty cycle, [see below](#the-potentiometer); `pot` alone tells its state |
 | `reboot` | software reset; the stream resumes by itself |
 | `help` | the list |
 
@@ -184,7 +188,35 @@ see the edges and the harmonics.
   your computer.
 - GPIO20 also drives breadboard LED 1 of the node apps, if it is wired: a dimmer for the duty cycle at a few
   hundred Hz.
-- Not measured on a board yet: reading it back through a wire is the test.
+- Measured on a board, `D0` wired to `43`: 1002 Hz and 50 % duty come back as 1002 Hz and 50 % from the samples.
+
+### The potentiometer
+
+A potentiometer on **GPIO44** makes the generator playable: turn the knob and the frequency (or the duty cycle)
+of the wave on GPIO20 follows, and the spectrum, the waveform and the **Potentiometer** card show it. The wiring is
+on the [wiring page](wiring.md#adc-app-pwm-jumper-and-potentiometer): `D0` to `43`, the wiper to `44`, the pot's
+ends to 3V3 and GND.
+
+| Command | What the knob does |
+|---|---|
+| `pot freq [min=Hz] [max=Hz]` | sets the frequency, `min` at the GND end, `max` at the 3V3 end, on a log scale (default 100 Hz to 5 kHz) |
+| `pot duty [min=%] [max=%]` | sets the duty cycle, linear (default 0 to 100 %); the frequency stays what `pwm` set |
+| `pot off` | not read: the ADC takes the signal alone, at the full sample rate (the default at boot) |
+| `pot` | the mode, the range, the raw conversions of GPIO44 |
+
+- **Pick the number the knob owns** with the mode; each mode keeps its own range on the page. `min` above `max`
+  reverses the knob.
+- The generator has to be **on**: the knob changes a running wave and doesn't start one.
+- The firmware averages the pin (64 conversions) and ignores moves under 0.5 % of the travel, so the wave is not
+  restarted by noise; a move restarts the wave once.
+- The board sends the knob's state ten times a second in a `POT1` datagram (`src/pot.rs`); the page
+  draws the **Knob** bar, the reading and the last 30 seconds of what the knob gave the generator. Without
+  hardware, `dev.py fft --demo --wire` has a simulated knob (it wanders between 10 % and 90 %) and a simulated wire
+  from the PWM pin to the ADC input.
+- While the knob is on, the ADC alternates GPIO43 and GPIO44: the signal's sample rate is **half** the conversion
+  rate, 41.6 kS/s at most. The page's rate limit follows.
+- Even ADC channels read inverted on this chip (GPIO44: 2198 at 0 V, 0 at 3.3 V); the firmware takes care of it.
+  The arithmetic is in `src/pot.rs`, tested on your computer.
 
 ## Tests
 
@@ -192,6 +224,7 @@ see the edges and the harmonics.
 |---|---|
 | firmware builds and lints | `cd firmware/adc-stream && cargo build --release && cargo clippy --release -- -D warnings` |
 | PWM arithmetic (no hardware) | `cd firmware/adc-stream && rustc --edition 2024 --test src/pwm_plan.rs -o /tmp/pwm_plan_test && /tmp/pwm_plan_test` |
+| potentiometer arithmetic (no hardware) | `cd firmware/adc-stream && rustc --edition 2024 --test src/pot.rs -o /tmp/pot_test && /tmp/pot_test` |
 | computer side: receiver, FFT, web server, saved settings, board commands | `python3 tools/adc-fft/adc_fft.py --selftest` |
 | formatting | `cd firmware/adc-stream && cargo fmt`, and `python3 scripts/dev.py format` for the Python |
 | everything CI runs | `python3 scripts/dev.py check` |
@@ -203,4 +236,6 @@ see the edges and the harmonics.
 | "No data from the board yet" | the board is flashed with `--app adc`, the cable is in, the computer's interface is `192.168.77.x`; `dev.py monitor a` shows the board's own log |
 | the status chip says *waiting* | no datagram for 1.5 s: the cable, or another program holding the board's UDP port |
 | a spectrum full of lines you didn't send | aliasing: add the RC low-pass, or raise the sample rate |
+| the knob's reading is stuck at one end, or at 0 | the wiper is not on `44`, or one end of the pot is not wired; `pot` tells the raw reading |
+| the reading moves but the wave doesn't | the generator is off (`pwm on`), or the knob is `off` (`pot freq`) |
 | the page forgets its settings | `--no-save` is on, or the settings file is not writable (the board log says so) |

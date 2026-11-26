@@ -174,8 +174,8 @@ with the three wires.
    table in the job summary;
 4. **Ethernet firmware**: the same for `firmware/ethernet`, for default, none, all and `ferrite` features, built with
    the UDP and with the TCP presets; the **Ferrite port** (`firmware/ferrite-esp32s31`) is built and linted too;
-5. **ADC app**: `firmware/adc-stream` built and linted, its PWM arithmetic tested on the computer
-   (`rustc --edition 2024 --test src/pwm_plan.rs`), and the `--selftest` of the ADC page (`tools/adc-fft`) and of the
+5. **ADC app**: `firmware/adc-stream` built and linted, its PWM and potentiometer arithmetic tested on the computer
+   (`rustc --edition 2024 --test src/pwm_plan.rs`, `src/pot.rs`), and the `--selftest` of the ADC page (`tools/adc-fft`) and of the
    nodes' dashboard (`tools/node-dash`): receiver, FFT, web server, saved settings, commands, against simulated boards;
 6. **site**: the documentation, once formatting and host tests pass (see
    [Formatting and generated docs](automation.md)).
