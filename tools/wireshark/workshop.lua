@@ -702,6 +702,7 @@ local AD = {
   text = ProtoField.string("wsadc.text", "Text", base.UNICODE),
   -- potentiometer
   pot_mode = ProtoField.uint8("wsadc.pot.mode", "Mode", base.DEC, POT_MODES),
+  pot_every = ProtoField.uint8("wsadc.pot.every", "Read once every N conversions"),
   pot_position = ProtoField.uint16("wsadc.pot.position", "Knob position (1/100 % of the travel)"),
   pot_code = ProtoField.uint16("wsadc.pot.code", "Averaged ADC code"),
   pot_value = ProtoField.float("wsadc.pot.value", "Value given to the generator (Hz or %)"),
@@ -717,6 +718,7 @@ local AD = {
   ok_full = ProtoField.uint32("wsadc.ok.full", "Full-scale code"),
   ok_verbose = ProtoField.uint32("wsadc.ok.verbose", "Verbose"),
   ok_pot_pin = ProtoField.uint32("wsadc.ok.pot_pin", "Potentiometer GPIO"),
+  ok_pot_every = ProtoField.uint32("wsadc.ok.pot_every", "Potentiometer read once every N conversions"),
 }
 local adf = {}
 for _, f in pairs(AD) do adf[#adf + 1] = f end
@@ -821,11 +823,12 @@ local function dissect_pot(tvb, item)
   local position = tvb(6, 2):le_uint()
   local value = tvb(12, 4):le_float()
   item:add(AD.pot_mode, tvb(4, 1))
+  item:add(AD.pot_every, tvb(5, 1))
   item:add_le(AD.pot_position, tvb(6, 2))
   item:add_le(AD.pot_code, tvb(8, 2))
   item:add_le(AD.pot_value, tvb(12, 4))
-  return string.format("POT1 %s  knob %.2f %%  → %.4g %s", POT_MODES[mode] or "?", position / 100, value,
-    mode == 2 and "%" or "Hz")
+  return string.format("POT1 %s  knob %.2f %%  → %.4g %s  (read every %d)", POT_MODES[mode] or "?", position / 100,
+    value, mode == 2 and "%" or "Hz", tvb(5, 1):uint())
 end
 
 local function key_values(item, tvb, text, fields)
@@ -872,6 +875,7 @@ function adc.dissector(tvb, pinfo, tree)
       key_values(item, tvb, text, {
         rate_mhz = AD.ok_rate_mhz, n = AD.ok_n, pin = AD.ok_pin,
         zero = AD.ok_zero, full = AD.ok_full, verbose = AD.ok_verbose, pot_pin = AD.ok_pot_pin,
+        pot_every = AD.ok_pot_every,
       })
       info = "answer: " .. text
     end

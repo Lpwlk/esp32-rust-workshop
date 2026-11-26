@@ -199,22 +199,27 @@ ends to 3V3 and GND.
 
 | Command | What the knob does |
 |---|---|
-| `pot freq [min=Hz] [max=Hz]` | sets the frequency, `min` at the GND end, `max` at the 3V3 end, on a log scale (default 100 Hz to 5 kHz) |
+| `pot freq [min=Hz] [max=Hz] [every=N]` | sets the frequency, `min` at the GND end, `max` at the 3V3 end, on a log scale (default 100 Hz to 5 kHz) |
 | `pot duty [min=%] [max=%]` | sets the duty cycle, linear (default 0 to 100 %); the frequency stays what `pwm` set |
 | `pot off` | not read: the ADC takes the signal alone, at the full sample rate (the default at boot) |
-| `pot` | the mode, the range, the raw conversions of GPIO44 |
+| `pot every=N` | the knob takes one ADC conversion in `N` (2 to 16, default 16); it can be set with or without a mode |
+| `pot` | the mode, the range, how often it is read, the raw conversions of GPIO44 |
 
 - **Pick the number the knob owns** with the mode; each mode keeps its own range on the page. `min` above `max`
   reverses the knob.
 - The generator has to be **on**: the knob changes a running wave and doesn't start one.
-- The firmware averages the pin (64 conversions) and ignores moves under 0.5 % of the travel, so the wave is not
+- The firmware averages about 20 ms of readings of the pin (up to 64) and ignores moves under 0.5 % of the travel, so the wave is not
   restarted by noise; a move restarts the wave once.
 - The board sends the knob's state ten times a second in a `POT1` datagram (`src/pot.rs`); the page
   draws the **Knob** bar, the reading and the last 30 seconds of what the knob gave the generator. Without
   hardware, `dev.py fft --demo --wire` has a simulated knob (it wanders between 10 % and 90 %) and a simulated wire
   from the PWM pin to the ADC input.
-- While the knob is on, the ADC alternates GPIO43 and GPIO44: the signal's sample rate is **half** the conversion
-  rate, 41.6 kS/s at most. The page's rate limit follows.
+- **High sample rates keep working.** The ADC's pattern table has 16 entries: the knob gets one of every `every`
+  conversions, the signal the others. With the default `every=16` the signal keeps 15/16 of the ADC's 83.3 kS/s
+  (**78.1 kS/s** at most) and the knob is read 5.2 thousand times a second, far more than a hand needs. A smaller
+  `every` reads the knob more often and leaves less to the signal (`every=2`: 41.6 kS/s each). The *Read every* box of
+  the **Potentiometer** card and its info line show the three rates; the knob's averaging follows the reading rate, so
+  it settles in about 20 ms whatever `every` is.
 - Even ADC channels read inverted on this chip (GPIO44: 2198 at 0 V, 0 at 3.3 V); the firmware takes care of it.
   The arithmetic is in `src/pot.rs`, tested on your computer.
 

@@ -67,11 +67,15 @@ BOARD_COMMANDS = ("info", "verbose", "pwm", "pot", "reboot", "help")
 # `pwm [freq=HZ] [duty=%] [on|off]` (or `pwm 1000 25`): what the board's generator on GPIO20 accepts.
 PWM_ARG = re.compile(r"on|off|(?:(?:freq|f|hz|duty|d)=)?[0-9]+(?:\.[0-9]*)?(?:e[+-]?[0-9]+)?", re.I)
 PWM_MIN_HZ, PWM_MAX_HZ = 0.2, 1_000_000.0
-# `pot [off|freq|duty] [min=N] [max=N]`: the potentiometer on GPIO44 sets the generator's frequency or duty cycle.
-POT_ARG = re.compile(r"off|freq|duty|(?:min|max)=[0-9]+(?:\.[0-9]*)?(?:e[+-]?[0-9]+)?", re.I)
+# `pot [off|freq|duty] [min=N] [max=N] [every=N]`: the potentiometer on GPIO44 sets the generator's frequency or
+# duty cycle, and is read once every N conversions.
+POT_ARG = re.compile(
+    r"off|freq|duty|(?:min|max)=[0-9]+(?:\.[0-9]*)?(?:e[+-]?[0-9]+)?|every=[0-9]+", re.I
+)
 POT = struct.Struct(
-    "<4sBxHHxxf"
-)  # "POT1", mode, position (1/100 %), averaged code, the value the generator was given
+    "<4sBBHHxxf"
+)  # "POT1", mode, every, position (1/100 %), averaged code, the value the generator was given
+POT_EVERY = (2, 16)  # the pot takes one conversion in N: the pattern table has 16 entries at most
 POT_MAGIC = b"POT1"
 POT_MODES = ("off", "freq", "duty")
 MAX_SCOPE = 16384  # samples of the waveform at most
@@ -82,9 +86,13 @@ HALF_SCALE = FULL_SCALE - ZERO_CODE  # amplitude of a full-scale sine, in codes
 KEEPALIVE_S = 1.0
 # The ADC's continuous mode (DMA) on the ESP32-S31: 611 Hz to 83 333 Hz (SOC_ADC_SAMPLE_FREQ_THRES_*).
 MIN_RATE_HZ, MAX_RATE_HZ = 611, 83_333
-POT_MAX_RATE_HZ = (
-    MAX_RATE_HZ // 2
-)  # the ADC alternates the two pins: the signal gets half the conversions
+
+
+def pot_max_rate(every: int) -> int:
+    """The signal's fastest rate while the pot takes one conversion in `every`: all but its share."""
+    return MAX_RATE_HZ * (every - 1) // every
+
+
 HISTORY = 65536  # samples kept: twice the largest FFT
 PAGE = Path(__file__).with_name("adc_fft.html")
 DEFAULT_RATE_HZ = 20_000
@@ -291,7 +299,7 @@ class Stream:
         if words[0] == "pwm" and not all(PWM_ARG.fullmatch(w) for w in words[1:]):
             return "pwm [freq=HZ] [duty=%] [on|off]"
         if words[0] == "pot" and not all(POT_ARG.fullmatch(w) for w in words[1:]):
-            return "pot [off|freq|duty] [min=N] [max=N]"
+            return "pot [off|freq|duty] [min=N] [max=N] [every=N]"
         self.host_log("cmd", text)
         try:
             self.sock.sendto(text.encode(), self.board)
@@ -402,6 +410,8 @@ class Stream:
                     pot["pin"] = int(value)
                 elif key in ("pot_lo", "pot_hi"):
                     pot["lo" if key == "pot_lo" else "hi"] = float(value)
+                elif key == "pot_every":
+                    pot["every"] = int(value)
             except ValueError:
                 pass
         self.board_pwm = pwm if "on" in pwm else None
@@ -413,11 +423,12 @@ class Stream:
                 pass
 
     def _on_pot(self, datagram: bytes) -> None:
-        _, mode, position, code, value = POT.unpack_from(datagram)
+        _, mode, every, position, code, value = POT.unpack_from(datagram)
         if mode < len(POT_MODES):
             with self.lock:
                 self._pot_live = {
                     "mode": POT_MODES[mode],
+                    "every": every,
                     "position": position / 100.0,  # % of the knob's travel
                     "code": code,
                     "value": value,  # Hz or %, what the generator was given
@@ -2039,7 +2050,7 @@ class FakeBoard:
         self.knob: float | None = (
             None  # a fixed position of the potentiometer; None: it wanders slowly
         )
-        self.pot = {"mode": "off", "freq": (100.0, 5000.0), "duty": (0.0, 100.0)}
+        self.pot = {"mode": "off", "freq": (100.0, 5000.0), "duty": (0.0, 100.0), "every": 16}
         self.stop_flag = threading.Event()
         self.t0 = time.monotonic()
         self.history: list[tuple[int, int, int, str]] = (
@@ -2155,12 +2166,14 @@ class FakeBoard:
 
     def _pot_command(self, args: list[str], reply) -> None:
         """The firmware's `pot [off|freq|duty] [min=N] [max=N]`, without the hardware."""
-        mode, low, high = None, None, None
+        mode, low, high, every = None, None, None, None
         for word in args:
             key, eq, value = word.partition("=")
             try:
                 if word in POT_MODES:
                     mode = word
+                elif eq and key == "every":
+                    every = int(value)
                 elif eq and key == "min":
                     low = float(value)
                 elif eq and key == "max":
@@ -2168,8 +2181,14 @@ class FakeBoard:
                 else:
                     raise ValueError
             except ValueError:
-                reply("pot [off|freq|duty] [min=N] [max=N] (Hz for freq, % for duty)", 2)
+                reply(
+                    "pot [off|freq|duty] [min=N] [max=N] [every=N] (Hz for freq, % for duty; every: 2 to 16)",
+                    2,
+                )
                 return
+        if every is not None and not POT_EVERY[0] <= every <= POT_EVERY[1]:
+            reply("pot: every is 2 to 16 (the pot is read once in that many conversions)", 3)
+            return
         now = mode or self.pot["mode"]
         if (low is not None or high is not None) and now == "off":
             reply("pot: pick freq or duty before a range", 3)
@@ -2188,22 +2207,27 @@ class FakeBoard:
                 reply("pot: min and max are the same", 3)
                 return
             self.pot[key] = new
+        if every is not None:
+            self.pot["every"] = every
         if mode is not None:
             self.pot["mode"] = mode
             if mode != "off":
                 self.pwm["on"] = True
         p = self.pot
         if p["mode"] == "off":
-            reply("pot off · GPIO44 not read · `pot freq` or `pot duty` turns it on")
+            reply(
+                "pot off · GPIO44 not read · `pot freq` or `pot duty` turns it on, "
+                f"read once every {p['every']} conversions"
+            )
         elif p["mode"] == "freq":
             reply(
                 f"pot freq · {p['freq'][0]:g} to {p['freq'][1]:g} Hz · GPIO44 · "
-                f"the duty stays {self.pwm['duty']:.1f} %"
+                f"read once every {p['every']} conversions · the duty stays {self.pwm['duty']:.1f} %"
             )
         else:
             reply(
                 f"pot duty · {p['duty'][0]:g} to {p['duty'][1]:g} % · GPIO44 · "
-                f"the frequency stays {self.pwm['freq']:.1f} Hz"
+                f"read once every {p['every']} conversions · the frequency stays {self.pwm['freq']:.1f} Hz"
             )
 
     def knob_position(self) -> float:
@@ -2240,7 +2264,9 @@ class FakeBoard:
         heard = 0.0
         next_stat = 0.0
         next_pot = 0.0
-        running_pot = False  # whether the conversions in progress include the potentiometer's pin
+        running_pot = (
+            1  # the pot's share of the conversions in progress: one in this many (1: none)
+        )
         while not self.stop_flag.is_set():
             try:
                 text, addr = self.sock.recvfrom(128)
@@ -2253,10 +2279,11 @@ class FakeBoard:
                     )
                     heard = time.monotonic()
                     pot_on = self.pot["mode"] != "off"
+                    pot_every = self.pot["every"] if pot_on else 1
                     if pot_on:
-                        new = (min(new[0], POT_MAX_RATE_HZ), new[1])
-                    if (addr, new) != (client, request) or pot_on != running_pot:
-                        running_pot = pot_on
+                        new = (min(new[0], pot_max_rate(pot_every)), new[1])
+                    if (addr, new) != (client, request) or pot_every != running_pot:
+                        running_pot = pot_every
                         first = addr != client
                         client, request, seq, index, due = addr, new, 0, 0, time.monotonic()
                         next_stat = time.monotonic() + 2
@@ -2273,7 +2300,7 @@ class FakeBoard:
                     reply = f"ok rate_mhz={rate_hz * 1000} n={count} pin=43 zero={ZERO_CODE} full={FULL_SCALE} verbose={int(self.verbose)}"
                     reply += f" pwm={int(self.pwm['on'])} pwm_hz={self.pwm['freq']:.4f} pwm_duty={self.pwm['duty']:.3f} pwm_pin=20"
                     low, high = self.pot["duty" if self.pot["mode"] == "duty" else "freq"]
-                    reply += f" pot={self.pot['mode']} pot_pin=44 pot_lo={low:g} pot_hi={high:g}"
+                    reply += f" pot={self.pot['mode']} pot_pin=44 pot_lo={low:g} pot_hi={high:g} pot_every={self.pot['every']}"
                     self.sock.sendto(reply.encode(), addr)
                 elif words[:1] == ["stop"]:
                     client = None
@@ -2285,7 +2312,7 @@ class FakeBoard:
                 client = None
                 continue
             rate_hz, count = request
-            if running_pot and time.monotonic() >= next_pot:
+            if running_pot > 1 and time.monotonic() >= next_pot:
                 next_pot = time.monotonic() + 0.1
                 position = self._follow_knob()
                 given = self.pwm["duty" if self.pot["mode"] == "duty" else "freq"]
@@ -2296,6 +2323,7 @@ class FakeBoard:
                     POT.pack(
                         POT_MAGIC,
                         POT_MODES.index(self.pot["mode"]),
+                        self.pot["every"],
                         round(position * 10000),
                         round(code),
                         given,
@@ -3112,14 +3140,32 @@ def selftest() -> int:
         and abs(f["stats"]["pwm"]["freq"] - expected) < 0.5,
     )
     check(f is not None, "turning the knob on starts the generator, at the knob's frequency")
+
+    def settles_at(rate: int) -> bool:
+        deadline = time.monotonic() + 5
+        while abs(stream.fs - rate) > 1 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return abs(stream.fs - rate) <= 1
+
     stream.set_rate(60000)
-    deadline = time.monotonic() + 5
-    while abs(stream.fs - POT_MAX_RATE_HZ) > 1 and time.monotonic() < deadline:
-        time.sleep(0.05)
     check(
-        abs(stream.fs - POT_MAX_RATE_HZ) <= 1,
-        f"the conversions alternate: the signal's rate stops at {POT_MAX_RATE_HZ} Hz",
+        settles_at(60000), "the pot takes one conversion in 16: 60 kS/s of signal is still possible"
     )
+    stream.set_rate(MAX_RATE_HZ)
+    check(
+        settles_at(pot_max_rate(16)),
+        f"the signal's rate stops at 15/16 of the ADC's: {pot_max_rate(16)} Hz",
+    )
+    check(command("pot every=2") == 200, "pot every=2")
+    check(
+        settles_at(pot_max_rate(2)),
+        f"read every other conversion, the signal's rate stops at {pot_max_rate(2)} Hz",
+    )
+    f = next_frame(resp, lambda f: pot(f).get("live") and pot(f).get("every") == 2)
+    check(f is not None, "the board says how often it reads the pot (POT1 and ok)")
+    check(command("pot every=1") == 200, "a bad value is answered, not applied")
+    check(command("pot every=16") == 200, "pot every=16")
+    check(settles_at(pot_max_rate(16)), "back to 15/16")
     stream.set_rate(20000)
     check(command("pot duty min=10 max=60") == 200, "pot duty min=10 max=60")
     f = next_frame(resp, lambda f: pot(f).get("live") and pot(f)["mode"] == "duty")

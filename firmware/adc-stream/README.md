@@ -60,7 +60,7 @@ The terminal under the page's "Board log" has a prompt: what you type goes to th
 | `info` | six lines, the node firmware's boot card in short: chip and MAC, build, ADC, network and link, stream (rate, datagrams, losses, DMA stalls), uptime |
 | `verbose [on\|off]` | one detail line per second: datagrams, longest burst, longest `send_to`, longest pass of the main loop, ring level, DMA buffers and stalls, log lines sent |
 | `pwm [freq=HZ] [duty=%] [on\|off]` | the **PWM generator** on GPIO20 (`D0` of header J2), see below; `pwm 1000 25` is 1 kHz at 25 %, `pwm` alone tells its state |
-| `pot [off\|freq\|duty] [min=N] [max=N]` | the **potentiometer** on GPIO44 sets the PWM's frequency (Hz, log scale) or duty cycle (%), see below; `pot` alone tells its state and the raw conversions |
+| `pot [off\|freq\|duty] [min=N] [max=N] [every=N]` | the **potentiometer** on GPIO44 sets the PWM's frequency (Hz, log scale) or duty cycle (%), see below; `pot` alone tells its state and the raw conversions |
 | `reboot` | software reset; the page's keep-alive restarts the stream and re-applies verbose mode |
 | `help` | the list |
 
@@ -88,8 +88,9 @@ the two pins to read the duty cycle as a level, or none to see the edges and the
 A potentiometer on **GPIO44** (`ADC1_CH2`, pin `44` of header J2; the wiper, its ends on 3V3 and GND) sets the
 generator's frequency or its duty cycle: `pot freq min=100 max=5000` (log scale, 100 Hz at the GND end), or
 `pot duty min=0 max=100`; the other number stays what `pwm` set, `min` above `max` turns the knob the other way,
-`pot off` (the default) doesn't read the pin at all. The ADC then alternates the two pins, so the signal is sampled
-at half the conversion rate (41.6 kS/s at most). The board sends the knob's state ten times a second (`POT1`) and
+`pot off` (the default) doesn't read the pin at all. While it is on, the knob takes one conversion in `every` (`pot
+freq every=8`; 2 to 16, 16 by default) in the ADC's pattern table and the signal all the others: at 16 the signal
+keeps 15/16 of the conversions (78.1 kS/s at most) and the knob is read about 5 thousand times a second. The board sends the knob's state ten times a second (`POT1`) and
 the page's **Potentiometer** card draws it. Wiring drawing: [the wiring page](../../docs/book/wiring.md).
 
 - Measured on a board: the whole travel reads 2192 down to about 1. The even ADC channels of the S31 read the other

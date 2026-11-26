@@ -127,7 +127,7 @@ on the page follows.
 - Any linear potentiometer from 1 kΩ to 50 kΩ does; **10 kΩ** is the sweet spot. A bigger one is a weaker source
   for the ADC and picks up the signal of its neighbour pin; a smaller one just wastes current.
 - If the reading flickers, add a **100 nF** ceramic capacitor from `44` to `G`: it takes the noise out before the
-  ADC sees it. The firmware already averages 64 conversions, so it is rarely needed.
+  ADC sees it. The firmware already averages about 20 ms of readings, so it is rarely needed.
 - LED 1 on `D0` is still possible (same resistor as above): it dims with the duty cycle of the PWM. Don't add
   anything else to `43`: it is the measured signal.
 - 3V3 is the only supply of the knob. Never wire the pot to 5 V: the ADC input stops at 3.3 V.
@@ -139,7 +139,8 @@ terminal, or `dev.py monitor`):
 pot freq min=100 max=5000     knob sets the frequency: 100 Hz at the GND end, 5 kHz at the 3V3 end (logarithmic)
 pot duty min=0 max=100        knob sets the duty cycle (linear); the frequency stays what `pwm` set
 pot off                       GPIO44 is not read again, the ADC takes the signal alone at the full rate
-pot                           tells the mode, the range and the raw conversions of GPIO44
+pot freq every=8              the pot takes one ADC conversion in 8 (2 to 16, default 16)
+pot                           tells the mode, the range, how often it is read and the raw conversions of GPIO44
 ```
 
 A low end above the high end (`pot duty min=100 max=0`, or the **Reverse** button) turns the knob the other way:
@@ -160,8 +161,10 @@ there is no need to swap the wires. The knob owns exactly one number of the gene
     ([`pot.rs`](https://github.com/Lpwlk/esp32-rust-workshop/blob/main/firmware/adc-stream/src/pot.rs)): the knob's
     position is 0 % at the GND end whichever way the code runs. You only see it in the *reading* number.
 
-The ADC alternates the two pins while the knob is on, so the **signal's sample rate is half** of the conversion
-rate (41.6 kS/s at most, instead of 83.3 kS/s); with `pot off` the full rate is back.
+While the knob is on, the ADC reads it **once every `every` conversions** (16 by default) and gives all the other
+ones to the signal. A knob needs a hundred readings a second, not thousands, so by default the signal keeps **15/16**
+of the ADC's 83.3 kS/s: **78.1 kS/s** at most, the knob read at 5.2 kHz. `every=2` makes the knob and the signal
+alternate (41.6 kS/s of signal); with `pot off` the full rate is back.
 
 ## Pins to avoid
 

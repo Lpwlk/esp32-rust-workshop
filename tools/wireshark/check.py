@@ -208,16 +208,18 @@ def check_captures(tshark):
                 udp,
                 "wsadc.pot.mode",
                 "wsadc.pot.mode",
+                "wsadc.pot.every",
                 "wsadc.pot.position",
                 "wsadc.pot.code",
                 "wsadc.pot.value",
             )
-            == [["1", "5000", "3295", "707.25"]],
+            == [["1", "16", "5000", "3295", "707.25"]],
             "the POT1 datagram is read",
         )
         check(
-            fields(tshark, udp, "wsadc.ok.pot_pin", "wsadc.ok.pot_pin")[0] == ["44"],
-            "the potentiometer's pin in the answer to start",
+            fields(tshark, udp, "wsadc.ok.pot_pin", "wsadc.ok.pot_pin", "wsadc.ok.pot_every")[0]
+            == ["44", "16"],
+            "the potentiometer's pin and reading interval in the answer to start",
         )
         check(
             fields(tshark, udp, "wsadc.start.rate", "wsadc.start.rate", "wsadc.start.n")[0]

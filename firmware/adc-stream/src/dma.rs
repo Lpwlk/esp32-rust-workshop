@@ -15,10 +15,10 @@
 //! Timing comes from the ADC's timer (the 40 MHz crystal divided), so the sampling instants are exactly
 //! regular, and the chip's limits are those of ESP-IDF: 611 Hz to 83 333 Hz.
 //!
-//! The potentiometer ([`crate::pot`], GPIO44) shares the ADC: when it is on, the pattern table has two entries
-//! and the controller converts the signal pin and the pot's pin in turn. The signal keeps its regular instants
-//! (every other conversion), at half the conversion rate; [`AdcDma::drain`] tells the two apart by the channel
-//! number of each result.
+//! The potentiometer ([`crate::pot`], GPIO44) shares the ADC: when it is on, the pattern table has `every` entries
+//! (2 to 16): the signal pin in all but the last one, the pot's pin in the last. The signal keeps its regular
+//! instants (a burst of `every - 1` conversions, then the pot's), at `(every - 1) / every` of the conversion
+//! rate; [`AdcDma::drain`] tells the two apart by the channel number of each result.
 //!
 //! The descriptors form a ring of [`DESCRIPTORS`] buffers of [`PER_DESCRIPTOR`] conversions. The hardware
 //! hands a filled one to the CPU (owner bit cleared); [`AdcDma::drain`] reads them in order and gives them
@@ -125,17 +125,18 @@ impl AdcDma {
         }
     }
 
-    /// Starts sampling the signal at about `rate_hz`, and the potentiometer too when `pot` is set (the conversions
-    /// alternate, so the controller runs at twice the rate: the chip's limits apply to that). Returns the exact
-    /// rate of the signal, in millihertz: the timer divides 40 MHz by integers.
-    pub fn start(&mut self, rate_hz: u32, pot: bool) -> u32 {
+    /// Starts sampling the signal at about `rate_hz`, and the potentiometer too when `pot_every` is more than 1: it
+    /// takes one conversion in `pot_every` (2 to 16), so the controller runs a little faster than the signal
+    /// (the chip's limits apply to that). Returns the exact rate of the signal, in millihertz: the timer divides
+    /// 40 MHz by integers.
+    pub fn start(&mut self, rate_hz: u32, pot_every: u8) -> u32 {
         if self.running {
             self.stop();
         }
-        let pins = if pot { 2 } else { 1 };
+        let entries = pot_every.clamp(1, 16);
         self.pot_conversions = 0;
         self.pot_last_word = 0;
-        let rate = u64::from((rate_hz * pins).clamp(MIN_RATE_HZ, MAX_RATE_HZ));
+        let rate = u64::from(crate::pot::conversion_rate(rate_hz, entries).clamp(MIN_RATE_HZ, MAX_RATE_HZ));
         // The digital controller's clock is the crystal divided by `div`; it triggers a conversion every
         // `interval` cycles of its half-rate clock (a 12-bit counter), as in ESP-IDF's
         // `adc_hal_digi_sample_freq_config`.
@@ -152,19 +153,22 @@ impl AdcDma {
         });
         adc.ctrl_date().modify(|_, w| w.clk_en().set_bit());
 
-        // ADC1 only, scan mode (the controller's timer triggers it), one pattern entry: our channel.
+        // ADC1 only, scan mode (the controller's timer triggers it), the pattern: the signal, then the pot's pin.
         adc.ctrl0().modify(|_, w| unsafe {
             w.sar1_trigger_stop().clear_bit();
             w.sar1_trigger_start().clear_bit();
             w.sar1_continue_mode_en().clear_bit();
             w.sar1_patt_type().clear_bit();
-            w.sar1_patt_len().bits(pins as u8 - 1);
+            w.sar1_patt_len().bits(entries - 1);
             w.sar1_trigger_mode().bits(1)
         });
         adc.ctrl1().modify(|_, w| unsafe { w.sar2_trigger_mode().bits(0) });
-        // An entry is six bits, the first in bits 23:18 and each next one six bits lower (`adc_ll_digi_set_pattern_table`).
-        let table = (u32::from(CHANNEL) << 2) << 18 | if pot { (u32::from(POT_CHANNEL) << 2) << 12 } else { 0 };
-        adc.sar1_patt_tab1().write(|w| unsafe { w.sar1_patt_tab1().bits(table) });
+        // Four tables of four entries (`adc_ll_digi_set_pattern_table`).
+        let tables = crate::pot::pattern_tables(CHANNEL, POT_CHANNEL, entries);
+        adc.sar1_patt_tab1().write(|w| unsafe { w.sar1_patt_tab1().bits(tables[0]) });
+        adc.sar1_patt_tab2().write(|w| unsafe { w.sar1_patt_tab2().bits(tables[1]) });
+        adc.sar1_patt_tab3().write(|w| unsafe { w.sar1_patt_tab3().bits(tables[2]) });
+        adc.sar1_patt_tab4().write(|w| unsafe { w.sar1_patt_tab4().bits(tables[3]) });
         adc.ctrl0().modify(|_, w| w.sar1_patt_p_clear().set_bit());
         adc.ctrl0().modify(|_, w| w.sar1_patt_p_clear().clear_bit());
         adc.ctrl2().modify(|_, w| unsafe { w.timer_target().bits(interval as u16) });
@@ -194,7 +198,7 @@ impl AdcDma {
         adc.ctrl2().modify(|_, w| w.timer_en().set_bit());
 
         self.running = true;
-        (XTAL_HZ * 1000 / (div * 2 * interval) / u64::from(pins)) as u32
+        crate::pot::signal_share(XTAL_HZ * 1000 / (div * 2 * interval), entries) as u32
     }
 
     /// Stops sampling.

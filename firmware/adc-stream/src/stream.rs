@@ -42,12 +42,12 @@
 //! | `info` | six lines: chip, build, ADC, network, stream, uptime (the node firmware's `info`, compact) |
 //! | `verbose [on\|off]` | one detail line per second (timings, ring level, DMA), without slowing the stream |
 //! | `pwm [freq=HZ] [duty=%] [on\|off]` | the PWM generator on GPIO20 ([`crate::pwm`]): `pwm 1000 25` is 1 kHz at 25 %; no argument tells its state |
-//! | `pot [off\|freq\|duty] [min=N] [max=N]` | the potentiometer on GPIO44 ([`crate::pot`]) sets the generator's frequency (Hz) or duty cycle (%) between `min` and `max`; no argument tells its state |
+//! | `pot [off\|freq\|duty] [min=N] [max=N] [every=N]` | the potentiometer on GPIO44 ([`crate::pot`]) sets the generator's frequency (Hz) or duty cycle (%) between `min` and `max`, and is read once every `every` conversions (2 to 16, default 16: the signal keeps the others); no argument tells its state |
 //! | `reboot` | software reset of the chip |
 //! | `help` | the list above |
 //!
 //! While the potentiometer is on, the board also sends a `POT1` datagram ten times a second ([`pot::encode`]: the
-//! mode, the knob's position, the value it gave the generator), and the samples come at half the conversion rate.
+//! mode, the knob's position, the value it gave the generator), and the samples come at `(every - 1) / every` of the conversion rate.
 //!
 //! The S31's SAR is differential: 0 V reads about [`ZERO_CODE`] and the full scale is
 //! [`FULL_SCALE`], so the computer removes the mean before the FFT anyway.
@@ -248,7 +248,10 @@ async fn say_pot(socket: &UdpSocket<'_>, to: IpEndpoint, config: &pot::Config, g
                 socket,
                 to,
                 Level::Reply,
-                format_args!("pot off · GPIO{pin} not read · `pot freq` or `pot duty` turns it on"),
+                format_args!(
+                    "pot off · GPIO{pin} not read · `pot freq` or `pot duty` turns it on, read once every {} conversions",
+                    config.every
+                ),
             )
             .await
         }
@@ -257,7 +260,10 @@ async fn say_pot(socket: &UdpSocket<'_>, to: IpEndpoint, config: &pot::Config, g
                 socket,
                 to,
                 Level::Reply,
-                format_args!("pot freq · {low} to {high} Hz · GPIO{pin} · the duty stays {:.1} %", s.duty),
+                format_args!(
+                    "pot freq · {low} to {high} Hz · GPIO{pin} · read once every {} conversions · the duty stays {:.1} %",
+                    config.every, s.duty
+                ),
             )
             .await
         }
@@ -266,7 +272,10 @@ async fn say_pot(socket: &UdpSocket<'_>, to: IpEndpoint, config: &pot::Config, g
                 socket,
                 to,
                 Level::Reply,
-                format_args!("pot duty · {low} to {high} % · GPIO{pin} · the frequency stays {:.1} Hz", s.asked_hz),
+                format_args!(
+                    "pot duty · {low} to {high} % · GPIO{pin} · read once every {} conversions · the frequency stays {:.1} Hz",
+                    config.every, s.asked_hz
+                ),
             )
             .await
         }
@@ -464,6 +473,7 @@ pub async fn run(spawner: Spawner) -> ! {
     let mut knob = pot::Filter::new();
     let mut follower = pot::Follower::default();
     let mut adc_pot = false;
+    let mut adc_every = 1u8;
     let mut pot_followed_at = Clock::now();
     let mut pot_sent_at = Clock::now();
     // The PWM generator (RMT channel 0 on GPIO20): idle (low) until the page asks.
@@ -579,17 +589,20 @@ pub async fn run(spawner: Spawner) -> ! {
                         // A different request (or a different computer) restarts the stream; the same one is the keep-alive.
                         // So does the potentiometer being turned on or off: the ADC's conversions change.
                         let pot_on = pot_config.mode != Mode::Off;
-                        if client != Some((meta.endpoint, req)) || adc_pot != pot_on {
+                        let every = if pot_on { pot_config.every } else { 1 };
+                        if client != Some((meta.endpoint, req)) || adc_every != every {
                             let new_client = client.map(|(endpoint, _)| endpoint) != Some(meta.endpoint);
                             if let Some((gpio, pot_gpio, adc1)) = adc_parts.take() {
                                 adc = Some(AdcDma::new(gpio, pot_gpio, adc1));
                                 blog!(Level::Info, "ADC1 and the LP-GDMA channel set up");
                             }
                             if let Some(adc) = adc.as_mut() {
-                                rate_mhz = adc.start(req.rate_hz, pot_on);
+                                rate_mhz = adc.start(req.rate_hz, every);
                             }
                             adc_pot = pot_on;
-                            knob.reset();
+                            adc_every = every;
+                            // The knob settles in the same time whatever the pot's reading rate.
+                            knob.reset_with(pot::filter_weight(rate_mhz as f32 / 1000.0 / f32::from(every.max(2) - 1)));
                             follower.reset();
                             client = Some((meta.endpoint, req));
                             seq = 0;
@@ -615,9 +628,10 @@ pub async fn run(spawner: Spawner) -> ! {
                             if pot_on {
                                 blog!(
                                     Level::Info,
-                                    "potentiometer {} on GPIO{}: the conversions alternate, the signal is sampled at {:.1} Hz",
+                                    "potentiometer {} on GPIO{}: read once every {every} conversions ({:.0} Hz), the signal is sampled at {:.1} Hz",
                                     pot_config.mode.name(),
                                     pot::PIN,
+                                    rate_mhz as f32 / 1000.0 / f32::from(every - 1),
                                     rate_mhz as f32 / 1000.0
                                 );
                             }
@@ -652,9 +666,10 @@ pub async fn run(spawner: Spawner) -> ! {
                         let _ = core::fmt::Write::write_fmt(
                             &mut reply,
                             format_args!(
-                                " pot={} pot_pin={} pot_lo={pot_low} pot_hi={pot_high}",
+                                " pot={} pot_pin={} pot_lo={pot_low} pot_hi={pot_high} pot_every={}",
                                 pot_config.mode.name(),
-                                pot::PIN
+                                pot::PIN,
+                                pot_config.every
                             ),
                         );
                         let _ = socket.send_to(reply.as_bytes(), meta.endpoint).await;
@@ -769,7 +784,7 @@ pub async fn run(spawner: Spawner) -> ! {
                                 &socket,
                                 meta.endpoint,
                                 Level::Warn,
-                                format_args!("pot [off|freq|duty] [min=N] [max=N] (Hz for freq, % for duty)"),
+                                format_args!("pot [off|freq|duty] [min=N] [max=N] [every=N] (Hz for freq, % for duty; every: 2 to 16)"),
                             )
                             .await;
                             continue;
@@ -822,7 +837,7 @@ pub async fn run(spawner: Spawner) -> ! {
                             meta.endpoint,
                             Level::Reply,
                             format_args!(
-                                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · pot [off|freq|duty] [min=N] [max=N] · reboot · help"
+                                "commands: info · verbose [on|off] · pwm [freq=HZ] [duty=%] [on|off] · pot [off|freq|duty] [min=N] [max=N] [every=N] · reboot · help"
                             ),
                         )
                         .await;
@@ -907,7 +922,8 @@ pub async fn run(spawner: Spawner) -> ! {
                         let s = pwm.state();
                         if pot_config.mode == Mode::Duty { s.duty } else { s.hz }
                     });
-                    let datagram = pot::encode(pot_config.mode, position, knob.code().unwrap_or(0.0), given);
+                    let datagram =
+                        pot::encode(pot_config.mode, pot_config.every, position, knob.code().unwrap_or(0.0), given);
                     let _ = socket.send_to(&datagram, endpoint).await;
                 }
             }

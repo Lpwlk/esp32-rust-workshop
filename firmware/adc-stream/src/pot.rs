@@ -10,12 +10,18 @@
 //! ```
 //!
 //! The pot owns one number of the generator, chosen by the `pot` command ([`Mode`]); the other one stays what
-//! `pwm` set. The ADC's pattern table then alternates the two pins, so the signal's sample rate is half of the
-//! conversion rate (at most 41 666 Hz): that costs nothing while the mode is `off`.
+//! `pwm` set. The ADC's pattern table then holds up to 16 entries, one of them the pot's pin: the pot is read once
+//! every `every` conversions (2 to 16, 16 by default) and the signal gets the other ones. A knob needs a hundred
+//! readings a second, not thousands, so by default the signal keeps 15/16 of the conversions (78 125 Hz at most,
+//! instead of 41 666 Hz when the two pins alternate). While the mode is `off` the pin is not read at all.
 
 /// The input pin and its ADC channel.
 pub const PIN: u8 = 44;
 pub const CHANNEL: u8 = 2;
+/// The pot is read once every `every` conversions: the pattern table has 16 entries at most, and two at least
+/// (one for the signal, one for the pot).
+pub const EVERY_MIN: u8 = 2;
+pub const EVERY_MAX: u8 = 16;
 /// The S31's SAR is differential, and an even channel is wired the other way round: its code falls from the
 /// zero code (0 V) towards 0 (3.3 V), where an odd channel's (GPIO43, the signal) rises from the zero code to the
 /// full scale. Measured on the board: GPIO44 reads 2192 at the GND end of the pot and 1 at the 3V3 end.
@@ -55,10 +61,13 @@ pub struct Config {
     pub freq: (f32, f32),
     /// Percent, both from 0 to 100.
     pub duty: (f32, f32),
+    /// The pot takes one conversion in this many ([`EVERY_MIN`] to [`EVERY_MAX`]).
+    pub every: u8,
 }
 
 impl Config {
-    pub const DEFAULT: Config = Config { mode: Mode::Off, freq: (100.0, 5_000.0), duty: (0.0, 100.0) };
+    pub const DEFAULT: Config =
+        Config { mode: Mode::Off, freq: (100.0, 5_000.0), duty: (0.0, 100.0), every: EVERY_MAX };
 
     /// The range of the current mode: Hz, or percent.
     pub fn range(&self) -> (f32, f32) {
@@ -86,12 +95,17 @@ impl Config {
 
     /// Takes a parsed `pot` command in. Refuses a range outside the limits or with no width; nothing changes then.
     pub fn apply(&mut self, change: &Change, min_hz: f32, max_hz: f32) -> Result<(), &'static str> {
+        let every = change.every.unwrap_or(self.every);
+        if !(EVERY_MIN..=EVERY_MAX).contains(&every) {
+            return Err("every is 2 to 16 (the pot is read once in that many conversions)");
+        }
         let mode = change.mode.unwrap_or(self.mode);
         if mode == Mode::Off && (change.low.is_some() || change.high.is_some()) {
             return Err("pick freq or duty before a range");
         }
         let mut next = *self;
         next.mode = mode;
+        next.every = every;
         if change.low.is_some() || change.high.is_some() {
             let (low, high) = if mode == Mode::Duty { self.duty } else { self.freq };
             let range = (change.low.unwrap_or(low), change.high.unwrap_or(high));
@@ -119,10 +133,11 @@ pub struct Change {
     pub mode: Option<Mode>,
     pub low: Option<f32>,
     pub high: Option<f32>,
+    pub every: Option<u8>,
 }
 
-/// `pot [off|freq|duty] [min=N] [max=N]`: `freq` and `duty` take their range in Hz and percent. `None` when the
-/// words make no sense.
+/// `pot [off|freq|duty] [min=N] [max=N] [every=N]`: `freq` and `duty` take their range in Hz and percent, `every`
+/// is how many conversions the pot takes one of. `None` when the words make no sense.
 pub fn parse<'a>(words: impl Iterator<Item = &'a str>) -> Option<Change> {
     let mut change = Change::default();
     for word in words {
@@ -136,6 +151,9 @@ pub fn parse<'a>(words: impl Iterator<Item = &'a str>) -> Option<Change> {
                 match key {
                     "min" | "low" => change.low = Some(value),
                     "max" | "high" => change.high = Some(value),
+                    "every" if (0.0..=255.0).contains(&value) && value == f32::from(value as u8) => {
+                        change.every = Some(value as u8)
+                    }
                     _ => return None,
                 }
             }
@@ -147,34 +165,62 @@ pub fn parse<'a>(words: impl Iterator<Item = &'a str>) -> Option<Change> {
 /// A slow average of the pin's codes: the pot's wiper is a high impedance, and the ADC's input is noisy.
 #[derive(Clone, Copy, Debug)]
 pub struct Filter {
-    /// 64 × the average code.
+    /// `weight` × the average code.
     sum: u32,
+    /// How many conversions the average spans (1 to 64).
+    weight: u32,
     primed: bool,
+}
+
+/// The averaging time of the knob, in seconds: the weight follows how often the pot is read, so that a slow pot
+/// reading doesn't make a slow knob.
+pub const SETTLE_S: f32 = 0.02;
+
+/// How many readings the filter averages for a pot read `pot_hz` times a second: [`SETTLE_S`] worth, 1 to 64.
+pub fn filter_weight(pot_hz: f32) -> u32 {
+    (pot_hz * SETTLE_S).clamp(1.0, 64.0) as u32
 }
 
 impl Filter {
     pub const fn new() -> Self {
-        Self { sum: 0, primed: false }
+        Self { sum: 0, weight: 64, primed: false }
     }
 
-    /// Takes a conversion in: the average moves by a 64th of the way to it.
+    /// A filter that averages `weight` readings (1 to 64); it starts again.
+    pub const fn with_weight(weight: u32) -> Self {
+        let weight = if weight < 1 {
+            1
+        } else if weight > 64 {
+            64
+        } else {
+            weight
+        };
+        Self { sum: 0, weight, primed: false }
+    }
+
+    /// Takes a conversion in: the average moves by a `weight`-th of the way to it.
     pub fn push(&mut self, code: u16) {
         if self.primed {
-            self.sum = self.sum - self.sum / 64 + u32::from(code);
+            self.sum = self.sum - self.sum / self.weight + u32::from(code);
         } else {
-            self.sum = u32::from(code) * 64;
+            self.sum = u32::from(code) * self.weight;
             self.primed = true;
         }
     }
 
+    /// Forgets everything (the next code starts the average again), and averages `weight` readings from now on.
+    pub fn reset_with(&mut self, weight: u32) {
+        *self = Self::with_weight(weight);
+    }
+
     /// Forgets everything (the next code starts the average again).
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::with_weight(self.weight);
     }
 
     /// The averaged code, or `None` before the first one.
     pub fn code(&self) -> Option<f32> {
-        self.primed.then(|| self.sum as f32 / 64.0)
+        self.primed.then(|| self.sum as f32 / self.weight as f32)
     }
 
     /// The knob's position from 0 (GND end) to 1 (3V3 end), with the end of the travel snapped: the ADC never
@@ -191,6 +237,34 @@ impl Default for Filter {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The conversion rate that gives the signal `signal_hz` when the pot takes one conversion in `every`
+/// (`every` = 1 stands for no pot at all).
+pub fn conversion_rate(signal_hz: u32, every: u8) -> u32 {
+    if every <= 1 {
+        return signal_hz;
+    }
+    let every = u64::from(every);
+    (u64::from(signal_hz) * every).div_ceil(every - 1).min(u64::from(u32::MAX)) as u32
+}
+
+/// What the signal gets of a conversion rate: all of it with no pot (`every` = 1), else all but the pot's share.
+pub fn signal_share(conversion: u64, every: u8) -> u64 {
+    let every = u64::from(every.max(1));
+    if every == 1 { conversion } else { conversion * (every - 1) / every }
+}
+
+/// The four SAR1 pattern tables for `entries` conversions in turn: the signal's channel in all but the last, the
+/// pot's channel in the last (with one entry: the signal alone). An entry is six bits (the channel, shifted by
+/// two), the first in bits 23:18 of a table and each next one six bits lower (`adc_ll_digi_set_pattern_table`).
+pub fn pattern_tables(signal: u8, pot: u8, entries: u8) -> [u32; 4] {
+    let mut tables = [0u32; 4];
+    for k in 0..usize::from(entries.clamp(1, 16)) {
+        let channel = if entries > 1 && k == usize::from(entries) - 1 { pot } else { signal };
+        tables[k / 4] |= (u32::from(channel & 0xF) << 2) << (18 - 6 * (k % 4));
+    }
+    tables
 }
 
 /// The part of the travel at each end that reads as exactly 0 or 1.
@@ -229,13 +303,15 @@ impl Follower {
 /// Bytes of a `POT1` datagram.
 pub const DATAGRAM: usize = 16;
 
-/// The live state, for the computer's page: `POT1` (4 bytes), the mode (`u8`, [`Mode::code`]), a spare byte,
-/// the position in hundredths of a percent (`u16`, 0 to 10000), the averaged code (`u16`), two spare bytes, and
-/// the value the generator was given (`f32`: Hz or percent; 0 for `off`). Little-endian.
-pub fn encode(mode: Mode, position: f32, code: f32, value: f32) -> [u8; DATAGRAM] {
+/// The live state, for the computer's page: `POT1` (4 bytes), the mode (`u8`, [`Mode::code`]), `every` (`u8`: the
+/// pot takes one conversion in that many), the position in hundredths of a percent (`u16`, 0 to 10000), the
+/// averaged code (`u16`), two spare bytes, and the value the generator was given (`f32`: Hz or percent; 0 for
+/// `off`). Little-endian.
+pub fn encode(mode: Mode, every: u8, position: f32, code: f32, value: f32) -> [u8; DATAGRAM] {
     let mut out = [0u8; DATAGRAM];
     out[0..4].copy_from_slice(b"POT1");
     out[4] = mode.code();
+    out[5] = every;
     out[6..8].copy_from_slice(&((position.clamp(0.0, 1.0) * 10_000.0 + 0.5) as u16).to_le_bytes());
     out[8..10].copy_from_slice(&((code.max(0.0) + 0.5) as u16).to_le_bytes());
     out[12..16].copy_from_slice(&value.to_le_bytes());
@@ -332,7 +408,7 @@ mod tests {
         assert_eq!(words("freq"), Some(Change { mode: Some(Mode::Freq), ..Change::default() }));
         assert_eq!(
             words("duty min=10 max=90"),
-            Some(Change { mode: Some(Mode::Duty), low: Some(10.0), high: Some(90.0) })
+            Some(Change { mode: Some(Mode::Duty), low: Some(10.0), high: Some(90.0), every: None })
         );
         assert_eq!(words("min=20 high=2e4").map(|c| (c.low, c.high)), Some((Some(20.0), Some(20000.0))));
         assert_eq!(words("off").unwrap().mode, Some(Mode::Off));
@@ -341,6 +417,88 @@ mod tests {
         assert_eq!(words("freq speed=3"), None);
         assert_eq!(words("loud"), None);
         assert_eq!(words("10"), None);
+        assert_eq!(words("every=8").unwrap().every, Some(8));
+        assert_eq!(words("freq every=2 min=50").unwrap().every, Some(2));
+        assert_eq!(words("every=2.5"), None, "a whole number of conversions");
+        assert_eq!(words("every=-1"), None);
+        assert_eq!(words("every=300"), None);
+    }
+
+    #[test]
+    fn every_is_checked_and_kept_with_the_mode() {
+        let mut c = Config::DEFAULT;
+        assert_eq!(c.every, 16);
+        let limits = (0.2, 1_000_000.0);
+        let apply = |c: &mut Config, text: &str| c.apply(&words(text).unwrap(), limits.0, limits.1);
+        assert_eq!(apply(&mut c, "freq every=4"), Ok(()));
+        assert_eq!((c.mode, c.every), (Mode::Freq, 4));
+        assert!(apply(&mut c, "every=1").is_err(), "the pot needs one conversion of its own, the signal another");
+        assert!(apply(&mut c, "every=17").is_err());
+        assert!(apply(&mut c, "every=0").is_err());
+        assert_eq!(c.every, 4, "a refused value changes nothing");
+        assert_eq!(apply(&mut c, "off every=2"), Ok(()));
+        assert_eq!((c.mode, c.every), (Mode::Off, 2), "it can be set while the pot is off");
+        assert_eq!(apply(&mut c, "duty"), Ok(()));
+        assert_eq!(c.every, 2, "a mode keeps it");
+    }
+
+    #[test]
+    fn the_signal_keeps_what_the_pot_leaves_it() {
+        // The pot takes one conversion in `every`: ask 20 kHz of signal and the ADC runs a bit faster.
+        assert_eq!(conversion_rate(20_000, 1), 20_000, "no pot");
+        assert_eq!(conversion_rate(20_000, 2), 40_000);
+        assert_eq!(conversion_rate(15_000, 16), 16_000);
+        assert_eq!(conversion_rate(75_000, 16), 80_000);
+        assert_eq!(signal_share(83_333_000, 16), 78_124_687, "15/16 of 83.3 kS/s, in mHz");
+        assert_eq!(signal_share(83_333_000, 2), 41_666_500);
+        assert_eq!(signal_share(83_333_000, 1), 83_333_000);
+        for every in EVERY_MIN..=EVERY_MAX {
+            let wanted = 10_000;
+            let share = signal_share(u64::from(conversion_rate(wanted, every)) * 1000, every);
+            assert!(share >= u64::from(wanted) * 1000, "every={every}: the signal gets {share} mHz");
+        }
+    }
+
+    #[test]
+    fn the_pattern_tables_hold_the_signal_and_the_pot() {
+        let s = 1u8;
+        let k = 2u8;
+        // Alone: one entry, the signal.
+        assert_eq!(pattern_tables(s, k, 1), [(1 << 2) << 18, 0, 0, 0]);
+        // Two entries: signal in 23:18, pot in 17:12.
+        assert_eq!(pattern_tables(s, k, 2), [((1 << 2) << 18) | ((2 << 2) << 12), 0, 0, 0]);
+        // Sixteen: fifteen signal entries and the pot last, in the fourth table's last slot (5:0).
+        let t = pattern_tables(s, k, 16);
+        let signal_entry = 1u32 << 2;
+        assert_eq!(t[0], signal_entry << 18 | signal_entry << 12 | signal_entry << 6 | signal_entry);
+        assert_eq!(t[3] & 0x3F, 2 << 2, "the pot's entry is the last");
+        assert_eq!((t[3] >> 6) & 0x3F, signal_entry, "the one before is the signal's");
+        assert!(t.iter().all(|w| w >> 24 == 0), "each table is 24 bits");
+        // Five entries: the pot is the first slot of the second table.
+        let t = pattern_tables(s, k, 5);
+        assert_eq!(t[1], (2 << 2) << 18);
+        assert_eq!(t[0] & 0x3F, signal_entry);
+    }
+
+    #[test]
+    fn the_filter_settles_in_the_same_time_whatever_the_pot_rate() {
+        assert_eq!(filter_weight(5_208.0), 64, "a quick pot reading averages 64");
+        assert_eq!(filter_weight(1_250.0), 25);
+        assert_eq!(filter_weight(38.0), 1, "a slow one doesn't average at all");
+        assert_eq!(filter_weight(0.0), 1);
+        let mut f = Filter::with_weight(1);
+        f.push(1000);
+        f.push(3000);
+        assert_eq!(f.code(), Some(3000.0), "weight 1 is the last reading");
+        let mut f = Filter::with_weight(25);
+        for _ in 0..300 {
+            f.push(2000);
+        }
+        assert!((f.code().unwrap() - 2000.0).abs() < 1.0);
+        f.reset();
+        assert_eq!(f.code(), None);
+        f.push(500);
+        assert_eq!(f.code(), Some(500.0), "a reset keeps the weight and starts again");
     }
 
     #[test]
@@ -417,13 +575,14 @@ mod tests {
 
     #[test]
     fn the_datagram_layout() {
-        let d = encode(Mode::Freq, 0.5, 3295.4, 707.25);
+        let d = encode(Mode::Freq, 16, 0.5, 3295.4, 707.25);
         assert_eq!(&d[0..4], b"POT1");
         assert_eq!(d[4], 1);
+        assert_eq!(d[5], 16);
         assert_eq!(u16::from_le_bytes([d[6], d[7]]), 5000);
         assert_eq!(u16::from_le_bytes([d[8], d[9]]), 3295);
         assert_eq!(f32::from_le_bytes([d[12], d[13], d[14], d[15]]), 707.25);
-        assert_eq!(encode(Mode::Duty, 7.0, -3.0, 0.0)[6..8], 10_000u16.to_le_bytes());
+        assert_eq!(encode(Mode::Duty, 2, 7.0, -3.0, 0.0)[6..8], 10_000u16.to_le_bytes());
         assert_eq!(d.len(), DATAGRAM);
     }
 }

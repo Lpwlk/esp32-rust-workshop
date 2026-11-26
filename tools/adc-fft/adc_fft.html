@@ -477,13 +477,14 @@
   <section class="card" id="c-pot" aria-label="Potentiometer">
     <div class="card-head">
       <h2>Potentiometer</h2>
-      <p class="hint">A knob on <b>GPIO44</b> (<code>44</code> of header J2, wiper; the ends go to <code>3V3</code> and <code>G</code>) sets the generator's <b>frequency</b> or its <b>duty cycle</b> between two limits, and the spectrum follows it. The other number stays what the generator above says. While it is on, the ADC alternates the two pins: the sample rate stops at 41.6 kS/s.</p>
+      <p class="hint">A knob on <b>GPIO44</b> (<code>44</code> of header J2, wiper; the ends go to <code>3V3</code> and <code>G</code>) sets the generator's <b>frequency</b> or its <b>duty cycle</b> between two limits, and the spectrum follows it. The other number stays what the generator above says. The ADC reads the knob once every <i>N</i> conversions and gives all the others to the signal: with 16 (the default) the signal keeps 15/16 of the ADC's 83.3 kS/s, with 2 it keeps half.</p>
     </div>
     <div class="potrow">
       <div class="group"><span class="lab">The knob sets</span><div class="seg" id="pot-mode"><button data-m="off">Nothing</button><button data-m="freq">Frequency</button><button data-m="duty">Duty cycle</button></div></div>
       <div class="group"><span class="lab" id="pot-lo-l">From (Hz)</span><input type="number" class="num-in" id="pot-lo" step="any" aria-label="Value at the GND end of the knob"></div>
       <div class="group"><span class="lab" id="pot-hi-l">To (Hz)</span><input type="number" class="num-in" id="pot-hi" step="any" aria-label="Value at the 3V3 end of the knob"></div>
       <div class="group"><span class="lab">&nbsp;</span><button id="pot-swap" title="Turn the knob the other way: swap the two limits">⇄ Reverse</button></div>
+      <div class="group"><span class="lab">Read every (conversions)</span><input type="number" class="num-in" id="pot-every" min="2" max="16" step="1" aria-label="The knob takes one conversion of the ADC in this many, 2 to 16" title="2: the knob takes every other conversion, the signal keeps half the ADC's rate. 16: the signal keeps 15/16 of it."></div>
     </div>
     <div class="potlive">
       <div><span class="lab">Knob</span><div class="knob" id="pot-knob" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Potentiometer position"><i id="pot-fill"></i></div></div>
@@ -816,7 +817,7 @@ const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, w
              harm: "off", labels: 1, view: "all", sstyle: "line", swidth: "auto", wstyle: "line", wwidth: "auto",
              cmap: "theme", cmrev: false, col: {}, palette: "default", wunit: "codes", mvcode: 0.7, keepdc: false,
              wrange: 0, amargin: 5, adamp: 1, wx: false, wsrc: "filtered", f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
-             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
+             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
              avol: 70, amute: false, aauto: false, afilt: false, fold: {} };
 // Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
 function adopt(saved) {
@@ -1864,7 +1865,7 @@ function potSend(mode, now) {
   const go = () => {
     pot.timer = null; pot.sent = performance.now(); pot.mode = mode;
     const [lo, hi] = potRange(mode);
-    sendCommand(mode === "off" ? "pot off" : `pot ${mode} min=${+lo.toPrecision(9)} max=${+hi.toPrecision(9)}`);
+    sendCommand(mode === "off" ? `pot off every=${ui.pote}` : `pot ${mode} min=${+lo.toPrecision(9)} max=${+hi.toPrecision(9)} every=${ui.pote}`);
     potShow();
   };
   if (now) go(); else pot.timer = setTimeout(go, 400);  // typing a number sends once, not per key
@@ -1877,6 +1878,7 @@ function potShow() {
   if (document.activeElement !== $("pot-lo")) $("pot-lo").value = +lo.toPrecision(7);
   if (document.activeElement !== $("pot-hi")) $("pot-hi").value = +hi.toPrecision(7);
   $("pot-lo").disabled = $("pot-hi").disabled = $("pot-swap").disabled = pot.mode === "off";
+  if (document.activeElement !== $("pot-every")) $("pot-every").value = ui.pote;
   $("c-pwm").classList.toggle("pot-freq", pot.mode === "freq");
   $("c-pwm").classList.toggle("pot-duty", pot.mode === "duty");
 }
@@ -1891,6 +1893,12 @@ function potLimit(i, text) {
   if (ui[kl] === ui[kh]) ui[key] *= i ? 1.01 : 0.99;  // the board refuses an empty range
   saveUi(); potSend(pot.mode);
 }
+$("pot-every").oninput = (e) => {
+  const n = Math.round(+e.target.value);
+  if (!(n >= 2 && n <= 16)) return;  // typing "1" on the way to "16" waits
+  ui.pote = n; saveUi(); potSend(pot.mode);
+};
+$("pot-every").onchange = () => potShow();
 $("pot-lo").oninput = (e) => potLimit(0, e.target.value);
 $("pot-hi").oninput = (e) => potLimit(1, e.target.value);
 $("pot-lo").onchange = $("pot-hi").onchange = () => potShow();
@@ -1933,6 +1941,7 @@ function potSync(board, fs) {
   }
   if (performance.now() - pot.sent > 1500 && !pot.timer) {
     pot.mode = board.mode;
+    if (board.every && document.activeElement !== $("pot-every")) ui.pote = board.every;
     if (board.mode !== "off") {
       const [kl, kh] = board.mode === "duty" ? ["potdl", "potdh"] : ["potfl", "potfh"];
       if (document.activeElement !== $("pot-lo") && document.activeElement !== $("pot-hi")) { ui[kl] = board.lo; ui[kh] = board.hi; }
@@ -1940,16 +1949,20 @@ function potSync(board, fs) {
     potShow();
   }
   const unit = board.mode === "duty" ? "%" : "Hz";
+  // The ADC converts the signal in all but one of every N conversions and the knob in that one.
+  const every = board.every || ui.pote, rates = fs
+    ? ` · the ADC converts at ${fmtHz(fs * every / (every - 1))}: ${fmtHz(fs)} for the signal, the knob is read ${fmtHz(fs / (every - 1))}`
+    : "";
   let txt;
   if (board.mode === "off") {
     txt = `Off: GPIO${board.pin} is not read, and the ADC samples the signal alone at the full rate.`;
     $("pot-fill").style.width = "0"; pot.trace.length = 0; pot.traced = "off";
   } else if (!board.live) {
-    txt = `${board.mode === "duty" ? "Duty cycle" : "Frequency"} from ${fmtNum(board.lo)} to ${fmtNum(board.hi)} ${unit} · waiting for a reading…`;
+    txt = `${board.mode === "duty" ? "Duty cycle" : "Frequency"} from ${fmtNum(board.lo)} to ${fmtNum(board.hi)} ${unit} · waiting for a reading…${rates}`;
   } else {
     const shown = board.mode === "duty" ? `${board.value.toFixed(1)} %` : fmtHz(board.value);
     txt = `Knob at <b>${board.position.toFixed(1)} %</b> of its travel → ${board.mode === "duty" ? "duty" : "frequency"} <b>${shown}</b>` +
-      ` (from ${fmtNum(board.lo)} to ${fmtNum(board.hi)} ${unit}${board.mode === "freq" ? ", logarithmic" : ""}) · reading ${board.code}`;
+      ` (from ${fmtNum(board.lo)} to ${fmtNum(board.hi)} ${unit}${board.mode === "freq" ? ", logarithmic" : ""}) · reading ${board.code}${rates}`;
     $("pot-fill").style.width = board.position + "%";
     $("pot-knob").setAttribute("aria-valuenow", board.position.toFixed(1));
     $("potchip-t").textContent = `${board.mode === "duty" ? "duty" : "freq"} ${shown}`;
