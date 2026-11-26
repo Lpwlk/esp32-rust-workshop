@@ -108,6 +108,9 @@ bar goes and a log line takes its place, so the screen above is a record of what
                     $ cargo clippy --release -- -D warnings
 ```
 
+<div class="asciicast" data-cast="../assets/demo/dev-flash.cast" data-poster="npt:0:10"></div>
+<p class="asciicast-caption"><code>dev.py flash a --app adc</code>: the build, the Flash/RAM table, then the flash with its own bar · recorded on a board, <a href="../assets/demo/dev-flash.cast">.cast</a></p>
+
 A failing command prints its whole output, in color, under its log line (so does a command with warnings).
 `scripts/logs/dev.log` keeps the same lines with the full output of every command, and `-v` shows cargo's own output
 instead of the bar. `flash all` has one bar per board, side by side, each replaced by its own log line when its board is
@@ -119,6 +122,9 @@ to `ocean` (the default), `forest`, `sunset`, `dracula`, `nord` or `mono` (no co
 there by copying one and changing its colors.
 
 ### Every day
+
+<div class="asciicast" data-cast="../assets/demo/dev-boards.cast" data-poster="npt:0:1"></div>
+<p class="asciicast-caption"><code>dev.py boards</code>: each board by its MAC address and serial port, the node it was assigned to · <a href="../assets/demo/dev-boards.cast">.cast</a></p>
 
 | I want to… | Do |
 |---|---|
@@ -144,6 +150,9 @@ there by copying one and changing its colors.
 python3 scripts/dev.py format     # cargo fmt (root, Ethernet, ADC) + black
 python3 scripts/dev.py check      # what CI runs, in its order, stopping at the first failure
 ```
+
+<div class="asciicast" data-cast="../assets/demo/dev-check.cast" data-speed="2.5" data-poster="npt:0:36"></div>
+<p class="asciicast-caption"><code>dev.py check --fast</code>, played 2.5× faster: one bar for the step in progress, one line per step done with its time · <a href="../assets/demo/dev-check.cast">.cast</a></p>
 
 `check` ends with the time of each step. While you iterate, `check --fast` leaves out the three firmware builds (the slow
 fat-LTO part; clippy still type-checks the same code) and the site, and only a link error escapes it.

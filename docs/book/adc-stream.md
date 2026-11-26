@@ -27,6 +27,9 @@ Give the computer's Ethernet port (a USB-C adapter is fine) the address `192.168
 `255.255.255.0`, and cable it to the board's RJ45. Without Rust: `python3 tools/adc-fft/adc_fft.py` from the
 `.venv`, or `.venv/bin/python tools/adc-fft/adc_fft.py --demo`.
 
+<div class="asciicast" data-cast="../assets/demo/dev-monitor.cast" data-poster="npt:0:11"></div>
+<p class="asciicast-caption"><code>dev.py monitor a</code> on the ADC board: it is reset once attached, so the boot card shows (the pins, the generator, the knob, the link), then a page asks for 75 kS/s and the board reports its rate every 2 s · <a href="../assets/demo/dev-monitor.cast">.cast</a></p>
+
 A phone or tablet on the same Wi-Fi: `dev.py fft --lan` prints the address to type there. Anyone on that network
 can then change the settings and reboot the board, so use it on a network you trust.
 

@@ -67,6 +67,8 @@ python3 scripts/dev.py flash a -m --app uart       # the same for the UART app
 python3 scripts/dev.py check                       # everything CI checks, locally
 ```
 
+![dev.py check --fast: one bar for the step in progress, one line per finished step with its time](docs/book/assets/demo/dev-check.gif)
+
 ## A third app: the ADC to your computer
 
 One board samples an analog pin (up to 83 kS/s, with the ESP32-S31's continuous ADC and DMA) and streams it over
@@ -78,12 +80,15 @@ python3 scripts/dev.py flash a -m --app adc  # node A's board (or b)
 python3 scripts/dev.py fft                   # the page (or `fft --demo` without a board)
 ```
 
+![dev.py monitor a on the ADC board: reset once attached, the boot card, the link, a page asking for 75 kS/s](docs/book/assets/demo/dev-monitor.gif)
+
 `dev.py` flashes any of the three firmwares from the repository root, with `--app eth` (default), `--app uart`
 or `--app adc`: no need to `cd` into a firmware folder.
 
 The page has a spectrum, a waveform with an oscilloscope trigger, a harmonics view (with aliasing shown), a waterfall,
 a digital filter, measurements, a status box for the link and global colour themes, and the board's log with a command line; the board can also play a **PWM wave** (RMT, GPIO20) to give its ADC a signal you
-know. **Your settings are kept** in `~/.config/adc-fft/settings.json`: rebuild, restart, change the port, and the
+know, and a **potentiometer** on GPIO44 turns a knob into that wave's frequency or duty cycle while the signal keeps
+15/16 of the ADC's rate ([breadboard drawings](docs/book/wiring.md)). **Your settings are kept** in `~/.config/adc-fft/settings.json`: rebuild, restart, change the port, and the
 page comes back as you left it (`--settings FILE`, `--no-save`, `--reset-settings`, or *Reset all* in the page).
 Everything about it: [the ADC app page](https://lpwlk.github.io/esp32-rust-workshop/adc-stream/).
 
