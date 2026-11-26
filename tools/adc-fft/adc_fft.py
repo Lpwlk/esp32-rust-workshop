@@ -2290,7 +2290,7 @@ class FakeBoard:
                 next_pot = time.monotonic() + 0.1
                 position = self._follow_knob()
                 given = self.pwm["duty" if self.pot["mode"] == "duty" else "freq"]
-                code = ZERO_CODE + position * HALF_SCALE
+                code = ZERO_CODE * (1 - position)  # GPIO44 is an even channel: 2198 at the GND end, 0 at 3V3
                 self.sock.sendto(
                     POT.pack(
                         POT_MAGIC,

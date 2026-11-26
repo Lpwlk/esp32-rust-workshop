@@ -16,6 +16,10 @@
 /// The input pin and its ADC channel.
 pub const PIN: u8 = 44;
 pub const CHANNEL: u8 = 2;
+/// The S31's SAR is differential, and an even channel is wired the other way round: its code falls from the
+/// zero code (0 V) towards 0 (3.3 V), where an odd channel's (GPIO43, the signal) rises from the zero code to the
+/// full scale. Measured on the board: GPIO44 reads 2192 at the GND end of the pot and 1 at the 3V3 end.
+pub const INVERTED: bool = CHANNEL.is_multiple_of(2);
 
 /// What the potentiometer drives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,7 +181,8 @@ impl Filter {
     /// reads exactly its limits, and the ends of a cheap pot are not exact either.
     pub fn position(&self, zero: u16, full: u16) -> Option<f32> {
         let span = f32::from(full) - f32::from(zero);
-        let raw = (self.code()? - f32::from(zero)) / span;
+        let (code, zero) = (self.code()?, f32::from(zero));
+        let raw = if INVERTED { (zero - code) / span } else { (code - zero) / span };
         Some(((raw - EDGE) / (1.0 - 2.0 * EDGE)).clamp(0.0, 1.0))
     }
 }
@@ -362,18 +367,20 @@ mod tests {
 
     #[test]
     fn the_filter_settles_and_the_ends_of_the_travel_snap() {
+        // The code at 0 V, at 3.3 V and half way, whichever way round the channel reads.
+        let (gnd, rail) = if INVERTED { (ZERO, 0) } else { (ZERO, FULL) };
         let mut f = Filter::new();
         assert_eq!(f.position(ZERO, FULL), None);
         for _ in 0..600 {
-            f.push(ZERO);
+            f.push(gnd);
         }
         assert_eq!(f.position(ZERO, FULL), Some(0.0));
         for _ in 0..600 {
-            f.push(FULL);
+            f.push(rail);
         }
         assert_eq!(f.position(ZERO, FULL), Some(1.0));
         for _ in 0..600 {
-            f.push((ZERO + FULL) / 2);
+            f.push((gnd + rail) / 2);
         }
         let middle = f.position(ZERO, FULL).unwrap();
         assert!((middle - 0.5).abs() < 0.01, "the middle reads {middle}");
