@@ -196,6 +196,7 @@ theme, light or dark, log filters, the PWM values you typed), and in the demo th
 | `--http-port`, `--host`, `--lan`, `--fps` | where the page is served (8050 on 127.0.0.1), shown to the network, frames per second |
 | `--settings`, `--no-save`, `--reset-settings` | the settings file, see above |
 | `--demo` | a simulated board on this computer |
+| `--no-wire` | with `--demo`: don't connect the simulated PWM pin to the input |
 | `--no-browser` | don't open the page |
 | `--selftest` | receiver, FFT, web server, saved settings and PWM commands against a simulated board, no browser (CI runs it) |
 
@@ -253,8 +254,9 @@ ends to 3V3 and GND.
   restarted by noise; a move restarts the wave once.
 - The board sends the knob's state ten times a second in a `POT1` datagram (`src/pot.rs`); the page
   draws the **Knob** bar, the reading and the last 30 seconds of what the knob gave the generator. Without
-  hardware, `dev.py fft --demo --wire` has a simulated knob (it wanders between 10 % and 90 %) and a simulated wire
-  from the PWM pin to the ADC input.
+  hardware, `dev.py fft --demo` has a simulated knob (it wanders between 10 % and 90 %) and a simulated wire from the
+  PWM pin to the ADC input: **while the generator is on, its wave is the signal** (the *Signal generator* card says so);
+  off, the signal is the one you build in that card. `--no-wire` keeps the PWM off the input.
 - **High sample rates keep working.** The ADC's pattern table has 16 entries: the knob gets one of every `every`
   conversions, the signal the others. With the default `every=16` the signal keeps 15/16 of the ADC's 83.3 kS/s
   (**78.1 kS/s** at most) and the knob is read 5.2 thousand times a second, far more than a hand needs. A smaller

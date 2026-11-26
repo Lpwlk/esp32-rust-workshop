@@ -1605,6 +1605,7 @@ class Server:
         prefs = self.prefs
         return {
             "demo": self.fake is not None,
+            "wired": self.fake is not None and self.fake.wired,
             "pages": self.hub.count(),  # open pages
             "fps": self.fps,
             "uptime": round(time.monotonic() - self.started, 1),  # seconds
@@ -1966,6 +1967,17 @@ def gen_signal(spec: dict, t: np.ndarray, rng: np.random.Generator) -> np.ndarra
     return volts + spec["dc"]
 
 
+def wired_wave(
+    phase: float, freq: float, duty: float, count: int, rate: float
+) -> tuple[np.ndarray, float]:
+    """The next `count` samples of the PWM pin on the simulated wire (-1 or +1), starting at `phase` (0 to 1,
+    in periods), and the phase after them. The phase is carried from call to call: computed as `freq * t` it
+    would jump by (change of frequency) x (time since the start) whenever the knob moved, a glitch each time.
+    """
+    p = (phase + freq * np.arange(count) / rate) % 1.0
+    return np.where(p < duty / 100, 1.0, -1.0), (phase + freq * count / rate) % 1.0
+
+
 def _number(v, lo: float, hi: float) -> float | None:
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
         return None
@@ -2261,6 +2273,7 @@ class FakeBoard:
         seq = 0
         index = 0
         due = 0.0
+        wire_phase = 0.0  # where the simulated PWM pin is in its period
         heard = 0.0
         next_stat = 0.0
         next_pot = 0.0
@@ -2344,8 +2357,10 @@ class FakeBoard:
                 if self.wired and self.pwm["on"]:
                     # GPIO20 wired to GPIO43: a 0 to 3.3 V rectangle (0 V is ZERO_CODE), with a little noise.
                     half = HALF_SCALE / 2
-                    wave = gen_tone("pwm", self.pwm["freq"], half, duty=self.pwm["duty"])
-                    volts = gen_signal(gen_spec(wave, dc=half, noise=3), t, rng)
+                    wave, wire_phase = wired_wave(
+                        wire_phase, self.pwm["freq"], self.pwm["duty"], count, rate_hz
+                    )
+                    volts = half + half * wave + rng.normal(0, 3, count)
                 else:
                     volts = gen_signal(self.signal, t, rng)
                 codes = np.clip(ZERO_CODE + volts, 0, FULL_SCALE).astype("<u2")
@@ -3239,6 +3254,20 @@ def selftest() -> int:
         "above half the sample rate a harmonic is flagged as folded (9 kHz reads as 1 kHz)",
     )
 
+    # the simulated wire while the knob turns, a minute into the stream: every period is one of the range swept
+    rate, phase, chunks = 20000, 0.0, []
+    for k in range(160):
+        wave, phase = wired_wave(phase, 1000 + (k // 8) * 10.0, 50.0, 256, rate)
+        chunks.append(wave)
+    x = np.concatenate(chunks)
+    periods = np.diff(np.flatnonzero((x[:-1] < 0) & (x[1:] > 0))) / rate
+    check(
+        len(periods) > 2000
+        and periods.min() >= 1 / 1190 - 1 / rate
+        and periods.max() <= 1 / 1000 + 1 / rate,
+        f"the simulated wire changes frequency without a jump of phase ({len(periods)} periods)",
+    )
+
     # 2b. settings kept between runs: written, read back by the next run, bad files and resets survived
     import tempfile
 
@@ -3455,8 +3484,10 @@ def main() -> int:
     ap.add_argument("--demo", action="store_true", help="use a simulated board on this computer")
     ap.add_argument(
         "--wire",
-        action="store_true",
-        help="with --demo: the simulated PWM pin is wired to the input and a potentiometer wanders (docs/book/wiring.md)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="with --demo, as on the breadboard of the docs (default): while the PWM generator is on, its wave is "
+        "the input, and a simulated potentiometer wanders. --no-wire: the input is always the demo's own signal",
     )
     ap.add_argument(
         "--selftest", action="store_true", help="test receiver, FFT and web server, no browser"

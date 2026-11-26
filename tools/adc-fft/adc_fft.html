@@ -98,6 +98,7 @@
   .chip b { color: var(--text-primary); font-weight: 600; }
   .chip svg { flex: none; }
   .chip.demo { color: var(--text-primary); border-color: var(--series-2); }
+  .wirenote { margin: 0 0 8px; padding: 6px 10px; font-size: 13px; border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 8px; background: var(--surface-2); }
   .chip.pwm { border-color: var(--accent); }
   .chip select { border: 0; background: transparent; padding: 0 2px; min-height: 22px; font-size: 12.5px; }
   .chip:focus-within { border-color: var(--accent); }
@@ -462,6 +463,7 @@
       <h2>Signal generator</h2>
       <p class="hint">Demo only: what the simulated board measures. Like the real ADC it samples the ideal signal with no anti-alias filter, so a tone above half the sample rate folds back, and so do the harmonics of a square wave.</p>
     </div>
+    <p class="wirenote hidden" id="gen-wire" role="status"></p>
     <div class="toolbar">
       <div class="group"><span class="lab">Preset</span><select id="gen-preset" aria-label="Signal preset"></select></div>
       <div class="group"><span class="lab">Noise (rms, codes)</span><input type="number" id="gen-noise" min="0" max="1000" step="1" aria-label="Noise, codes rms"></div>
@@ -1820,6 +1822,15 @@ function setApp(f) {
     ` · ${s.paused ? "paused" : "live"}` + (lost ? " · " + cls("bad", `${fmtInt(lost)} lost`) : "") + (pw && pw.on ? ` · PWM ${fmtHz(pw.freq)}` : ""));
   set("s-link", streaming ? cls("good", "receiving") + (age !== null ? ` · last datagram ${Math.round(age * 1000)} ms ago` : "") : cls("warn", "no data") + (age !== null && age < 1e6 ? ` · for ${age.toFixed(1)} s` : " yet"));
   set("s-board", `${st.addr}${a.demo ? " (simulated)" : ""}`);
+  // The demo has one input: what the generator card makes, or the PWM wave coming through the simulated wire.
+  const pwmOn = !!(a.demo && st.pwm && st.pwm.on), note = $("gen-wire");
+  note.classList.toggle("hidden", !pwmOn);
+  if (pwmOn) {
+    const text = a.wired
+      ? "The PWM generator is on and wired to the simulated input: its wave is the signal now (the knob moves it). Turn it off to get these components back."
+      : "The PWM generator is on but not wired (--no-wire): the signal stays these components.";
+    if (note.textContent !== text) note.textContent = text;
+  }
   set("s-pc", `page at ${location.host} · ${a.pages || 1} page${(a.pages || 1) === 1 ? "" : "s"} open`);
   set("s-dg", streaming ? `${st.pps.toFixed(0)}/s of ${exp.toFixed(0)} expected · ${fmtInt(st.packets)} received` : `${fmtInt(st.packets)} received`);
   set("s-bps", streaming ? `${(wire / 1e6).toFixed(2)} Mbit/s on the wire · ${st.dgram || "?"} bytes of data per datagram` : "–");
