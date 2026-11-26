@@ -25,7 +25,7 @@
     python3 scripts/dev.py flash a [-m]          # build + flash with espflash (+ monitor)
     python3 scripts/dev.py flash all [--rtt]     # both nodes: one build, both boards flashed at the same time
     python3 scripts/dev.py watch [a|b] [-f]      # rebuild on every saved source file (-f: reflash node a|b too)
-    python3 scripts/dev.py monitor a             # serial console + CLI, backtraces decoded
+    python3 scripts/dev.py monitor a [--keep]    # serial console + CLI, backtraces decoded; resets the board so its boot card shows
     python3 scripts/dev.py reset a               # restart the firmware: no build, no flashing
     python3 scripts/dev.py rtt a                 # RTT build, flash, cargo-embed console
     python3 scripts/dev.py erase a [--settings]  # erase the whole flash (--settings: only the saved settings)
@@ -462,8 +462,8 @@ def flash_all(release: bool, rtt: bool) -> None:
     )
 
 
-def monitor(node: str | None, selector: str | None) -> None:
-    from devlib import live, log
+def monitor(node: str | None, selector: str | None, keep: bool) -> None:
+    from devlib import live, live_pressing, log
 
     board = board_for(node, selector)
     command = espflash("monitor", board)
@@ -471,8 +471,16 @@ def monitor(node: str | None, selector: str | None) -> None:
         command += ["--elf", str(elf_path(node))]
     elif node:
         log.info(f"no {elf_path(node).relative_to(ROOT)} yet: backtraces won't be decoded")
-    log.info("Ctrl+C to quit")
-    live(command, exit_on_failure=False)
+    if keep or not sys.stdin.isatty() or not sys.stdout.isatty():
+        log.info("Ctrl+C to quit")
+        live(command, exit_on_failure=False)
+        return
+    # espflash doesn't reset the board when it attaches, and a board that is quiet (no dashboard, no trace)
+    # prints nothing until its next boot: Ctrl+R, once the monitor is up, shows the boot card at once.
+    log.info(
+        "Ctrl+C to quit · the board is reset so that its boot card shows (`--keep` to attach as it is)"
+    )
+    live_pressing(command, after_seeing=b"CTRL+C", press=b"\x12")
 
 
 def rtt(node: str, selector: str | None) -> None:
@@ -1030,6 +1038,11 @@ def build_parser() -> argparse.ArgumentParser:
         "monitor", help="serial console + CLI of a board (no flashing)"
     )
     add_node_argument(monitor_parser, optional=True)
+    monitor_parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="attach without resetting the board: only what it prints from now on",
+    )
 
     rtt_parser = commands.add_parser("rtt", help="RTT build + flash, then the cargo-embed console")
     add_node_argument(rtt_parser)
@@ -1252,7 +1265,7 @@ def run_command(args: argparse.Namespace, release: bool) -> None:
             else:
                 flash(args.node, args.board, args.monitor, args.rtt, release)
         case "monitor":
-            monitor(args.node, args.board)
+            monitor(args.node, args.board, args.keep)
         case "rtt":
             rtt(args.node, args.board)
         case "reset":

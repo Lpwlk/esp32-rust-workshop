@@ -476,6 +476,66 @@ def live(
     return exit_code
 
 
+PRESS_DELAY_SECONDS = 0.5
+
+
+def live_pressing(command: list[str], *, after_seeing: bytes, press: bytes) -> int:
+    """`live`, with one key pressed for you once the command has printed `after_seeing`: a serial
+    monitor that doesn't reset the board by itself gets its Ctrl+R, so the boot card is on screen
+    instead of nothing. Your keyboard goes to the command as usual. Needs a terminal."""
+    import fcntl
+    import pty
+    import select
+    import termios
+    import tty
+
+    echo(command, None)
+    child, master = pty.fork()
+    if child == 0:
+        os.chdir(ROOT)
+        os.execvp(command[0], command)
+    size_of_terminal = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+    fcntl.ioctl(master, termios.TIOCSWINSZ, size_of_terminal)
+
+    def pass_window_size(*_: object) -> None:
+        size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+        fcntl.ioctl(master, termios.TIOCSWINSZ, size)
+
+    previous_resize_handler = signal.signal(signal.SIGWINCH, pass_window_size)
+    terminal_settings = termios.tcgetattr(sys.stdin.fileno())
+    tty.setraw(sys.stdin.fileno())
+    seen_at: float | None = None
+    pressed = False
+    try:
+        while True:
+            # The command prints its help just before it takes the keyboard: the key goes in a moment later.
+            if (
+                seen_at is not None
+                and not pressed
+                and time.monotonic() - seen_at > PRESS_DELAY_SECONDS
+            ):
+                pressed = True
+                os.write(master, press)
+            ready, _, _ = select.select([sys.stdin, master], [], [], 0.1)
+            if sys.stdin in ready:
+                os.write(master, os.read(sys.stdin.fileno(), 1024))
+            if master in ready:
+                try:
+                    data = os.read(master, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                os.write(sys.stdout.fileno(), data)
+                if seen_at is None and after_seeing in data:
+                    seen_at = time.monotonic()
+    finally:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, terminal_settings)
+        signal.signal(signal.SIGWINCH, previous_resize_handler)
+    _, status = os.waitpid(child, 0)
+    return os.waitstatus_to_exitcode(status)
+
+
 def run_parallel(
     commands: dict[str, list[str]], labels: dict[str, str]
 ) -> dict[str, tuple[int, str, float]]:
