@@ -73,10 +73,9 @@
 }
 
 .custom-hero {
-    padding: 10% 10%;
-    margin: 10% 10%;
-    margin-top:100px;
-    margin-bottom:100px;
+    padding: 2.2rem 6%;
+    margin: 1.5rem auto 0;
+    max-width: 60rem;
     border-radius: 1rem;
     background-size: cover;
     background-repeat:   no-repeat;
@@ -110,29 +109,29 @@
 
 .hero-title {
     font-weight: 600;
-    font-size: clamp(2rem, 4vw, 3rem);
-    margin-bottom: 1.3rem;
+    font-size: clamp(1.7rem, 3.2vw, 2.4rem);
+    margin-bottom: 0.6rem;
     line-height: 1.1;
     color: rgb(255, 255, 255)
 
 }
 
 .hero-subtitle {
-    font-size: 1.3rem;
+    font-size: 1rem;
     color: #e0e5eb;
     max-width: 600px;
 }
 
 .hero-logo img {
-    max-width: 300px;
-    height: 100%;
+    max-width: 130px;
+    height: auto;
 }
 
 .hero-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
-    margin-top: 2rem;
+    margin-top: 1.1rem;
 }
 
 /* Secondary button on the hero background */
@@ -161,13 +160,19 @@
     }
 
     .hero-logo img {
-        max-width: 160px;
+        max-width: 90px;
     }
 
     .custom-hero {
-        padding: 2rem 1rem;
-        margin: 2rem 1rem;
+        padding: 1.4rem 1rem;
+        margin: 1rem 1rem 0;
     }
+}
+
+/* The home page's banner is its title: no second "Home" heading under it, nor the page's edit buttons. */
+body:has(.custom-hero) .md-content__inner > h1,
+body:has(.custom-hero) .md-content__button {
+    display: none;
 }
 
 /* Console recordings (javascripts/casts.js): full width, rounded like code blocks */
@@ -184,4 +189,56 @@
     font-size: 0.75rem;
     opacity: 0.75;
     margin-bottom: 1.2em;
+}
+
+/* ---------------------------------------------------------------------------
+   Scrolling effects (javascripts/scroll.js). Nothing is hidden unless the script ran and the visitor
+   has not asked for reduced motion, so the page is complete without it.
+   --------------------------------------------------------------------------- */
+.scroll-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    z-index: 5;
+    transform: scaleX(0);
+    transform-origin: 0 50%;
+    background: linear-gradient(90deg, var(--md-primary-fg-color), #ffb347 60%, #19b6a8);
+    pointer-events: none;
+}
+
+html.reveal-on .reveal {
+    opacity: 0;
+    transform: translateY(1.2rem);
+    transition: opacity 0.55s ease var(--reveal-delay, 0ms), transform 0.55s ease var(--reveal-delay, 0ms);
+}
+
+html.reveal-on .reveal.in {
+    opacity: 1;
+    transform: none;
+}
+
+/* The cards keep their own hover transition once they are in. */
+html.reveal-on .md-typeset .grid.cards > ul > li.reveal.in {
+    transition: opacity 0.55s ease var(--reveal-delay, 0ms), transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* The hero drifts and fades a little as it leaves (the script sets --hero-shift and --hero-fade). */
+html.reveal-on .custom-hero {
+    background-position: center calc(50% + var(--hero-shift, 0px));
+}
+html.reveal-on .custom-hero .hero-container {
+    opacity: var(--hero-fade, 1);
+    transform: translateY(calc(var(--hero-shift, 0px) * -0.5));
+}
+
+/* The table of contents' current section: a slow colour change instead of a jump. */
+.md-nav__link, .md-nav__link--active {
+    transition: color 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scroll-progress { display: none; }
+    html.reveal-on .reveal { opacity: 1; transform: none; transition: none; }
 }

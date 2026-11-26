@@ -43,6 +43,7 @@ extra_css = [
 extra_javascript = [
   "https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.min.js",
   "javascripts/casts.js",
+  "javascripts/scroll.js",
 ]
 
 # Top-level sections are rendered as tabs (navigation.tabs).
