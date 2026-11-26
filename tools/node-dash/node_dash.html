@@ -77,9 +77,6 @@
   input[type="range"]::-moz-range-track { background: transparent; }
 
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; min-width: 0; }
-  .card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .card-head h2 { margin: 0; font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
-  .card-head .hint { margin: 0; font-size: 12px; color: var(--text-muted); flex: 1; min-width: 200px; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: end; margin: 10px 0 6px; }
   .group { display: grid; gap: 3px; }
   .group > .lab { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
@@ -92,11 +89,25 @@
   .empty { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
   .note { color: var(--text-muted); font-size: 12px; }
 
-  .boards, .cols2, .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-  @media (max-width: 1000px) { .boards, .cols2, .controls { grid-template-columns: minmax(0, 1fr); } }
-  .col { display: grid; gap: 16px; min-width: 0; }
-  .node { border-top: 3px solid var(--me); }
-  .node .card-head h2 { font-size: 15px; }
+  /* One grid for the whole page: a row is one block, node A on the left and node B on the right (the blocks
+     of a board sit in a `display: contents` wrapper, so they are placed by --row and --k). */
+  .page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
+  .wrap { display: contents; }
+  [data-block] { grid-row: var(--row); grid-column: calc(var(--k, 0) + 1); min-width: 0; }
+  [data-block][data-span="wide"], .band[data-block] { grid-column: 1 / -1; }
+  [data-span="left"] { --k: 0; } [data-span="right"] { --k: 1; }
+  @media (max-width: 1000px) {
+    .page { grid-template-columns: minmax(0, 1fr); }
+    [data-block], [data-block][data-span="wide"], .band[data-block] { grid-column: 1; grid-row: calc(var(--row) * 2 + var(--k, 0)); }
+  }
+  .mine { border-top: 3px solid var(--me); }
+  /* dragging a block by its grip: the whole row (both boards) moves; the line shows where it lands */
+  .grip { cursor: grab; color: var(--text-muted); padding: 0 2px; font-size: 14px; line-height: 1; user-select: none; }
+  .grip:hover { color: var(--text-primary); }
+  .grip:active { cursor: grabbing; }
+  .dragging { opacity: .4; }
+  .drop-before { box-shadow: 0 -4px 0 0 var(--series-1); }
+  .drop-after { box-shadow: 0 4px 0 0 var(--series-1); }
   .badge { font-size: 12px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); background: var(--surface-2); }
 
   .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
@@ -109,7 +120,7 @@
   .ico { display: inline-block; vertical-align: -1px; margin-right: 4px; }
 
   /* the board's console: always a dark terminal */
-  .term { background: var(--term-bg); color: var(--term-text); border: 1px solid var(--border); border-radius: 8px 8px 0 0; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; height: 340px; overflow: auto; resize: vertical; font-size: 12px; padding: 8px 10px; min-height: 100px; }
+  .term { background: var(--term-bg); color: var(--term-text); border: 1px solid var(--border); border-radius: 8px 8px 0 0; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; height: var(--term-h, 340px); overflow: auto; resize: vertical; font-size: 12px; padding: 8px 10px; min-height: 100px; }
   .term .l { white-space: pre; display: flex; gap: 8px; }
   .term .t { color: var(--term-dim); flex: none; font-variant-numeric: tabular-nums; }
   .term .x { min-width: 0; }
@@ -137,9 +148,19 @@
 
   .plots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   @media (max-width: 1000px) { .plots { grid-template-columns: minmax(0, 1fr); } }
-  .plotbox h3 { margin: 0 0 2px; font-size: 13px; font-weight: 650; }
-  .plotbox .hint { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .plotbox h3 { font-size: 13px; font-weight: 650; }
   .plot { width: 100%; height: 250px; }
+  .plots .plot { height: var(--charts-h, 250px); }
+  /* The bar under a chart or terminal group, and the one between the two boards' columns: drag to resize. */
+  .sizer { height: 14px; margin-top: 2px; display: flex; align-items: center; justify-content: center; cursor: ns-resize;
+    touch-action: none; user-select: none; border-radius: 7px; outline-offset: -2px; }
+  .sizer::before { content: ""; width: 56px; height: 4px; border-radius: 2px; background: var(--grid); transition: background 0.12s, width 0.12s; }
+  .sizer:hover::before, .sizer:focus-visible::before, .sizer.drag::before { background: var(--series-1); width: 80px; }
+  .page { position: relative; }
+  .vsplit { position: absolute; top: 0; bottom: 0; width: 16px; margin-left: -8px; display: flex; align-items: flex-start; justify-content: center;
+    cursor: col-resize; touch-action: none; user-select: none; z-index: 3; outline-offset: -2px; }
+  .vsplit::before { content: ""; position: sticky; top: 42vh; width: 4px; height: 64px; border-radius: 2px; background: var(--grid); transition: background 0.12s, height 0.12s; }
+  .vsplit:hover::before, .vsplit:focus-visible::before, .vsplit.drag::before { background: var(--series-1); height: 100px; }
   .banner { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 10px; margin-top: 8px; border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 8px; background: var(--surface-2); font-size: 13px; color: var(--text-secondary); }
 
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -171,15 +192,43 @@
   .prog .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); }
   .prog.idle { display: none; }
 
-  details.group-box { border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; background: var(--surface-1); }
-  details.group-box > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; font-size: 13px; list-style: none; display: flex; align-items: center; gap: 8px; }
-  details.group-box > summary::before { content: "▸"; color: var(--text-muted); transition: transform .1s; }
-  details.group-box[open] > summary::before { transform: rotate(90deg); }
-  details.group-box > summary .note { font-weight: 400; }
-  details.group-box > .body { padding: 0 12px 12px; }
-  details.group-box .toolbar:first-child { margin-top: 2px; }
-  [data-only] { display: none; }
+  /* Foldable blocks: a summary you click, a body that goes away. The state is kept in this browser. */
+  summary.fold { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  summary.fold::-webkit-details-marker { display: none; }
+  summary.fold::before { content: "▸"; color: var(--text-muted); transition: transform .1s; flex: none; }
+  details[open] > summary.fold::before { transform: rotate(90deg); }
+  details.block { padding: 0; }
+  details.block > summary { padding: 10px 14px; font-weight: 650; font-size: 14px; border-radius: 12px; }
+  details.block[open] > summary { border-radius: 12px 12px 0 0; }
+  details.block > summary:hover { background: var(--surface-2); }
+  details.block > summary .note { font-weight: 400; }
+  details.block > .body { padding: 0 14px 12px; }
+  details.block .toolbar:first-child { margin-top: 2px; }
+  .who { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+  .who.first { margin-left: 0; font-size: 15px; font-weight: 650; color: var(--text-primary); }
+  .port { margin-left: auto; }
+  .digest { color: var(--text-secondary); font-size: 13px; font-weight: 400; }
+  details[open] > summary .digest { display: none; }
+  .run-badge { font-size: 11px; font-weight: 600; padding: 0 8px; border-radius: 999px; color: #fff; background: var(--me, var(--series-1)); }
+  .run-badge.idle { display: none; }
+  details.inline { margin: 4px 0 8px; }
+  details.inline > summary { font-size: 12px; color: var(--text-secondary); padding: 2px 0; }
+  details.inline > .row { margin-top: 6px; }
+  details.plotbox > summary h3 { margin: 0; }
+  details.plotbox > summary .note { font-weight: 400; }
+  p.hint { margin: 0 0 6px; font-size: 12px; color: var(--text-muted); }
+  .band { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-bottom: 4px; border-bottom: 1px solid var(--border); scroll-margin-top: 64px; }
+  .band h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+  .band .note { flex: 1; min-width: 160px; }
+  .band button { min-height: 24px; padding: 0 8px; font-size: 12px; }
+  header.top { position: sticky; top: 0; z-index: 10; background: var(--page); padding: 8px 0; margin: -8px 0 0; }
+  nav.jump { display: flex; gap: 2px; flex-wrap: wrap; }
+  nav.jump a { padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+  nav.jump a:hover { background: var(--surface-2); border-color: var(--border); }
+  [data-only], .band[data-only], nav.jump a[data-only] { display: none; }
   [data-app="eth"] [data-only="eth"], [data-app="uart"] [data-only="uart"] { display: block; }
+  [data-app="eth"] .band[data-only="eth"], [data-app="uart"] .band[data-only="uart"] { display: flex; }
+  [data-app="eth"] nav.jump a[data-only="eth"], [data-app="uart"] nav.jump a[data-only="uart"] { display: inline-block; }
   .swatch { width: 52px; height: 10px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); vertical-align: middle; }
   .patterns button { padding: 4px 8px; }
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13px; }
@@ -199,79 +248,96 @@
   <header class="top">
     <h1>Node dashboard</h1>
     <span class="sub" id="sub">the two boards of the Ethernet and UART apps, as in the serial terminal</span>
+    <nav class="jump" id="jump" aria-label="Sections"></nav>
     <span class="grow"></span>
     <span class="status" id="status" role="status" aria-live="polite"></span>
+    <button id="resetlayout" title="Put the blocks back in their default order, and the charts, terminals and columns at their default size">Reset layout</button>
+    <button id="foldall" title="Fold every block">Fold all</button>
+    <button id="unfoldall" title="Unfold every block">Unfold all</button>
     <button id="theme" title="Theme: auto, light, dark" aria-label="Change theme">Theme: auto</button>
   </header>
 
-  <section class="boards" id="boards"></section>
+  <div class="page" id="page">
+    <details class="card block" data-block="charts" data-span="wide" data-fold="charts" open id="chartcard">
+      <summary class="fold">Traffic and link <span class="note">both boards on the same time axis · drag to zoom, double-click to follow the present again</span></summary>
+      <div class="body">
+        <div class="toolbar">
+          <div class="group"><span class="lab">Time span</span>
+            <select id="span" aria-label="Time span">
+              <option value="30">30 s</option><option value="120" selected>2 min</option><option value="600">10 min</option><option value="3600">1 h</option>
+            </select></div>
+          <div class="group"><span class="lab">Round-trip axis</span>
+            <div class="row"><button id="logrtt" aria-pressed="false">Log</button></div></div>
+          <div class="group"><span class="lab">Follow</span>
+            <div class="row"><button id="follow" aria-pressed="true">Live</button></div></div>
+        </div>
+        <div id="needs"></div>
+        <div class="plots">
+          <details class="plotbox" data-fold="plot-rate" open><summary class="fold"><h3>Frames per second</h3><span class="note">sent (solid) and received (dashed), from the counters</span></summary><div id="p-rate" class="plot"></div></details>
+          <details class="plotbox" data-fold="plot-rtt" open><summary class="fold"><h3>Round-trip time</h3><span class="note">µs between a frame sent and the peer's echo (<code>tx on-rx</code> on the peer, verbose frames)</span></summary><div id="p-rtt" class="plot"></div></details>
+          <details class="plotbox" data-fold="plot-delta" open><summary class="fold"><h3>Interval between data frames</h3><span class="note">ms since the previous DAT frame, sent or received (verbose frames)</span></summary><div id="p-delta" class="plot"></div></details>
+          <details class="plotbox" data-fold="plot-marks" open><summary class="fold"><h3>Link events</h3><span class="note">lost and bad frames, link changes, restarts, button edges</span></summary><div id="p-marks" class="plot"></div></details>
+        </div>
+      </div>
+    </details>
 
-  <section class="card" id="chartcard">
-    <div class="card-head">
-      <h2>Traffic and link</h2>
-      <p class="hint">Both boards on the same time axis. Drag to zoom, double-click to follow the present again.</p>
-    </div>
-    <div class="toolbar">
-      <div class="group"><span class="lab">Time span</span>
-        <select id="span" aria-label="Time span">
-          <option value="30">30 s</option><option value="120" selected>2 min</option><option value="600">10 min</option><option value="3600">1 h</option>
-        </select></div>
-      <div class="group"><span class="lab">Round-trip axis</span>
-        <div class="row"><button id="logrtt" aria-pressed="false">Log</button></div></div>
-      <div class="group"><span class="lab">Follow</span>
-        <div class="row"><button id="follow" aria-pressed="true">Live</button></div></div>
-    </div>
-    <div id="needs"></div>
-    <div class="plots">
-      <div class="plotbox"><h3>Frames per second</h3><p class="hint">Sent (solid) and received (dashed), from the counters.</p><div id="p-rate" class="plot"></div></div>
-      <div class="plotbox"><h3>Round-trip time</h3><p class="hint">µs between a frame sent and the peer's echo (<code>tx on-rx</code> on the peer, verbose frames).</p><div id="p-rtt" class="plot"></div></div>
-      <div class="plotbox"><h3>Interval between data frames</h3><p class="hint">ms since the previous DAT frame, sent or received (verbose frames).</p><div id="p-delta" class="plot"></div></div>
-      <div class="plotbox"><h3>Link events</h3><p class="hint">Lost and bad frames, link changes, restarts, button edges.</p><div id="p-marks" class="plot"></div></div>
-    </div>
-  </section>
-
-  <section class="cols2" id="results">
-    <div class="card">
-      <div class="card-head"><h2>Burst and traffic generator runs</h2><p class="hint">Each test shows on the sender and on the receiver. Start them from a board's controls.</p></div>
-      <div id="p-tests" class="plot" style="height:220px"></div>
-      <div class="scroll"><table id="tests"></table></div>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>Button events</h2><p class="hint">The jumper, each edge with the 64-bit key the TRNG gave it.</p></div>
-      <div class="scroll"><table id="events"></table></div>
-    </div>
-  </section>
-
-  <section class="controls" id="panels"></section>
+    <details class="card block" data-block="results" data-span="left" data-fold="runs" open>
+      <summary class="fold">Burst and traffic generator runs <span class="note">each test shows on the sender and on the receiver</span></summary>
+      <div class="body">
+        <div id="p-tests" class="plot" style="height:220px"></div>
+        <div class="scroll"><table id="tests"></table></div>
+      </div>
+    </details>
+    <details class="card block" data-block="results" data-span="right" data-fold="events" open>
+      <summary class="fold">Button events <span class="note">the jumper, each edge with the 64-bit key the TRNG gave it</span></summary>
+      <div class="body"><div class="scroll"><table id="events"></table></div></div>
+    </details>
+  </div>
 </main>
 
 <template id="tpl-card">
-  <article class="card node" data-r="card">
-    <div class="card-head">
-      <h2><span class="dot"></span><span data-r="title">Node</span></h2>
+  <details class="card block mine" data-block="status" data-fold="status" open>
+    <summary class="fold">
+      <span class="who first"><span class="dot"></span><span data-who>Node</span></span>
       <span class="badge" data-r="app">–</span>
       <span class="badge" data-r="conn">–</span>
-      <p class="hint" data-r="port"></p>
+      <span class="digest num" data-r="digest"></span>
+      <span class="note port" data-r="port"></span>
+    </summary>
+    <div class="body">
+      <div class="tiles">
+        <div class="tile"><div class="label">Link</div><div class="value num" data-r="k-link">–</div><div class="sub" data-r="n-link"></div></div>
+        <div class="tile"><div class="label">Frames sent</div><div class="value num" data-r="k-tx">–</div><div class="sub num" data-r="n-tx"></div></div>
+        <div class="tile"><div class="label">Frames received</div><div class="value num" data-r="k-rx">–</div><div class="sub num" data-r="n-rx"></div></div>
+        <div class="tile"><div class="label">Lost · bad</div><div class="value num" data-r="k-lost">–</div><div class="sub" data-r="n-lost"></div></div>
+        <div class="tile"><div class="label">Round trip</div><div class="value num" data-r="k-rtt">–</div><div class="sub num" data-r="n-rtt"></div></div>
+        <div class="tile"><div class="label">Peer's button</div><div class="value" data-r="k-btn">–</div><div class="sub" data-r="n-btn"></div></div>
+        <div class="tile"><div class="label" data-r="l-x">Peer</div><div class="value num" data-r="k-x">–</div><div class="sub num" data-r="n-x"></div></div>
+        <div class="tile"><div class="label">Board</div><div class="value" data-r="k-board">–</div><div class="sub" data-r="n-board"></div></div>
+      </div>
+      <div class="meters">
+        <div class="mrow" data-r="row-health"><div class="top"><span>Peer silence <small class="note">· the link goes down at the timeout</small></span><b class="num" data-r="v-health">–</b></div><div class="meter" data-r="m-health" role="progressbar" aria-label="Time since the peer's last frame, against the link timeout"><i></i></div></div>
+        <div class="mrow" data-only="uart"><div class="top"><span>RX buffer peak <small class="note">· UART receive buffer, highest fill</small></span><b class="num" data-r="v-rxbuf">–</b></div><div class="meter" data-r="m-rxbuf" role="progressbar" aria-label="Highest fill of the UART receive buffer"><i></i></div></div>
+      </div>
     </div>
-    <div class="tiles">
-      <div class="tile"><div class="label">Link</div><div class="value num" data-r="k-link">–</div><div class="sub" data-r="n-link"></div></div>
-      <div class="tile"><div class="label">Frames sent</div><div class="value num" data-r="k-tx">–</div><div class="sub num" data-r="n-tx"></div></div>
-      <div class="tile"><div class="label">Frames received</div><div class="value num" data-r="k-rx">–</div><div class="sub num" data-r="n-rx"></div></div>
-      <div class="tile"><div class="label">Lost · bad</div><div class="value num" data-r="k-lost">–</div><div class="sub" data-r="n-lost"></div></div>
-      <div class="tile"><div class="label">Round trip</div><div class="value num" data-r="k-rtt">–</div><div class="sub num" data-r="n-rtt"></div></div>
-      <div class="tile"><div class="label">Peer's button</div><div class="value" data-r="k-btn">–</div><div class="sub" data-r="n-btn"></div></div>
-      <div class="tile"><div class="label" data-r="l-x">Peer</div><div class="value num" data-r="k-x">–</div><div class="sub num" data-r="n-x"></div></div>
-      <div class="tile"><div class="label">Board</div><div class="value" data-r="k-board">–</div><div class="sub" data-r="n-board"></div></div>
-    </div>
-    <div class="meters">
-      <div class="mrow" data-r="row-health"><div class="top"><span>Peer silence <small class="note">· the link goes down at the timeout</small></span><b class="num" data-r="v-health">–</b></div><div class="meter" data-r="m-health" role="progressbar" aria-label="Time since the peer's last frame, against the link timeout"><i></i></div></div>
-      <div class="mrow" data-only="uart"><div class="top"><span>RX buffer peak <small class="note">· UART receive buffer, highest fill</small></span><b class="num" data-r="v-rxbuf">–</b></div><div class="meter" data-r="m-rxbuf" role="progressbar" aria-label="Highest fill of the UART receive buffer"><i></i></div></div>
-    </div>
-  </article>
-  <article class="card" data-r="termcard">
-    <div class="card-head"><h2>Console</h2><p class="hint" data-r="termhint">What the board prints, and what you type goes to it, as in the serial terminal.</p></div>
-    <div class="toolbar">
-      <div class="group"><span class="lab">Show</span>
+  </details>
+
+  <details class="card block mine" data-block="console" data-fold="console" open>
+    <summary class="fold">Console <span class="note" data-r="termsum">what the board prints; what you type goes to it</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
+      <p class="hint" data-r="termhint">As in the serial terminal: colours, the live line, the traffic dashboard, a command line with history.</p>
+      <div class="toolbar">
+        <div class="group"><span class="lab">Terminal</span>
+          <div class="row">
+            <button data-r="follow" aria-pressed="true">Follow</button>
+            <button data-r="clear">Clear</button>
+            <button data-r="copy">Copy</button>
+            <a class="btn" data-r="csv" download>Frames CSV</a>
+            <a class="btn" data-r="txt" download>Log</a>
+          </div></div>
+      </div>
+      <details class="inline" data-fold="termfilters">
+        <summary class="fold">Filter lines <span class="note" data-r="filt-note"></span></summary>
         <div class="row">
           <button data-f="frame" aria-pressed="true">Frames</button>
           <button data-f="stat" aria-pressed="true">Stats</button>
@@ -282,31 +348,23 @@
           <button data-f="cmd" aria-pressed="true">Echo</button>
           <button data-f="debug" aria-pressed="true">Wire</button>
           <button data-f="host" aria-pressed="true">This tool</button>
-        </div></div>
-      <div class="group"><span class="lab">Terminal</span>
-        <div class="row">
-          <button data-r="follow" aria-pressed="true">Follow</button>
-          <button data-r="clear">Clear</button>
-          <button data-r="copy">Copy</button>
-          <a class="btn" data-r="csv" download>Frames CSV</a>
-          <a class="btn" data-r="txt" download>Log</a>
-        </div></div>
+        </div>
+      </details>
+      <div class="term" data-r="term" role="log" aria-live="off" tabindex="0"></div>
+      <div class="livebox" data-r="live" aria-label="Live line and traffic dashboard of the board"></div>
+      <form class="cmdline" data-r="cmdform" autocomplete="off">
+        <span class="prompt" data-r="prompt">cli ›</span>
+        <input data-r="cmd" type="text" spellcheck="false" maxlength="96" placeholder="help · config · verbose frames · pattern ocean · burst 1000 max…" aria-label="Command for the board">
+        <select data-r="target" aria-label="Send to"><option value="own">this node</option><option value="both">both nodes</option></select>
+      </form>
     </div>
-    <div class="term" data-r="term" role="log" aria-live="off" tabindex="0"></div>
-    <div class="livebox" data-r="live" aria-label="Live line and traffic dashboard of the board"></div>
-    <form class="cmdline" data-r="cmdform" autocomplete="off">
-      <span class="prompt" data-r="prompt">cli ›</span>
-      <input data-r="cmd" type="text" spellcheck="false" maxlength="96" placeholder="help · config · verbose frames · pattern ocean · burst 1000 max…" aria-label="Command for the board">
-      <select data-r="target" aria-label="Send to"><option value="own">this node</option><option value="both">both nodes</option></select>
-    </form>
-  </article>
+  </details>
 </template>
 
 <template id="tpl-controls">
-  <article class="card" data-r="ctl">
-    <div class="card-head"><h2><span class="dot"></span><span data-r="title2">Node</span> · controls</h2><p class="hint">Every control types the CLI command shown in the console, and the settings table below follows the board.</p></div>
-
-    <details class="group-box" open><summary>Console and node</summary><div class="body">
+  <details class="card block mine" data-block="node" data-fold="node" open>
+    <summary class="fold">Console and node <span class="note">what the console prints, restart</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Verbose <span class="note">(what the console prints)</span></span>
           <div class="seg" data-seg="verbose">
@@ -318,9 +376,12 @@
         <div class="group"><span class="lab">Restart</span>
           <div class="row"><button class="danger" data-cmd="reboot" data-confirm="Reboot this board? Settings not saved are lost.">Reboot</button></div></div>
       </div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open><summary>RGB LED</summary><div class="body">
+  <details class="card block mine" data-block="rgb" data-fold="rgb" open>
+    <summary class="fold">RGB LED <span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Pattern</span>
           <div class="row patterns" data-r="patterns"></div></div>
@@ -331,13 +392,19 @@
         <div class="group"><span class="lab">Fade loop, ms <span class="note">200-60000, 2s, 0.5Hz</span></span>
           <input type="text" data-key="rgb.cycle_ms" aria-label="Fade loop duration"></div>
       </div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open><summary>Breadboard LEDs</summary><div class="body">
+  <details class="card block mine" data-block="leds" data-fold="leds" open>
+    <summary class="fold">Breadboard LEDs <span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar" data-r="leds"></div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open><summary>Traffic and timing</summary><div class="body">
+  <details class="card block mine" data-block="timing" data-fold="timing" open>
+    <summary class="fold">Traffic and timing <span class="note">what the node sends, and when the link counts as down</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Transmit</span>
           <div class="seg" data-seg="tx_mode">
@@ -349,32 +416,44 @@
         <div class="group"><span class="lab">Debounce, ms <span class="note">1-1000</span></span><input type="number" min="1" max="1000" data-key="debounce_ms" aria-label="Debounce"></div>
         <div class="group"><span class="lab">Lockout, ms <span class="note">0-5000</span></span><input type="number" min="0" max="5000" data-key="lockout_ms" aria-label="Lockout"></div>
       </div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open data-only="uart"><summary>UART link</summary><div class="body">
+  <details class="card block mine" data-block="link" data-fold="link" data-only="uart" open>
+    <summary class="fold">UART link <span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Baud rate <span class="note">both nodes switch (handshake)</span></span>
           <div class="row"><select data-r="baud" aria-label="Baud rate">
             <option>115200</option><option>230400</option><option>460800</option><option>921600</option><option>1000000</option><option>2000000</option><option>3000000</option><option>5000000</option></select>
             <button data-r="baud-go">Switch</button><button data-cmd="baud">Show</button></div></div>
       </div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open data-only="eth"><summary>Ethernet link</summary><div class="body">
+  <details class="card block mine" data-block="link" data-fold="link" data-only="eth" open>
+    <summary class="fold">Ethernet link <span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar"><div class="group"><span class="lab">Show</span><div class="row"><button data-cmd="link">link</button></div></div></div>
       <dl class="kv" data-r="netinfo"></dl>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open><summary>Burst <span class="note">frames sent as fast as asked, the peer measures</span></summary><div class="body">
+  <details class="card block mine" data-block="burst" data-fold="burst" open>
+    <summary class="fold">Burst <span class="note">frames sent as fast as asked, the peer measures</span><span class="run-badge idle" data-r="burst-badge">running</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Frames <span class="note">1-100000</span></span><input type="number" min="1" max="100000" value="1000" data-r="b-count" aria-label="Burst length"></div>
         <div class="group"><span class="lab">Rate <span class="note">frames/s · 20ms · max</span></span><input type="text" value="max" data-r="b-rate" aria-label="Burst rate"></div>
         <div class="group"><span class="lab">Run</span><div class="row"><button data-r="b-go">Start burst</button><button data-cmd="burst" title="The board asks length and rate in its console">Ask in console</button></div></div>
       </div>
       <div class="prog idle" data-r="burst-prog"><div class="top"><span data-r="burst-label">–</span><b class="num" data-r="burst-val"></b></div><div class="meter" data-r="burst-bar" role="progressbar" aria-label="Burst progress"><i></i></div></div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" data-only="eth"><summary>Traffic generator <span class="note">UDP datagrams to the peer, on the next port</span></summary><div class="body">
+  <details class="card block mine" data-block="generator" data-fold="generator" data-only="eth">
+    <summary class="fold">Traffic generator <span class="note">UDP datagrams to the peer, on the next port</span><span class="note" data-r="g-line"></span><span class="run-badge idle" data-r="gen-badge">running</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Rate <span class="note">5000 · 5kpps · 2Mbit</span></span><input type="text" value="2Mbit" data-r="g-rate" aria-label="Generator rate"></div>
         <div class="group"><span class="lab">Size <span class="note">512B · 64-1400 · imix</span></span><input type="text" value="512B" data-r="g-size" aria-label="Datagram size"></div>
@@ -384,41 +463,37 @@
         <div class="group"><span class="lab" data-r="g-l2">Cycle</span><input type="text" value="20s" data-r="g-p2" aria-label="Shape cycle"></div>
         <div class="group"><span class="lab">Time <span class="note">30s · 2min · forever · auto</span></span><input type="text" value="auto" data-r="g-time" aria-label="Duration"></div>
       </div>
-      <div class="row"><button data-r="g-go">Start</button><button data-cmd="gen stop">Stop</button><button data-cmd="gen pause">Pause</button><button data-cmd="gen resume">Resume</button><button data-cmd="gen status">Status</button><span class="note" data-r="g-line"></span></div>
+      <div class="row"><button data-r="g-go">Start</button><button data-cmd="gen stop">Stop</button><button data-cmd="gen pause">Pause</button><button data-cmd="gen resume">Resume</button><button data-cmd="gen status">Status</button></div>
       <div class="prog idle" data-r="gen-prog"><div class="top"><span data-r="gen-label">–</span><b class="num" data-r="gen-val"></b></div><div class="meter" data-r="gen-bar" role="progressbar" aria-label="Traffic generator progress"><i></i></div></div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" data-only="eth"><summary>Network trace <span class="note">frames that cross the cable, decoded line by line in the console</span></summary><div class="body">
+  <details class="card block mine" data-block="trace" data-fold="trace" data-only="eth">
+    <summary class="fold">Network trace <span class="note">frames that cross the cable, decoded line by line in the console</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Trace</span><div class="seg" data-seg="trace"><button data-v="off">0 off</button><button data-v="events">1 events</button><button data-v="frames">2 frames</button></div></div>
         <div class="group"><span class="lab">Layout</span><select data-key="trace_view" aria-label="Trace layout"><option>compact</option><option>layers</option><option>inside-out</option></select></div>
         <div class="group"><span class="lab">Hex dump, bytes <span class="note">0-256</span></span><input type="number" min="0" max="256" data-key="trace_bytes" aria-label="Hex dump bytes"></div>
         <div class="group"><span class="lab">Short IPs</span><div class="seg" data-seg="trace_short_ip"><button data-v="false">off</button><button data-v="true">on</button></div></div>
       </div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" data-only="eth"><summary>Traffic dashboard <span class="note">bars of what is sent and received, above the console prompt; works with the trace on or off</span></summary><div class="body">
+  <details class="card block mine" data-block="dash" data-fold="dash" data-only="eth">
+    <summary class="fold">Traffic dashboard <span class="note">bars of what is sent and received, above the console prompt; works with the trace on or off</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">Size <span class="note">off at boot</span></span><div class="seg" data-seg="trace_dash"><button data-v="off">0 off</button><button data-v="mini">1 mini</button><button data-v="normal">2 normal</button><button data-v="full">3 full</button></div></div>
         <div class="group"><span class="lab">View</span><div class="seg" data-seg="trace_dash_view"><button data-v="bars">bars</button><button data-v="chart">chart</button><button data-v="mix">mix</button></div></div>
         <div class="group"><span class="lab">Window, s <span class="note">2-3600 · 30s · 2min</span></span><input type="text" data-key="trace_window_s" aria-label="Dashboard window"></div>
       </div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box"><summary>Peer's address space <span class="note">browse, read, write and watch the other node's variables</span></summary><div class="body">
-      <div class="toolbar">
-        <div class="group"><span class="lab">Path</span><input type="text" list="paths" value="/" data-r="s-path" aria-label="Path in the peer's address space" style="width:170px"></div>
-        <div class="group"><span class="lab">Value <span class="note">to write</span></span><input type="text" data-r="s-value" aria-label="Value to write" style="width:130px"></div>
-        <div class="group"><span class="lab">Ask the peer</span><div class="row">
-          <button data-r="s-browse">Browse</button><button data-r="s-read">Read</button><button data-r="s-write">Write</button><button data-r="s-watch">Watch</button><button data-r="s-unwatch">Unwatch</button></div></div>
-      </div>
-      <div class="cols-s" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
-        <div><div class="note">Tree <span data-r="s-treehint"></span></div><div class="tree scroll" data-r="s-tree"></div></div>
-        <div><div class="note">Values the peer answered</div><div class="scroll"><table data-r="s-values"></table></div></div>
-      </div>
-    </div></details>
-
-    <details class="group-box" open><summary>Settings <span class="note" data-r="s-note"></span></summary><div class="body">
+  <details class="card block mine" data-block="settings" data-fold="settings">
+    <summary class="fold">Settings <span class="note" data-r="s-note"></span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">In flash <span class="note" data-r="s-flash"></span></span>
           <div class="row"><button data-cmd="save" title="Keep the settings that differ from the build across reboots">Save</button><button data-cmd="forget" title="Erase what was saved: the next boot uses the build config (the current settings stay until then)">Forget</button><button data-cmd="reset" data-confirm="Put every setting back to its build value (not saved ones are lost)?" title="Every setting back to the build value">Reset all</button></div></div>
@@ -426,9 +501,12 @@
           <div class="row"><button data-cmd="config" data-quiet="1">Refresh</button><button data-r="s-changed" aria-pressed="false" title="Only the settings that differ from the build">Changed only</button><button data-r="s-ro" aria-pressed="false" title="Also the settings fixed at build time (name, pins, network), and on the UART app the trace settings, which do nothing there">Read-only too</button></div></div>
       </div>
       <div class="scroll" style="max-height:420px"><table data-r="settings"></table></div>
-    </div></details>
+    </div>
+  </details>
 
-    <details class="group-box" open><summary>Peer's config <span class="note" data-r="p-note"></span></summary><div class="body">
+  <details class="card block mine" data-block="peer" data-fold="peer">
+    <summary class="fold">Peer's config <span class="note" data-r="p-note"></span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
       <div class="toolbar">
         <div class="group"><span class="lab">1 · Look</span>
           <div class="row"><button data-r="p-read" title="Ask the peer for each of its settings (read /config/&lt;key&gt;), over the link">Read peer's config</button></div></div>
@@ -440,8 +518,24 @@
       <div class="note" data-r="p-line"></div>
       <div class="prog idle" data-r="p-prog"><div class="top"><span data-r="p-prog-label">–</span><b class="num" data-r="p-prog-val"></b></div><div class="meter" data-r="p-bar" role="progressbar" aria-label="Peer config progress"><i></i></div></div>
       <div class="scroll" style="max-height:420px"><table data-r="p-table"></table></div>
-    </div></details>
-  </article>
+    </div>
+  </details>
+
+  <details class="card block mine" data-block="space" data-fold="space">
+    <summary class="fold">Peer's address space <span class="note">browse, read, write and watch the other node's variables</span><span class="who"><span class="dot"></span><span data-who>Node</span></span></summary>
+    <div class="body">
+      <div class="toolbar">
+        <div class="group"><span class="lab">Path</span><input type="text" list="paths" value="/" data-r="s-path" aria-label="Path in the peer's address space" style="width:170px"></div>
+        <div class="group"><span class="lab">Value <span class="note">to write</span></span><input type="text" data-r="s-value" aria-label="Value to write" style="width:130px"></div>
+        <div class="group"><span class="lab">Ask the peer</span><div class="row">
+          <button data-r="s-browse">Browse</button><button data-r="s-read">Read</button><button data-r="s-write">Write</button><button data-r="s-watch">Watch</button><button data-r="s-unwatch">Unwatch</button></div></div>
+      </div>
+      <div class="cols-s" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+        <div><div class="note">Tree <span data-r="s-treehint"></span></div><div class="tree scroll" data-r="s-tree"></div></div>
+        <div><div class="note">Values the peer answered</div><div class="scroll"><table data-r="s-values"></table></div></div>
+      </div>
+    </div>
+  </details>
 </template>
 <datalist id="paths"></datalist>
 
@@ -479,7 +573,7 @@ $("paths").innerHTML = QUICK_PATHS.map((p) => `<option value="${p}">`).join("");
 
 // ---- view settings kept in this browser ------------------------------------------------------
 const ui = { span: 120, logrtt: false, follow: true, f_frame: true, f_stat: true, f_info: true, f_ok: true, f_warn: true, f_error: true, f_cmd: true, f_debug: true, f_host: true,
-             termfollow: { a: true, b: true }, changed: false, ro: false };
+             termfollow: { a: true, b: true }, changed: false, ro: false, folds: {}, order: [], sizes: {}, split: 0 };
 try { Object.assign(ui, JSON.parse(localStorage.getItem("node-ui") || "{}")); } catch (_) {}
 const saveUi = () => { try { localStorage.setItem("node-ui", JSON.stringify(ui)); } catch (_) {} };
 
@@ -528,18 +622,18 @@ const B = {};
 const SERIES = ["rate", "rtt", "rttstat", "delta", "marks", "events", "tests"];
 const KEEP = { rate: 3700, rtt: 4000, rttstat: 1000, delta: 4000, marks: 500, events: 300, tests: 200 };
 const tplCard = $("tpl-card"), tplCtl = $("tpl-controls");
+const setWho = (b, name) => b.who.forEach((el) => { el.textContent = name; });
 for (const k of BK) {
   const b = B[k] = { k, data: Object.fromEntries(SERIES.map((s) => [s, []])), snap: null, lastLog: 0, settingsKey: "", spaceV: -1, lastRow: null, history: [], hAt: 0 };
-  const colA = document.createElement("div"); colA.className = "col"; colA.style.setProperty("--me", `var(${SERIES_VAR[k]})`);
+  const colA = document.createElement("div"), colC = document.createElement("div");
+  for (const wrap of [colA, colC]) { wrap.className = "wrap"; wrap.style.setProperty("--me", `var(${SERIES_VAR[k]})`); wrap.style.setProperty("--k", k === "a" ? 0 : 1); $("page").append(wrap); }
   colA.append(tplCard.content.cloneNode(true));
-  $("boards").append(colA);
-  const colC = document.createElement("div"); colC.style.setProperty("--me", `var(${SERIES_VAR[k]})`);
   colC.append(tplCtl.content.cloneNode(true));
-  $("panels").append(colC);
   b.col = colA; b.ctl = colC;
   b.r = (name) => colA.querySelector(`[data-r="${name}"]`) || colC.querySelector(`[data-r="${name}"]`);
   b.q = (sel) => colC.querySelectorAll(sel);
-  b.r("title").textContent = `Node ${k.toUpperCase()}`; b.r("title2").textContent = `Node ${k.toUpperCase()}`;
+  b.who = [...colA.querySelectorAll("[data-who]"), ...colC.querySelectorAll("[data-who]")];
+  setWho(b, `Node ${k.toUpperCase()}`);
   b.term = b.r("term");
   b.col.dataset.app = ""; colC.dataset.app = "";
 }
@@ -569,6 +663,8 @@ function applyTermFilters() {
     for (const f of ["frame", "stat", "info", "ok", "warn", "error", "cmd", "debug", "host"]) b.term.classList.toggle("hide-" + f, !ui["f_" + f]);
     b.col.querySelectorAll("[data-f]").forEach((el) => el.setAttribute("aria-pressed", String(ui["f_" + el.dataset.f])));
     b.r("follow").setAttribute("aria-pressed", String(ui.termfollow[k]));
+    const hidden = [...b.col.querySelectorAll("[data-f]")].filter((el) => !ui["f_" + el.dataset.f]).map((el) => el.textContent);
+    b.r("filt-note").textContent = hidden.length ? `${hidden.join(", ")} hidden` : "all lines shown";
   }
 }
 function addLogs(k, list) {
@@ -840,7 +936,7 @@ function updateBoard(b) {
   const ok = s.status === "connected";
   set("conn", ok ? (s.silent_s !== null && s.silent_s > 5 ? "quiet" : "connected") : s.status === "unassigned" ? "no board" : esc(s.status));
   b.r("port").textContent = ok ? s.port || "" : s.detail || "";
-  if (s.name) { b.r("title").textContent = s.name; b.r("title2").textContent = s.name; }
+  if (s.name) setWho(b, s.name);
   const c = s.counters, have = c.tx !== null;
   set("k-link", s.link_up === null ? "–" : s.link_up ? `${iconOk(good)}UP` : `${iconDown(crit)}DOWN`);
   set("n-link", s.speed ? esc(s.speed) + (s.app === "uart" ? " baud" : "bit/s") : "");
@@ -849,6 +945,7 @@ function updateBoard(b) {
   set("n-tx", rate ? `${rate[1].toFixed(1)} /s` : ""); set("n-rx", rate ? `${rate[2].toFixed(1)} /s` : "");
   set("k-lost", have ? `${fmtInt(c.lost)} · ${fmtInt(c.bad)}` : "–");
   set("n-lost", have ? (c.lost + c.bad > 0 ? iconWarn(warn) + "frames missed" : iconOk(good) + "none missed") : "");
+  b.r("digest").textContent = have ? `${s.link_up === null ? "" : s.link_up ? "link UP · " : "link DOWN · "}${fmtInt(c.tx)} sent · ${fmtInt(c.rx)} received · ${fmtInt(c.lost)} lost` : "";
   const last = b.data.rtt[b.data.rtt.length - 1];
   set("k-rtt", s.rtt_stat ? fmtUs(s.rtt_stat[1] * 1000) : last ? fmtUs(last[1]) : "–");
   set("n-rtt", s.rtt_stat ? `min ${s.rtt_stat[0].toFixed(2)} · max ${s.rtt_stat[2].toFixed(2)} ms` : last ? "last echo" : "peer needs tx on-rx");
@@ -898,7 +995,7 @@ function updateMeters(b) {
   }
   // a burst this node is sending: time-based when it has a rate, a sliding bar when it runs back to back
   const br = s.burst_run;
-  b.r("burst-prog").classList.toggle("idle", !br);
+  b.r("burst-prog").classList.toggle("idle", !br); b.r("burst-badge").classList.toggle("idle", !br);
   if (br) {
     const est = br.rate_hz ? br.count / br.rate_hz : 0, el = Math.max(0, now - br.t);
     b.r("burst-label").textContent = `Burst #${br.id} · ${fmtInt(br.count)} frames ${br.rate_hz ? "at " + br.rate_hz + " Hz" : "back to back"}`;
@@ -907,7 +1004,7 @@ function updateMeters(b) {
   }
   // the traffic generator: its stream's time against the time it was told to last
   const g = s.gen, active = g && (g.state === "running" || g.state === "paused");
-  b.r("gen-prog").classList.toggle("idle", !active);
+  b.r("gen-prog").classList.toggle("idle", !active); b.r("gen-badge").classList.toggle("idle", !active);
   if (active) {
     const st = g.stream, paused = g.state === "paused";
     let dur = st ? st.dur_ms : 0;
@@ -922,6 +1019,7 @@ function updateMeters(b) {
 function updateHeader() {
   const connected = BK.filter((k) => B[k].snap && B[k].snap.status === "connected").length;
   const apps = [...new Set(BK.map((k) => B[k].snap && B[k].snap.app).filter(Boolean))];
+  $("page").dataset.app = apps.includes("eth") ? "eth" : apps[0] || "";
   $("sub").textContent = apps.length === 1 ? (apps[0] === "eth" ? "Ethernet app: two nodes over UDP" : "UART app: two nodes over a serial link") : "the two boards of the Ethernet and UART apps, as in the serial terminal";
   const color = connected === 2 ? css("--good") : connected ? css("--warning") : css("--text-muted");
   $("status").innerHTML = (connected === 2 ? iconOk(color) : iconWarn(color)) + `<span>${connected} of 2 boards connected</span>`;
@@ -950,7 +1048,9 @@ function xRange() {
   const now = Date.now();
   return [now - ui.span * 1000, now + ui.span * 20];
 }
+const shown = (el) => !el.closest("details:not([open])");   // a folded block keeps its layout, so offsetParent can't tell
 function plot(id, traces, layout) {
+  if (!shown($(id))) return;   // folded: drawn again when it is opened
   if (following) layout.xaxis.range = xRange();
   layout.uirevision = `${theme}|${ui.span}|${ui.logrtt}|${following}`;
   Plotly.react(id, traces, layout, plotCfg);
@@ -1022,7 +1122,7 @@ function drawTests() {
     : '<tbody><tr><td class="empty">No burst or generator run yet.</td></tr></tbody>';
   const recent = all.slice(0, 12).reverse();
   const L = baseLayout("kB/s"); L.hovermode = "closest"; L.showlegend = false; L.xaxis = { ...L.xaxis, type: "category", showspikes: false }; L.margin.b = 30; L.yaxis.rangemode = "tozero";
-  Plotly.react("p-tests", [{
+  if (shown($("p-tests"))) Plotly.react("p-tests", [{
     type: "bar", x: recent.map((t) => `${t.node.toUpperCase()} ${t.kind} #${t.id} ${t.dir}`), y: recent.map((t) => (t.bps || 0) / 1000),
     marker: { color: recent.map((t) => css(SERIES_VAR[t.node])), line: { color: css("--surface-1"), width: 2 } }, hovertemplate: "%{x}<br>%{y:.1f} kB/s<extra></extra>",
   }], L, plotCfg);
@@ -1077,10 +1177,205 @@ function tick() {
   try {
     if (frame && frame !== drawn) { drawn = frame; for (const k of BK) if (B[k].snap) updateBoard(B[k]); updateHeader(); }
     const now = performance.now();
-    if (frame && (plotsDirty || (following && now - lastPlot > 1500)) && now - lastPlot > 500) { lastPlot = now; plotsDirty = false; drawPlots(); drawTests(); }
+    if (frame && !dragging && (plotsDirty || (following && now - lastPlot > 1500)) && now - lastPlot > 500) { lastPlot = now; plotsDirty = false; drawPlots(); drawTests(); }
   } catch (e) { console.error(e); document.title = "Node dashboard: " + e.message; }
   requestAnimationFrame(tick);
 }
+// ---- layout: the blocks in the order a person uses them, and folding ------------------------------------
+const LAYOUT = [
+  { id: "boards", title: "Boards", note: "what each board is doing, and its console", blocks: ["status", "console"] },
+  { id: "control", title: "Control", note: "every control types the CLI command shown in the console", blocks: ["node", "rgb", "leds", "timing", "link"] },
+  { id: "measure", title: "Measure", note: "start a test, watch the traffic, read the results", blocks: ["burst", "generator", "charts", "results"] },
+  { id: "diagnose", title: "Diagnose", note: "Ethernet app: what crosses the cable", blocks: ["trace", "dash"], only: "eth" },
+  { id: "configure", title: "Configure", note: "the settings, the peer's config, its address space", blocks: ["settings", "peer", "space"] },
+];
+const DEFAULT_ORDER = LAYOUT.flatMap((band) => ["band-" + band.id, ...band.blocks]);
+for (const band of LAYOUT) {
+  const el = document.createElement("div");
+  el.className = "band"; el.id = "band-" + band.id; el.dataset.block = "band-" + band.id;
+  if (band.only) el.dataset.only = band.only;
+  el.innerHTML = `<h2>${band.title}</h2><span class="note">${band.note}</span><button data-band="${band.id}" data-open="0" title="Fold the blocks of ${band.title}">Fold</button><button data-band="${band.id}" data-open="1" title="Unfold the blocks of ${band.title}">Unfold</button>`;
+  $("page").append(el);
+}
+$("jump").innerHTML = LAYOUT.map((band) => `<a href="#band-${band.id}"${band.only ? ` data-only="${band.only}"` : ""}>${band.title}</a>`).join("");
+
+// The order of the blocks: the default, or the one you made by dragging (kept with the other view settings).
+// A saved id that no longer exists is dropped, a new one goes where the default puts it.
+function mergeOrder(saved) {
+  const order = (Array.isArray(saved) ? saved : []).filter((id, i, all) => DEFAULT_ORDER.includes(id) && all.indexOf(id) === i);
+  DEFAULT_ORDER.forEach((id, i) => { if (!order.includes(id)) order.splice(Math.min(i, order.length), 0, id); });
+  return order;
+}
+let order = mergeOrder(ui.order);
+function applyOrder() {
+  let band = "";
+  order.forEach((id, row) => document.querySelectorAll(`[data-block="${id}"]`).forEach((el) => {
+    el.style.setProperty("--row", row + 1);
+    if (id.startsWith("band-")) band = id.slice(5); else el.dataset.band = band;
+  }));
+}
+applyOrder();
+
+// Drag by the grip only: a chart's own mouse drag is its zoom. Dropping on the upper half of a block puts the
+// dragged one before it, on the lower half after it, on a band title at the start of that band.
+let dragId = null, dragging = false, dropAt = null;
+const blocksOf = (id) => document.querySelectorAll(`[data-block="${id}"]`);
+function markDrop(at) {
+  if (dropAt && at && dropAt.id === at.id && dropAt.after === at.after) return;
+  document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+  dropAt = at;
+  if (at) blocksOf(at.id).forEach((el) => el.classList.add(at.after ? "drop-after" : "drop-before"));
+}
+function endDrag() {
+  markDrop(null);
+  document.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+  dragId = null; dragging = false; plotsDirty = true; testsKey = null;
+  requestAnimationFrame(resizePlots);
+}
+for (const blk of document.querySelectorAll("[data-block]:not(.band)")) {
+  const grip = document.createElement("span");
+  grip.className = "grip"; grip.draggable = true; grip.textContent = "⠿"; grip.title = "Drag to move this block (both boards)";
+  grip.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); });
+  grip.addEventListener("dragstart", (e) => {
+    dragId = blk.dataset.block; dragging = true;
+    e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragId); e.dataTransfer.setDragImage(blk, 24, 18);
+    requestAnimationFrame(() => blocksOf(dragId).forEach((el) => el.classList.add("dragging")));   // after the browser took its picture
+  });
+  grip.addEventListener("dragend", endDrag);
+  blk.querySelector(":scope > summary").prepend(grip);
+}
+$("page").addEventListener("dragover", (e) => {
+  if (!dragId) return;
+  const target = e.target.closest("[data-block]");
+  if (!target || target.dataset.block === dragId) { markDrop(null); return; }
+  e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  const rect = target.getBoundingClientRect();
+  markDrop({ id: target.dataset.block, after: target.classList.contains("band") || e.clientY > rect.top + rect.height / 2 });
+});
+$("page").addEventListener("drop", (e) => {
+  if (!dragId || !dropAt) return;
+  e.preventDefault();
+  const next = order.filter((id) => id !== dragId);
+  next.splice(next.indexOf(dropAt.id) + (dropAt.after ? 1 : 0), 0, dragId);
+  order = next; ui.order = order; saveUi(); applyOrder();
+});
+
+// ---- sizes: drag the bar under the charts or under the test chart for their height, the console's own corner for
+// the terminals' (both boards follow), and the bar between the two columns for their widths ------------------------
+const SIZE_MIN = 120, SIZE_MAX = 1600;
+const sizers = {};   // key -> { set(px, keep) }
+function addSizer(key, name, host, get, put) {
+  const bar = document.createElement("div");
+  bar.className = "sizer"; bar.tabIndex = 0;
+  bar.setAttribute("role", "separator"); bar.setAttribute("aria-orientation", "horizontal");
+  bar.setAttribute("aria-label", `${name} height: drag, or press the up and down arrows (shift for bigger steps, Home for the default)`);
+  bar.title = `Drag to resize ${name.toLowerCase()} · double-click for the default size`;
+  host.after(bar);
+  const set = (px, keep) => {
+    if (!px) delete ui.sizes[key]; else ui.sizes[key] = Math.min(SIZE_MAX, Math.max(SIZE_MIN, Math.round(px)));
+    put(ui.sizes[key] || 0);
+    bar.setAttribute("aria-valuenow", String(Math.round(get())));
+    plotsDirty = true; requestAnimationFrame(resizePlots);
+    if (keep) saveUi();
+  };
+  let start = null;
+  bar.addEventListener("pointerdown", (e) => { if (e.button > 0) return; start = { y: e.clientY, h: get() }; bar.setPointerCapture(e.pointerId); bar.classList.add("drag"); e.preventDefault(); });
+  bar.addEventListener("pointermove", (e) => { if (start) set(start.h + e.clientY - start.y, false); });
+  const end = () => { if (start) { start = null; bar.classList.remove("drag"); saveUi(); } };
+  bar.addEventListener("pointerup", end); bar.addEventListener("pointercancel", end);
+  bar.addEventListener("dblclick", () => set(0, true));
+  bar.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 96 : 24;
+    if (e.key === "ArrowDown") set(get() + step, true);
+    else if (e.key === "ArrowUp") set(get() - step, true);
+    else if (e.key === "Home") set(0, true);
+    else return;
+    e.preventDefault();
+  });
+  sizers[key] = { set };
+  if (ui.sizes[key]) put(ui.sizes[key]);
+}
+const root = document.documentElement;
+addSizer("charts", "the charts", document.querySelector("#chartcard .plots"), () => $("p-rate").offsetHeight,
+         (px) => (px ? root.style.setProperty("--charts-h", px + "px") : root.style.removeProperty("--charts-h")));
+addSizer("tests", "the runs chart", $("p-tests"), () => $("p-tests").offsetHeight, (px) => { $("p-tests").style.height = (px || 220) + "px"; });
+// The terminals have the browser's own corner; whatever it set on one is taken for all (both boards, kept).
+function applyTermHeight() {
+  if (ui.sizes.term) root.style.setProperty("--term-h", ui.sizes.term + "px"); else root.style.removeProperty("--term-h");
+}
+function shareTermHeight() {
+  setTimeout(() => {
+    for (const t of document.querySelectorAll(".term")) {
+      if (!t.style.height) continue;
+      const h = Math.round(parseFloat(t.style.height)); t.style.height = "";
+      if (h && shown(t) && Math.abs(h - (ui.sizes.term || 340)) > 2) { ui.sizes.term = Math.min(SIZE_MAX, Math.max(SIZE_MIN, h)); applyTermHeight(); saveUi(); }
+    }
+  }, 0);
+}
+document.addEventListener("pointerup", shareTermHeight); document.addEventListener("mouseup", shareTermHeight);
+applyTermHeight();
+// The two boards' columns: `ui.split` is the share of the width node A takes (0: half and half).
+const page = $("page"), GAP = 16, vbar = document.createElement("div");
+vbar.className = "vsplit"; vbar.tabIndex = 0;
+vbar.setAttribute("role", "separator"); vbar.setAttribute("aria-orientation", "vertical");
+vbar.setAttribute("aria-label", "Width of node A's column and node B's: drag, or press the left and right arrows (Home for the default)");
+vbar.title = "Drag to change the widths of node A and node B · double-click for half and half";
+page.append(vbar);
+const columnsOn = () => !matchMedia("(max-width: 1000px)").matches && page.clientWidth > 0;
+function layoutColumns() {
+  if (!columnsOn()) { page.style.gridTemplateColumns = ""; vbar.style.display = "none"; return; }
+  const s = ui.split || 0.5;
+  page.style.gridTemplateColumns = ui.split ? `minmax(0, ${s}fr) minmax(0, ${1 - s}fr)` : "";
+  vbar.style.display = ""; vbar.style.left = (page.clientWidth - GAP) * s + GAP / 2 + "px";
+  vbar.setAttribute("aria-valuenow", String(Math.round(s * 100)));
+}
+function setSplit(s, keep) {
+  ui.split = s ? Math.min(0.8, Math.max(0.2, s)) : 0;
+  layoutColumns(); plotsDirty = true; testsKey = null; requestAnimationFrame(resizePlots);
+  if (keep) saveUi();
+}
+let splitDrag = false;
+vbar.addEventListener("pointerdown", (e) => { if (e.button > 0) return; splitDrag = true; vbar.setPointerCapture(e.pointerId); vbar.classList.add("drag"); e.preventDefault(); });
+vbar.addEventListener("pointermove", (e) => { if (splitDrag) setSplit((e.clientX - page.getBoundingClientRect().left - GAP / 2) / (page.clientWidth - GAP), false); });
+const endSplit = () => { if (splitDrag) { splitDrag = false; vbar.classList.remove("drag"); saveUi(); } };
+vbar.addEventListener("pointerup", endSplit); vbar.addEventListener("pointercancel", endSplit);
+vbar.addEventListener("dblclick", () => setSplit(0, true));
+vbar.addEventListener("keydown", (e) => {
+  const s = ui.split || 0.5;
+  if (e.key === "ArrowLeft") setSplit(s - 0.02, true);
+  else if (e.key === "ArrowRight") setSplit(s + 0.02, true);
+  else if (e.key === "Home") setSplit(0, true);
+  else return;
+  e.preventDefault();
+});
+new ResizeObserver(layoutColumns).observe(page);
+layoutColumns();
+$("resetlayout").onclick = () => {
+  order = [...DEFAULT_ORDER]; ui.order = []; applyOrder();
+  for (const k of Object.keys(sizers)) sizers[k].set(0, false);
+  ui.sizes = {}; applyTermHeight(); ui.split = 0; layoutColumns();
+  saveUi(); plotsDirty = true; testsKey = null; requestAnimationFrame(resizePlots);
+};
+const setFolds = (selector, open) => document.querySelectorAll(selector).forEach((d) => { if (d.open !== open) d.open = open; });
+document.querySelectorAll("details[data-fold]").forEach((d) => { const kept = ui.folds[d.dataset.fold]; if (kept !== undefined) d.open = kept; });
+// `toggle` doesn't bubble: listen while it goes down. A block with the same name on the other board follows.
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!(d instanceof HTMLDetailsElement) || !d.dataset.fold) return;
+  ui.folds[d.dataset.fold] = d.open; saveUi();
+  setFolds(`details[data-fold="${d.dataset.fold}"]`, d.open);
+  if (d.open) { plotsDirty = true; testsKey = null; requestAnimationFrame(resizePlots); }
+}, true);
+function resizePlots() {
+  for (const id of ["p-rate", "p-rtt", "p-delta", "p-marks", "p-tests"]) if (shown($(id))) { try { Plotly.Plots.resize($(id)); } catch (_) {} }
+}
+document.addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-band]");
+  if (button) setFolds(`details.block[data-band="${button.dataset.band}"]`, button.dataset.open === "1");
+});
+$("foldall").onclick = () => setFolds("details[data-fold]", false);
+$("unfoldall").onclick = () => setFolds("details[data-fold]", true);
+
 applyTheme(); applyTermFilters(); connect(); requestAnimationFrame(tick);
 </script>
 </body>

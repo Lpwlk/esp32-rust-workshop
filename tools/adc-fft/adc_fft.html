@@ -152,6 +152,13 @@
   select:focus, input:focus { border-color: var(--accent); }
 
   /* A card, with its controls in a toolbar right under its title: each control sits with the plot it changes. */
+  /* dragging a card by its grip: the line shows where it lands */
+  .grip { cursor: grab; color: var(--text-muted); padding: 0 3px 0 0; font-size: 14px; line-height: 1; user-select: none; }
+  .grip:hover { color: var(--text-primary); }
+  .grip:active { cursor: grabbing; }
+  main > .dragging { opacity: .4; }
+  main > .drop-before { box-shadow: 0 -4px 0 0 var(--accent); }
+  main > .drop-after { box-shadow: 0 4px 0 0 var(--accent); }
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; min-width: 0; }
   .card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .card-head h2 { margin: 0; font-size: 13px; font-weight: 650; }
@@ -196,11 +203,16 @@
   #spec { height: clamp(340px, 36vh, 640px); }
   #scope { height: clamp(230px, 27vh, 440px); }
   #water { height: clamp(240px, 30vh, 460px); }
-  /* The grip under a plot you can resize: drag it, or use the arrow keys when it has the focus. */
-  .grip { height: 14px; margin-top: 2px; display: flex; align-items: center; justify-content: center; cursor: ns-resize;
+  /* The bar under a plot you can resize: drag it, or use the arrow keys when it has the focus. */
+  .sizer { height: 14px; margin-top: 2px; display: flex; align-items: center; justify-content: center; cursor: ns-resize;
     touch-action: none; user-select: none; border-radius: 7px; outline-offset: -2px; }
-  .grip::before { content: ""; width: 56px; height: 4px; border-radius: 2px; background: var(--grid); transition: background 0.12s, width 0.12s; }
-  .grip:hover::before, .grip:focus-visible::before, .grip.drag::before { background: var(--accent); width: 80px; }
+  .sizer::before { content: ""; width: 56px; height: 4px; border-radius: 2px; background: var(--grid); transition: background 0.12s, width 0.12s; }
+  .sizer:hover::before, .sizer:focus-visible::before, .sizer.drag::before { background: var(--accent); width: 80px; }
+  /* The bar between two columns: drag it to change their widths. */
+  .vsplit { position: absolute; top: 0; bottom: 0; width: 16px; margin-left: -8px; display: flex; align-items: center; justify-content: center;
+    cursor: col-resize; touch-action: none; user-select: none; z-index: 2; outline-offset: -2px; }
+  .vsplit::before { content: ""; width: 4px; height: 56px; max-height: 40%; border-radius: 2px; background: var(--grid); transition: background 0.12s, height 0.12s; }
+  .vsplit:hover::before, .vsplit:focus-visible::before, .vsplit.drag::before { background: var(--accent); height: 90px; }
   .stack { display: grid; gap: 12px; align-content: start; min-width: 0; }
   #hist { height: clamp(180px, 23vh, 300px); }
   input[type="color"] { width: 28px; height: 26px; padding: 2px; border: 1px solid var(--border); border-radius: 8px;
@@ -391,7 +403,7 @@
         <span class="readout listen-info" id="ainfo" aria-live="polite"></span>
       </div></div>
     <div class="group"><span class="lab">Settings</span>
-      <div class="row"><button id="resetall" title="Your settings are kept between runs">Reset all</button></div></div>
+      <div class="row"><button id="resetall" title="Your settings are kept between runs">Reset all</button><button id="resetlayout" title="Put the cards back in their default order, and the plots and columns at their default size">Reset layout</button></div></div>
     <div class="group"><span class="lab">Export</span>
       <div class="row">
         <a class="btn" href="/api/snapshot.csv?kind=spectrum" download="adc-spectrum.csv">Spectrum CSV</a>
@@ -400,7 +412,7 @@
     </div>
   </section>
 
-  <section aria-label="Measurements">
+  <section id="c-meas" aria-label="Measurements">
   <div class="sect"><h2>Measurements</h2><p class="hint">Live numbers from the spectrum and the samples.</p></div>
   <div class="tiles">
     <div class="card tile"><div class="label">Peak frequency</div><div class="value num" id="k-pf">–</div><div class="note" id="n-pf"></div></div>
@@ -763,9 +775,6 @@
         <div class="row"><button id="showwater" aria-pressed="true">Show</button></div></div>
     </div>
     <div id="water" class="plot"></div>
-    <div class="grip" id="water-grip" role="separator" aria-orientation="horizontal" tabindex="0" aria-valuemin="160" aria-valuemax="1600"
-         aria-label="Waterfall height: drag, or press the up and down arrows (shift for bigger steps, Home for the default)"
-         title="Drag to resize the waterfall · double-click for the default size"></div>
   </section>
 
   <section class="card" id="logcard">
@@ -825,8 +834,8 @@ const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, w
              harm: "off", labels: 1, view: "all", sstyle: "line", swidth: "auto", wstyle: "line", wwidth: "auto",
              cmap: "theme", cmrev: false, col: {}, palette: "default", wunit: "codes", mvcode: 0.7, keepdc: false,
              wrange: 0, amargin: 5, adamp: 1, wx: false, wsrc: "filtered", f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
-             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, waterh: 0, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
-             avol: 70, amute: false, aauto: false, afilt: false, fold: {} };
+             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, size: {}, split: 0, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
+             avol: 70, amute: false, aauto: false, afilt: false, fold: {}, order: [] };
 // Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
 function adopt(saved) {
   if (!saved || typeof saved !== "object") return;
@@ -1064,48 +1073,91 @@ function resizePlots() {  // a plot that is not on screen can't be resized: that
     try { Promise.resolve(Plotly.Plots.resize($(id))).catch(() => {}); } catch (_) {}
   }
 }
-// A plot the user can make taller or shorter: `ui.waterh` is its height in pixels (0: the default, which depends
-// on the view and the window). The size is kept with the other settings.
-const GRIP_MIN = 160, GRIP_MAX = 1600;
-function applyWaterHeight() {
-  $("water").style.height = ui.waterh ? ui.waterh + "px" : "";
-  $("water-grip").setAttribute("aria-valuenow", String(Math.round($("water").offsetHeight)));
+// The plots the user can make taller or shorter: `ui.size[id]` is the height in pixels (missing: the default, which
+// depends on the view and the window). The sizes are kept with the other settings.
+const SIZER_MIN = 140, SIZER_MAX = 1600;
+let splitRow = null;  // the bar between the waveform and its side cards, set up below
+function plotHeight(id, px, keep) {
+  if (!px) delete ui.size[id]; else ui.size[id] = Math.min(SIZER_MAX, Math.max(SIZER_MIN, Math.round(px)));
+  $(id).style.height = ui.size[id] ? ui.size[id] + "px" : "";
+  const bar = $(id + "-sizer");
+  if (bar) bar.setAttribute("aria-valuenow", String(Math.round($(id).offsetHeight)));
   requestAnimationFrame(resizePlots);
-}
-function setWaterHeight(px, keep) {
-  ui.waterh = px ? Math.min(GRIP_MAX, Math.max(GRIP_MIN, Math.round(px))) : 0;
-  applyWaterHeight();
   if (keep) saveUi();
 }
-(function () {
-  const grip = $("water-grip");
+function addSizer(id, name) {
+  const bar = document.createElement("div");
+  bar.className = "sizer"; bar.id = id + "-sizer"; bar.tabIndex = 0;
+  bar.setAttribute("role", "separator"); bar.setAttribute("aria-orientation", "horizontal");
+  bar.setAttribute("aria-valuemin", SIZER_MIN); bar.setAttribute("aria-valuemax", SIZER_MAX);
+  bar.setAttribute("aria-label", `${name} height: drag, or press the up and down arrows (shift for bigger steps, Home for the default)`);
+  bar.title = `Drag to resize the ${name.toLowerCase()} · double-click for the default size`;
+  $(id).after(bar);
   let start = null;
-  grip.addEventListener("pointerdown", (e) => {
+  bar.addEventListener("pointerdown", (e) => {
     if (e.button > 0) return;
-    start = { y: e.clientY, h: $("water").offsetHeight };
-    grip.setPointerCapture(e.pointerId);
-    grip.classList.add("drag");
-    e.preventDefault();
+    start = { y: e.clientY, h: $(id).offsetHeight };
+    bar.setPointerCapture(e.pointerId); bar.classList.add("drag"); e.preventDefault();
   });
-  grip.addEventListener("pointermove", (e) => { if (start) setWaterHeight(start.h + e.clientY - start.y, false); });
-  const end = () => {
-    if (!start) return;
-    start = null;
-    grip.classList.remove("drag");
-    saveUi();
-  };
-  grip.addEventListener("pointerup", end);
-  grip.addEventListener("pointercancel", end);
-  grip.addEventListener("dblclick", () => setWaterHeight(0, true));
-  grip.addEventListener("keydown", (e) => {
-    const step = e.shiftKey ? 96 : 24, h = $("water").offsetHeight;
-    if (e.key === "ArrowDown") setWaterHeight(h + step, true);
-    else if (e.key === "ArrowUp") setWaterHeight(h - step, true);
-    else if (e.key === "Home") setWaterHeight(0, true);
+  bar.addEventListener("pointermove", (e) => { if (start) plotHeight(id, start.h + e.clientY - start.y, false); });
+  const end = () => { if (start) { start = null; bar.classList.remove("drag"); saveUi(); } };
+  bar.addEventListener("pointerup", end);
+  bar.addEventListener("pointercancel", end);
+  bar.addEventListener("dblclick", () => plotHeight(id, 0, true));
+  bar.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 96 : 24, h = $(id).offsetHeight;
+    if (e.key === "ArrowDown") plotHeight(id, h + step, true);
+    else if (e.key === "ArrowUp") plotHeight(id, h - step, true);
+    else if (e.key === "Home") plotHeight(id, 0, true);
     else return;
     e.preventDefault();
   });
-})();
+  if (ui.size[id]) plotHeight(id, ui.size[id], false);
+}
+// The waveform and the cards beside it (strongest lines, histogram): the bar between them moves their border.
+// `ui.split` is the share of the width the waveform takes (0: the default two thirds).
+{
+  const row = $("c-cols"), GAP = 12, bar = document.createElement("div");
+  bar.className = "vsplit"; bar.tabIndex = 0;
+  bar.setAttribute("role", "separator"); bar.setAttribute("aria-orientation", "vertical");
+  bar.setAttribute("aria-label", "Width of the waveform and the cards beside it: drag, or press the left and right arrows (Home for the default)");
+  bar.title = "Drag to change the widths · double-click for the default";
+  row.style.position = "relative"; row.append(bar);
+  const wide = () => !row.classList.contains("single") && !matchMedia("(max-width: 860px)").matches && row.clientWidth > 0;
+  function layout() {
+    if (!wide()) { row.style.gridTemplateColumns = ""; bar.style.display = "none"; return; }
+    const s = ui.split || 2 / 3;
+    row.style.gridTemplateColumns = ui.split ? `minmax(0, ${s}fr) minmax(0, ${1 - s}fr)` : "";
+    bar.style.display = ""; bar.style.left = (row.clientWidth - GAP) * s + GAP / 2 + "px";
+    bar.setAttribute("aria-valuenow", String(Math.round(s * 100)));
+  }
+  const set = (s, keep) => {
+    ui.split = s ? Math.min(0.8, Math.max(0.2, s)) : 0;
+    layout(); requestAnimationFrame(resizePlots);
+    if (keep) saveUi();
+  };
+  let dragging = false;
+  bar.addEventListener("pointerdown", (e) => { if (e.button > 0) return; dragging = true; bar.setPointerCapture(e.pointerId); bar.classList.add("drag"); e.preventDefault(); });
+  bar.addEventListener("pointermove", (e) => {
+    if (dragging) set((e.clientX - row.getBoundingClientRect().left - GAP / 2) / (row.clientWidth - GAP), false);
+  });
+  const end = () => { if (dragging) { dragging = false; bar.classList.remove("drag"); saveUi(); } };
+  bar.addEventListener("pointerup", end); bar.addEventListener("pointercancel", end);
+  bar.addEventListener("dblclick", () => set(0, true));
+  bar.addEventListener("keydown", (e) => {
+    const s = ui.split || 2 / 3;
+    if (e.key === "ArrowLeft") set(s - 0.02, true);
+    else if (e.key === "ArrowRight") set(s + 0.02, true);
+    else if (e.key === "Home") set(0, true);
+    else return;
+    e.preventDefault();
+  });
+  new ResizeObserver(layout).observe(row);
+  new MutationObserver(layout).observe(row, { attributes: true, attributeFilter: ["class"] });
+  layout();
+  splitRow = { reset() { ui.split = 0; layout(); } };
+}
+for (const [id, name] of [["spec", "Spectrum"], ["scope", "Waveform"], ["hist", "Code histogram"], ["harms", "Harmonics"], ["water", "Waterfall"]]) addSizer(id, name);
 function applyView() {
   if (!VIEWS[ui.view]) ui.view = "all";
   const on = VIEWS[ui.view], hide = (id, off) => $(id).classList.toggle("hidden", off);
@@ -2165,7 +2217,6 @@ function makeFoldable(el, key, after) {
 }
 if (!ui.fold || typeof ui.fold !== "object") ui.fold = {};
 for (const id of ["c-acq", "c-filter", "c-gen", "c-pwm", "c-pot", "c-spec", "c-scope", "c-lines", "c-hist", "c-harms", "watercard", "logcard"]) makeFoldable($(id), id);
-applyWaterHeight();
 for (const tile of document.querySelectorAll(".tile")) makeFoldable(tile, "tile-" + tile.querySelector(".label").textContent.trim().toLowerCase().replace(/[^a-z]+/g, "-"));
 // The Measurements title folds or unfolds all the tiles at once (each one is still its own).
 {
@@ -2421,14 +2472,75 @@ function connect() {
   es.addEventListener("log", (e) => addLogs(JSON.parse(e.data)));
   es.onerror = () => { $("status").innerHTML = "<span>Server not reachable, retrying…</span>"; };
 }
+let dragging = false;   // a card is in the air: no redraw until it lands
 function tick() {
   requestAnimationFrame(tick);  // first: an error in one frame must never stop the next ones
-  if (frame && frame !== drawn) {
+  if (frame && frame !== drawn && !dragging) {
     const force = drawn === null;
     drawn = frame;
     try { render(frame, force); } catch (e) { console.error("render:", e); }
   }
 }
+// ---- order: drag a card by its grip to move it; kept with the other view settings ---------------------------
+// Only the grip drags (a chart's own mouse drag is its zoom). Dropping on the upper half of a card puts the dragged
+// one before it, on the lower half after it. The waveform, the strongest lines and the histogram move as one row.
+{
+  const main = document.querySelector("main");
+  const blocks = () => [...main.children].filter((el) => el.id);
+  const defaults = blocks().map((el) => el.id);
+  const order = (Array.isArray(ui.order) ? ui.order : []).filter((id, i, all) => defaults.includes(id) && all.indexOf(id) === i);
+  defaults.forEach((id, i) => { if (!order.includes(id)) order.splice(Math.min(i, order.length), 0, id); });
+  const place = (ids) => ids.forEach((id) => main.append($(id)));
+  place(order);
+  let dragEl = null, dropAt = null;
+  const mark = (el, after) => {
+    if (dropAt && dropAt.el === el && dropAt.after === after) return;
+    main.querySelectorAll(":scope > .drop-before, :scope > .drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
+    dropAt = el ? { el, after } : null;
+    if (el) el.classList.add(after ? "drop-after" : "drop-before");
+  };
+  const endDrag = () => {
+    mark(null, false);
+    if (dragEl) dragEl.classList.remove("dragging");
+    dragEl = null; dragging = false; drawn = null;
+    requestAnimationFrame(resizePlots);
+  };
+  for (const el of blocks()) {
+    const head = el.querySelector(":scope > .card-head, :scope > .sect, :scope > summary") || el.querySelector(".card-head");
+    if (!head) continue;
+    const grip = document.createElement("span");
+    grip.className = "grip"; grip.draggable = true; grip.textContent = "⠿"; grip.title = "Drag to move this card";
+    grip.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); });
+    grip.addEventListener("dragstart", (e) => {
+      dragEl = el; dragging = true;
+      e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", el.id); e.dataTransfer.setDragImage(el, 24, 18);
+      requestAnimationFrame(() => el.classList.add("dragging"));   // after the browser took its picture
+    });
+    grip.addEventListener("dragend", endDrag);
+    head.prepend(grip);
+  }
+  main.addEventListener("dragover", (e) => {
+    if (!dragEl) return;
+    const target = e.target.closest("main > *");
+    if (!target || target === dragEl || !defaults.includes(target.id)) { mark(null, false); return; }
+    e.preventDefault(); e.dataTransfer.dropEffect = "move";
+    const rect = target.getBoundingClientRect();
+    mark(target, e.clientY > rect.top + rect.height / 2);
+  });
+  main.addEventListener("drop", (e) => {
+    if (!dragEl || !dropAt) return;
+    e.preventDefault();
+    main.insertBefore(dragEl, dropAt.after ? dropAt.el.nextSibling : dropAt.el);
+    ui.order = blocks().map((x) => x.id); saveUi();
+  });
+  $("resetlayout").onclick = () => {
+    place(defaults); ui.order = [];
+    for (const id of Object.keys(ui.size)) plotHeight(id, 0, false);
+    if (splitRow) splitRow.reset();
+    saveUi(); drawn = null; requestAnimationFrame(resizePlots);
+  };
+}
+
 applyTheme();
 $("c-status").open = ui.statusOpen;
 $("c-status").addEventListener("toggle", () => { ui.statusOpen = $("c-status").open; saveUi(); });

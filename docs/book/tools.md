@@ -70,6 +70,22 @@ Wireshark. `python3 tools/wireshark/make_samples.py` writes two sample captures 
 `python3 tools/wireshark/check.py` runs `tshark` on them and fails when the Lua tables no longer match the Rust
 sources (a node, a setting, a status, the ADC header). Details: `tools/wireshark/README.md`.
 
+### Arranging the two dashboards
+
+The ADC page (`dev.py fft`) and the node dashboard (`dev.py dash`) are laid out the same way, and **the page keeps your
+arrangement** (with the other view settings: the browser for the node dashboard, the settings file for the ADC page):
+
+| What | How |
+| --- | --- |
+| **Move a card** | drag it by the grip (⠿) at the left of its title and drop it on the upper half of another card (before it) or the lower half (after it). On the node dashboard a block moves **with its twin**: node A's and node B's stay side by side |
+| **Fold a card** | click its title or its chevron |
+| **Resize a plot** | drag the bar under it, or focus the bar and press ↑ / ↓ (Shift for bigger steps); double-click or Home gives the default height. ADC page: the spectrum, waveform, histogram, harmonics and waterfall; node dashboard: the four traffic charts (they share a height), the runs chart, and the consoles (the browser's corner, both boards follow) |
+| **Resize the columns** | drag the vertical bar between them (← / → on the keyboard, double-click or Home for the default): the waveform and the cards beside it on the ADC page, node A and node B on the node dashboard |
+| **Start over** | *Reset layout* in the header: the default order, heights and widths (folds stay) |
+
+A plot is redrawn at its new size while you drag. The bars work with a finger or a pen too, and below 1000 px (860 on the ADC
+page) the columns stack, so the vertical bar goes away.
+
 ## Workflows
 
 Every command below is written `dev.py …` for short. The command always comes first and its options after it, `--app`

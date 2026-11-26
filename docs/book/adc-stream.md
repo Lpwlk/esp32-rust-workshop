@@ -96,7 +96,7 @@ dark or auto (follows your system).
 | **Spectrum** | dB or linear, log or linear frequency, peak hold, a reference trace, A/B cursors, harmonic markers (strongest line, 50 or 60 Hz mains), autoscale |
 | **Waveform** | the last milliseconds of samples, with an oscilloscope-style **trigger** (edge, tone or pattern lock; slope, level, position; auto or normal), averaging, min/max envelope with a sliding window, mains hum removal, units in codes, % or mV |
 | **Strongest lines**, **Code histogram** | the peaks of the spectrum, and how the raw ADC codes are distributed (clipping, stuck bits) |
-| **Waterfall** | the spectrum over time, with a colour scale per theme. **Resizable**: drag the grip under it (mouse, finger or pen), or focus it and press ↑ / ↓ (Shift for bigger steps); double-click or Home gives the default size back. The height is kept with your other settings |
+| **Waterfall** | the spectrum over time, with a colour scale per theme. Like the other plots it is **resizable** ([how](tools.md#arranging-the-two-dashboards)) |
 | **Board log** | what the board prints, filterable, and a prompt for its [commands](#board-commands) |
 
 ### Fold what you don't need
@@ -104,6 +104,10 @@ dark or auto (follows your system).
 Every card folds to its title: click the chevron or the title (the *Status* box already did). In *Measurements* each
 tile folds **on its own**, and the title folds or unfolds them all. What is folded is kept with the other view settings, and a plot
 is redrawn at its size when you unfold it.
+
+You can also **move** the cards (drag the grip at the left of a title), **resize** the plots (the bar under each) and
+the waveform's width (the bar between it and the cards beside it); *Reset layout* undoes it. All of it is kept, see
+[Arranging the two dashboards](tools.md#arranging-the-two-dashboards).
 
 ### Listen to the signal
 
