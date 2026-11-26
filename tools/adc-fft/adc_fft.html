@@ -152,6 +152,13 @@
   select:focus, input:focus { border-color: var(--accent); }
 
   /* A card, with its controls in a toolbar right under its title: each control sits with the plot it changes. */
+  /* dragging a card by its grip: the line shows where it lands */
+  .grip { cursor: grab; color: var(--text-muted); padding: 0 3px 0 0; font-size: 14px; line-height: 1; user-select: none; }
+  .grip:hover { color: var(--text-primary); }
+  .grip:active { cursor: grabbing; }
+  main > .dragging { opacity: .4; }
+  main > .drop-before { box-shadow: 0 -4px 0 0 var(--accent); }
+  main > .drop-after { box-shadow: 0 4px 0 0 var(--accent); }
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; min-width: 0; }
   .card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .card-head h2 { margin: 0; font-size: 13px; font-weight: 650; }
@@ -372,7 +379,7 @@
         <span class="readout listen-info" id="ainfo" aria-live="polite"></span>
       </div></div>
     <div class="group"><span class="lab">Settings</span>
-      <div class="row"><button id="resetall" title="Your settings are kept between runs">Reset all</button></div></div>
+      <div class="row"><button id="resetall" title="Your settings are kept between runs">Reset all</button><button id="resetlayout" title="Put the cards back in their default order">Reset layout</button></div></div>
     <div class="group"><span class="lab">Export</span>
       <div class="row">
         <a class="btn" href="/api/snapshot.csv?kind=spectrum" download="adc-spectrum.csv">Spectrum CSV</a>
@@ -381,7 +388,7 @@
     </div>
   </section>
 
-  <section aria-label="Measurements">
+  <section id="c-meas" aria-label="Measurements">
   <div class="sect"><h2>Measurements</h2><p class="hint">Live numbers from the spectrum and the samples.</p></div>
   <div class="tiles">
     <div class="card tile"><div class="label">Peak frequency</div><div class="value num" id="k-pf">–</div><div class="note" id="n-pf"></div></div>
@@ -785,7 +792,7 @@ const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, w
              cmap: "theme", cmrev: false, col: {}, palette: "default", wunit: "codes", mvcode: 0.7, keepdc: false,
              wrange: 0, amargin: 5, adamp: 1, wx: false, wsrc: "filtered", f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
              f_host: true, follow: true, pwmf: 1000, pwmd: 50, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
-             avol: 70, amute: false, aauto: false, afilt: false, fold: {} };
+             avol: 70, amute: false, aauto: false, afilt: false, fold: {}, order: [] };
 // Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
 function adopt(saved) {
   if (!saved || typeof saved !== "object") return;
@@ -2207,14 +2214,70 @@ function connect() {
   es.addEventListener("log", (e) => addLogs(JSON.parse(e.data)));
   es.onerror = () => { $("status").innerHTML = "<span>Server not reachable, retrying…</span>"; };
 }
+let dragging = false;   // a card is in the air: no redraw until it lands
 function tick() {
   requestAnimationFrame(tick);  // first: an error in one frame must never stop the next ones
-  if (frame && frame !== drawn) {
+  if (frame && frame !== drawn && !dragging) {
     const force = drawn === null;
     drawn = frame;
     try { render(frame, force); } catch (e) { console.error("render:", e); }
   }
 }
+// ---- order: drag a card by its grip to move it; kept with the other view settings ---------------------------
+// Only the grip drags (a chart's own mouse drag is its zoom). Dropping on the upper half of a card puts the dragged
+// one before it, on the lower half after it. The waveform, the strongest lines and the histogram move as one row.
+{
+  const main = document.querySelector("main");
+  const blocks = () => [...main.children].filter((el) => el.id);
+  const defaults = blocks().map((el) => el.id);
+  const order = (Array.isArray(ui.order) ? ui.order : []).filter((id, i, all) => defaults.includes(id) && all.indexOf(id) === i);
+  defaults.forEach((id, i) => { if (!order.includes(id)) order.splice(Math.min(i, order.length), 0, id); });
+  const place = (ids) => ids.forEach((id) => main.append($(id)));
+  place(order);
+  let dragEl = null, dropAt = null;
+  const mark = (el, after) => {
+    if (dropAt && dropAt.el === el && dropAt.after === after) return;
+    main.querySelectorAll(":scope > .drop-before, :scope > .drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
+    dropAt = el ? { el, after } : null;
+    if (el) el.classList.add(after ? "drop-after" : "drop-before");
+  };
+  const endDrag = () => {
+    mark(null, false);
+    if (dragEl) dragEl.classList.remove("dragging");
+    dragEl = null; dragging = false; drawn = null;
+    requestAnimationFrame(resizePlots);
+  };
+  for (const el of blocks()) {
+    const head = el.querySelector(":scope > .card-head, :scope > .sect, :scope > summary") || el.querySelector(".card-head");
+    if (!head) continue;
+    const grip = document.createElement("span");
+    grip.className = "grip"; grip.draggable = true; grip.textContent = "⠿"; grip.title = "Drag to move this card";
+    grip.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); });
+    grip.addEventListener("dragstart", (e) => {
+      dragEl = el; dragging = true;
+      e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", el.id); e.dataTransfer.setDragImage(el, 24, 18);
+      requestAnimationFrame(() => el.classList.add("dragging"));   // after the browser took its picture
+    });
+    grip.addEventListener("dragend", endDrag);
+    head.prepend(grip);
+  }
+  main.addEventListener("dragover", (e) => {
+    if (!dragEl) return;
+    const target = e.target.closest("main > *");
+    if (!target || target === dragEl || !defaults.includes(target.id)) { mark(null, false); return; }
+    e.preventDefault(); e.dataTransfer.dropEffect = "move";
+    const rect = target.getBoundingClientRect();
+    mark(target, e.clientY > rect.top + rect.height / 2);
+  });
+  main.addEventListener("drop", (e) => {
+    if (!dragEl || !dropAt) return;
+    e.preventDefault();
+    main.insertBefore(dragEl, dropAt.after ? dropAt.el.nextSibling : dropAt.el);
+    ui.order = blocks().map((x) => x.id); saveUi();
+  });
+  $("resetlayout").onclick = () => { place(defaults); ui.order = []; saveUi(); drawn = null; requestAnimationFrame(resizePlots); };
+}
+
 applyTheme();
 $("c-status").open = ui.statusOpen;
 $("c-status").addEventListener("toggle", () => { ui.statusOpen = $("c-status").open; saveUi(); });
