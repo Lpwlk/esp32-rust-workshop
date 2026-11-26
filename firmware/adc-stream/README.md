@@ -16,7 +16,7 @@ The computer's Ethernet port (a USB-C adapter is fine) needs an address in the b
 (`192.168.77.1`, netmask `255.255.255.0`), cabled to the board's RJ45. The tool is
 [`tools/adc-fft/adc_fft.py`](../../tools/adc-fft/adc_fft.py); `dev.py fft --help` lists its options
 (`--rate`, `--fft`, `--no-browser`, `--http-port`, `--lan` to look from a phone...). The page **keeps your settings**
-between runs, in `~/.config/adc-fft/settings.json` (`--settings FILE`, `--no-save`, `--reset-settings`): see
+between runs, in [`tools/adc-fft/settings.json`](../../tools/adc-fft/settings.json), tracked by git (`--settings FILE`, `--no-save`, `--reset-settings`): see
 [the ADC app page of the docs](../../docs/book/adc-stream.md) for everything the page does.
 
 Checks, from this folder: `cargo build --release && cargo clippy --release -- -D warnings`, `cargo fmt`, the PWM

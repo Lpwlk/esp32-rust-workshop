@@ -138,8 +138,8 @@ another browser finds it again**: the sample rate, FFT, window, averaging, filte
 analyzer's settings), the page's view settings (plots shown, scales, cursors' units, colours, the colour
 theme, light or dark, log filters, the PWM values you typed), and in the demo the simulated signal.
 
-- The file is `~/.config/adc-fft/settings.json` (under `$XDG_CONFIG_HOME` when it is set). It is plain JSON; you
-  can read it, copy it to another computer, or delete it.
+- The file is `tools/adc-fft/settings.json`, **tracked by git**: commit it and the setup comes with the code to
+  another computer ([Saved settings and git](tools.md#saved-settings-and-git)).
 - It is written half a second after the last change (a slider sends many) and at exit, whole or not at all.
 - **What is not kept**: the pause (a page that opens paused looks broken), and the board's own state: the PWM
   generator is off after every reboot.
@@ -147,7 +147,7 @@ theme, light or dark, log filters, the PWM values you typed), and in the demo th
   something. `--settings FILE` uses another file (one per bench, say), `--no-save` runs from the defaults and
   keeps nothing, `--reset-settings` forgets the file and starts from the defaults.
 - The **Reset all** button (card *Acquisition*, group *Settings*) does the same from the page: everything is back
-  to the defaults and the file is forgotten.
+  to the defaults and the file is deleted (`git restore tools/adc-fft/settings.json` brings the committed one back).
 - A damaged file, or one written by another version, is ignored with a warning in the board log: the tool starts
   from the defaults and replaces the file at the next change.
 

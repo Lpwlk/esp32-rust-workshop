@@ -21,7 +21,7 @@ Play the signal as sound with the **Listen** group of the card *Acquisition* (pl
 
 The sample rate, FFT, window, averaging, filter, trigger and hold, the page's view settings (plots shown, scales,
 colour theme, light/dark mode, log filters, harmonics options, whether the status box is open, PWM values) and, in the demo, the simulated signal are written to
-`~/.config/adc-fft/settings.json` (`$XDG_CONFIG_HOME/adc-fft/settings.json` when set), half a second after the last
+[`settings.json`](settings.json) in this folder, tracked by git (commit it to keep a setup with the code), half a second after the last
 change and at exit. The next run, on any port or in any browser, starts from them.
 
 | | |

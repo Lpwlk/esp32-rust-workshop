@@ -42,6 +42,7 @@ import http.client
 import http.server
 import importlib.util
 import json
+import os
 import re
 import sys
 import threading
@@ -51,6 +52,10 @@ import webbrowser
 from pathlib import Path
 
 PAGE = Path(__file__).with_name("node_dash.html")
+# What the page remembers (folds, order, sizes, filters, theme): next to this file and tracked by git.
+SETTINGS = Path(__file__).resolve().with_name("settings.json")
+SETTINGS_VERSION = 1
+SETTINGS_MAX = 65536  # bytes of one save from the page
 ROOT = Path(__file__).resolve().parent.parent.parent
 CDN_PLOTLY = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
 MAX_CMD = 96  # the board's line editor takes 96 characters (cli::MAX_INPUT)
@@ -1147,9 +1152,57 @@ def plotly_js() -> Path | None:
     return None
 
 
+class Prefs:
+    """The page's view settings in a JSON file: `ui` and `theme`. `path` None: nothing is read or written."""
+
+    def __init__(self, path: Path | None) -> None:
+        self.path = path
+        self.ui: dict | None = None
+        self.theme: str | None = None
+        self.problem: str | None = None  # why the file could not be read or written
+        self._lock = threading.Lock()
+        if path is None:
+            return
+        try:
+            raw = json.loads(path.read_text("utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as e:
+            self.problem = f"can't read {path} ({e}): starting from the defaults"
+            return
+        if isinstance(raw, dict) and raw.get("version") == SETTINGS_VERSION:
+            self.ui = raw["ui"] if isinstance(raw.get("ui"), dict) else None
+            self.theme = raw["theme"] if raw.get("theme") in ("auto", "light", "dark") else None
+
+    def save(self, ui, theme) -> str | None:
+        """Takes what is valid and writes the file if something changed. Returns why a write failed."""
+        if self.path is None:
+            return None
+        with self._lock:
+            new_ui = ui if isinstance(ui, dict) else self.ui
+            new_theme = theme if theme in ("auto", "light", "dark") else self.theme
+            if (new_ui, new_theme) == (self.ui, self.theme):
+                return None
+            self.ui, self.theme = new_ui, new_theme
+            data = {"version": SETTINGS_VERSION, "theme": self.theme, "ui": self.ui}
+            text = json.dumps(data, indent=1, sort_keys=True)  # sorted: small diffs in git
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_text(text + "\n", "utf-8")
+                os.replace(tmp, self.path)  # whole file or nothing
+                self.problem = None
+            except OSError as e:
+                self.problem = f"can't write {self.path} ({e})"
+            return self.problem
+
+
 class Server:
-    def __init__(self, boards: dict[str, Board], host: str, port: int, fps: int) -> None:
+    def __init__(
+        self, boards: dict[str, Board], host: str, port: int, fps: int, prefs: Prefs | None = None
+    ) -> None:
         self.boards = boards
+        self.prefs = prefs or Prefs(None)
         for k, b in boards.items():
             b.other = boards.get("b" if k == "a" else "a")
         self.fps = fps
@@ -1181,6 +1234,17 @@ class Server:
             for b in self.boards.values():
                 b.tick(now)
             time.sleep(0.2)
+
+    def page(self) -> bytes:
+        """The page, with the saved view settings written into it (so it draws right at once)."""
+        prefs = self.prefs
+        saved = {
+            "path": str(prefs.path) if prefs.path else None,
+            "ui": prefs.ui,
+            "theme": prefs.theme,
+        }
+        blob = json.dumps(saved).replace("<", "\\u003c")  # never a `</script>` in the data
+        return PAGE.read_text("utf-8").replace("/*PREFS*/null", blob, 1).encode()
 
     def command(self, targets: str, text: str, quiet: bool = False) -> tuple[int, dict]:
         """Sends `text` to node a, b or both (`targets` = "a", "b" or "ab")."""
@@ -1219,7 +1283,7 @@ class Server:
                 if url.path in ("/", "/index.html"):
                     self._send(
                         200,
-                        PAGE.read_bytes(),
+                        server.page(),
                         "text/html; charset=utf-8",
                         {"Cache-Control": "no-store"},
                     )
@@ -1252,16 +1316,23 @@ class Server:
             def do_POST(self) -> None:
                 # application/json from a foreign page would need a CORS preflight, which we never grant.
                 ctype = self.headers.get("Content-Type", "").split(";")[0]
-                if self.path not in ("/api/cmd", "/api/peer") or ctype != "application/json":
+                paths = ("/api/cmd", "/api/peer", "/api/prefs")
+                if self.path not in paths or ctype != "application/json":
                     self._send(400, b"bad request", "text/plain")
                     return
                 try:
-                    length = min(int(self.headers.get("Content-Length", "0")), 4096)
+                    limit = SETTINGS_MAX if self.path == "/api/prefs" else 4096
+                    length = min(int(self.headers.get("Content-Length", "0")), limit)
                     body = json.loads(self.rfile.read(length) or b"{}")
                     if not isinstance(body, dict):
                         raise ValueError
                 except ValueError:
                     self._send(400, b"bad json", "text/plain")
+                    return
+                if self.path == "/api/prefs":
+                    problem = server.prefs.save(body.get("ui"), body.get("theme"))
+                    reply = json.dumps({"ok": problem is None, "error": problem}).encode()
+                    self._send(200 if problem is None else 500, reply, "application/json")
                     return
                 if self.path == "/api/peer":
                     board = server.boards.get(str(body.get("board", "")))
@@ -1383,6 +1454,15 @@ def main() -> int:
     )
     ap.add_argument("--no-browser", action="store_true", help="don't open the page")
     ap.add_argument(
+        "--settings",
+        type=Path,
+        metavar="FILE",
+        help="where the page's view settings are kept (default: tools/node-dash/settings.json)",
+    )
+    ap.add_argument(
+        "--no-save", action="store_true", help="keep nothing in a file (only in the browser)"
+    )
+    ap.add_argument(
         "--demo",
         nargs="?",
         const="auto",
@@ -1417,10 +1497,16 @@ def main() -> int:
         }
     else:
         boards = serial_boards(args)
-    server = Server(boards, args.host, args.http_port, args.fps)
+    prefs = Prefs(None if args.no_save else args.settings or SETTINGS)
+    server = Server(boards, args.host, args.http_port, args.fps, prefs)
     server.start()
     url = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{server.port}"
     print(f"Node dashboard at {url}   (Ctrl-C to stop)")
+    if prefs.problem:
+        print(f"  {prefs.problem}")
+    print(
+        f"  settings kept in {prefs.path}" if prefs.path else "  settings stay in the browser only"
+    )
     for k, b in boards.items():
         print(f"  node {k.upper()}: {b.port or b.note}")
     if not args.no_browser:

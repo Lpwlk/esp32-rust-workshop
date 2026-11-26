@@ -88,7 +88,7 @@ or `--app adc`: no need to `cd` into a firmware folder.
 The page has a spectrum, a waveform with an oscilloscope trigger, a harmonics view (with aliasing shown), a waterfall,
 a digital filter, measurements, a status box for the link and global colour themes, and the board's log with a command line; the board can also play a **PWM wave** (RMT, GPIO20) to give its ADC a signal you
 know, and a **potentiometer** on GPIO44 turns a knob into that wave's frequency or duty cycle while the signal keeps
-15/16 of the ADC's rate ([breadboard drawings](docs/book/wiring.md)). **Your settings are kept** in `~/.config/adc-fft/settings.json`: rebuild, restart, change the port, and the
+15/16 of the ADC's rate ([breadboard drawings](docs/book/wiring.md)). **Your settings are kept** in `tools/adc-fft/settings.json`, which git tracks (the node dashboard has its own, `tools/node-dash/settings.json`): rebuild, restart, change the port, and the
 page comes back as you left it (`--settings FILE`, `--no-save`, `--reset-settings`, or *Reset all* in the page).
 Everything about it: [the ADC app page](https://lpwlk.github.io/esp32-rust-workshop/adc-stream/).
 

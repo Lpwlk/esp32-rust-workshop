@@ -749,7 +749,7 @@ python3 scripts/dev.py flash a -m --app adc
 ```
 
 Live spectrum of the ADC app in the browser (`--demo`: a simulated board; your settings are kept in
-`~/.config/adc-fft/settings.json`, `--reset-settings` forgets them):
+`tools/adc-fft/settings.json`, tracked by git, `--reset-settings` forgets them):
 
 ```sh
 python3 scripts/dev.py fft

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import http.client
 import json
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import node_dash as nd
 import node_sim
@@ -627,7 +629,50 @@ def run() -> int:
     server.close()
     world.close()
 
-    # 5. no board
+    # 5. the page's settings: written to a file, given back to the next page, bad input and bad files survived
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "sub" / "settings.json"
+        server = nd.Server({}, "127.0.0.1", 0, fps=10, prefs=nd.Prefs(path))
+        server.start()
+        check(
+            b'"ui": null' in http_("GET", "/")[1] and not path.exists(),
+            "settings: none yet, and opening the page writes nothing by itself",
+        )
+        arrangement = {"order": ["console", "status"], "split": 0.6, "folds": {"rgb": False}}
+        st = http_("POST", "/api/prefs", {"ui": arrangement, "theme": "dark"})[0]
+        saved = json.loads(path.read_text("utf-8"))
+        check(
+            st == 200 and saved["ui"] == arrangement and saved["theme"] == "dark",
+            "settings: what the page sends is written to the file",
+        )
+        stamp = path.stat().st_mtime_ns
+        http_("POST", "/api/prefs", {"ui": arrangement, "theme": "dark"})
+        http_("POST", "/api/prefs", {"ui": "nonsense", "theme": "pink"})
+        check(
+            path.stat().st_mtime_ns == stamp,
+            "settings: nothing new or nothing valid leaves the file alone",
+        )
+        check(
+            http_("POST", "/api/prefs", {"ui": {}}, ctype="text/plain")[0] == 400,
+            "settings: a form from a foreign page is refused",
+        )
+        http_("POST", "/api/prefs", {"ui": {"note": "</script>"}})
+        check(
+            b"\\u003c/script>" in http_("GET", "/")[1],
+            "settings: the page cannot be broken out of",
+        )
+        server.close()
+        check(
+            nd.Prefs(path).theme == "dark" and nd.Prefs(path).ui == {"note": "</script>"},
+            "settings: the next run reads them back",
+        )
+        path.write_text("{not json", "utf-8")
+        broken = nd.Prefs(path)
+        check(
+            broken.ui is None and broken.problem is not None, "settings: a broken file is reported"
+        )
+
+    # 6. no board
     lone = nd.Board("a", None, None, "no board assigned")
     server = nd.Server(
         {"a": lone, "b": nd.Board("b", None, None, "no board assigned")}, "127.0.0.1", 0, fps=10

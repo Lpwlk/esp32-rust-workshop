@@ -999,9 +999,9 @@ class SlidingExtrema:
 
 
 def default_prefs_path() -> Path:
-    """`~/.config/adc-fft/settings.json` (under `$XDG_CONFIG_HOME` when it is set)."""
-    base = os.environ.get("XDG_CONFIG_HOME")
-    return (Path(base) if base else Path.home() / ".config") / "adc-fft" / "settings.json"
+    """`tools/adc-fft/settings.json`: next to this file and tracked by git, so a bench's setup is committed with
+    the code (the firmware builds don't count it when they say `+dirty`)."""
+    return Path(__file__).resolve().with_name("settings.json")
 
 
 class Prefs:

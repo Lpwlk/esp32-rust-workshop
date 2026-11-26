@@ -574,19 +574,39 @@ $("paths").innerHTML = QUICK_PATHS.map((p) => `<option value="${p}">`).join("");
 // ---- view settings kept in this browser ------------------------------------------------------
 const ui = { span: 120, logrtt: false, follow: true, f_frame: true, f_stat: true, f_info: true, f_ok: true, f_warn: true, f_error: true, f_cmd: true, f_debug: true, f_host: true,
              termfollow: { a: true, b: true }, changed: false, ro: false, folds: {}, order: [], sizes: {}, split: 0 };
-try { Object.assign(ui, JSON.parse(localStorage.getItem("node-ui") || "{}")); } catch (_) {}
-const saveUi = () => { try { localStorage.setItem("node-ui", JSON.stringify(ui)); } catch (_) {} };
+// Kept twice: in this browser, and (written into the page by node_dash.py, sent back to it on every change) in
+// tools/node-dash/settings.json, which git tracks. The file wins; without one yet, what the browser has fills it.
+const SAVED = /*PREFS*/null;
+const FILE = !!(SAVED && SAVED.path);
+// Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
+function adopt(saved) {
+  if (!saved || typeof saved !== "object") return;
+  for (const k of Object.keys(ui)) if (k in saved && saved[k] !== null && typeof saved[k] === typeof ui[k] && Array.isArray(saved[k]) === Array.isArray(ui[k])) ui[k] = saved[k];
+}
+try { adopt(JSON.parse(localStorage.getItem("node-ui") || "{}")); } catch (_) {}
+if (FILE) adopt(SAVED.ui);
+let saveTimer = null;
+function saveFile() {
+  if (!FILE) return;
+  clearTimeout(saveTimer);   // several changes in a row: send once they rest
+  saveTimer = setTimeout(() => {
+    const { termfollow, ...kept } = ui;   // whether a console is scrolled to its end is not a setting
+    fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ui: kept, theme }), keepalive: true }).catch(() => {});
+  }, 500);
+}
+const saveUi = () => { try { localStorage.setItem("node-ui", JSON.stringify(ui)); } catch (_) {} saveFile(); };
 
 // ---- theme -------------------------------------------------------------------------------------
 const themes = ["auto", "light", "dark"];
 let theme = "auto";
 try { theme = localStorage.getItem("node-theme") || "auto"; } catch (_) {}
+if (FILE && themes.includes(SAVED.theme)) theme = SAVED.theme;
 function applyTheme() {
   if (theme === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", theme);
   $("theme").textContent = "Theme: " + theme;
   plotsDirty = true;
 }
-$("theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; try { localStorage.setItem("node-theme", theme); } catch (_) {} applyTheme(); };
+$("theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; try { localStorage.setItem("node-theme", theme); } catch (_) {} saveFile(); applyTheme(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { plotsDirty = true; });
 
 // ---- formatting --------------------------------------------------------------------------------
@@ -1377,6 +1397,7 @@ $("foldall").onclick = () => setFolds("details[data-fold]", false);
 $("unfoldall").onclick = () => setFolds("details[data-fold]", true);
 
 applyTheme(); applyTermFilters(); connect(); requestAnimationFrame(tick);
+if (FILE && SAVED.ui === null) saveUi();   // no file yet: start it from what this browser remembers
 </script>
 </body>
 </html>

@@ -10,6 +10,7 @@
 __pycache__/
 /scripts/logs
 /.boards.json
+/tools/*/settings.json.tmp
 /docs/zensical.ci.toml
 /firmware/ethernet/target
 /firmware/adc-stream/target

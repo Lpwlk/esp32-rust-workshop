@@ -73,7 +73,7 @@ sources (a node, a setting, a status, the ADC header). Details: `tools/wireshark
 ### Arranging the two dashboards
 
 The ADC page (`dev.py fft`) and the node dashboard (`dev.py dash`) are laid out the same way, and **the page keeps your
-arrangement** (with the other view settings: the browser for the node dashboard, the settings file for the ADC page):
+arrangement** with its other view settings ([Saved settings and git](#saved-settings-and-git)):
 
 | What | How |
 | --- | --- |
@@ -85,6 +85,26 @@ arrangement** (with the other view settings: the browser for the node dashboard,
 
 A plot is redrawn at its new size while you drag. The bars work with a finger or a pen too, and below 1000 px (860 on the ADC
 page) the columns stack, so the vertical bar goes away.
+
+### Saved settings and git
+
+Like the firmware's [presets](presets.md), what you set up on the dashboards lives in the repository. Each page writes a
+plain JSON file (sorted keys, so a diff reads well) half a second after you change something. **Nothing commits it for
+you**: `git add` it when the setup is one you want to keep, `git restore` it to go back to the committed one.
+
+| | File | What is in it |
+| --- | --- | --- |
+| Firmware, `eth` and `uart` | `firmware/{ethernet,uart}/presets/*.toml` | what the boards are built with; you edit these ([presets](presets.md)). What you `save` on a board stays in its flash |
+| ADC page | `tools/adc-fft/settings.json` | the analyzer's settings (rate, FFT, filter, trigger...), the page's view and theme, the demo's signal |
+| Node dashboard | `tools/node-dash/settings.json` | the page's view and theme: order, folds, sizes, log filters, chart options. The boards' own settings are read from the boards, not kept here |
+
+- **Dirty tree.** A changed settings file shows in `git status` like any other change, and `dev.py` commands that need
+  a clean tree ask for it too. The **firmware builds don't count these two files**: the boot card says `+dirty` only for
+  other changes.
+- **The node dashboard's first run.** Its settings used to live in the browser only: the first time the page opens with
+  no file, it writes what that browser remembers. From then on the file wins, on any browser.
+- **`--demo` uses the same file.** To try things without touching yours, add `--no-save` or `--settings FILE`; both
+  dashboards take them.
 
 ## Workflows
 

@@ -58,7 +58,9 @@ fn build_info() {
 
     let git = match run("git", &["rev-parse", "--short", "HEAD"]) {
         Some(hash) => {
-            let dirty = run("git", &["status", "--porcelain"]).is_some_and(|s| !s.is_empty());
+            // The dashboards' saved settings are tracked too, but they aren't part of any firmware.
+            let changed = ["status", "--porcelain", "--", ":/", ":(top,exclude,glob)tools/*/settings.json"];
+            let dirty = run("git", &changed).is_some_and(|s| !s.is_empty());
             let branch = run("git", &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
             format!("{hash} ({branch}){}", if dirty { " +dirty" } else { "" })
         }
