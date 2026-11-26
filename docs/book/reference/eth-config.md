@@ -82,17 +82,21 @@ escape code, numbers separated by `;` (`"31"` red, `"1;33"` bold yellow, `"38;5;
 | `colors.info` | ordinary data frames in the trace | `34` |
 | `colors.prompt` | the `cli ›` prompt and the echo of what you typed | `35` |
 | `colors.link` | link events and the negotiated speed | `35` |
-| `colors.dat` | the `DAT` badge (periodic data) | `30;47` |
-| `colors.evt` | the `EVT` badge (button events) | `30;43` |
-| `colors.lnk` | the `ECH`/`BAU` badge (link control) | `30;45` |
+| `colors.dat` | the `DAT` badge (the node's periodic data): the node frames' colour | `30;48;5;254` |
+| `colors.evt` | the `EVT` badge (button events): the node frames' colour | `30;48;5;254` |
+| `colors.lnk` | the `ECH`/`BAU` badge (link control): the node frames' colour | `30;48;5;254` |
+| `colors.ua` | the `UA` badge (the address space protocol, UA-lite) | `30;48;5;153` |
 | `colors.eth` | trace: the Ethernet layer | `34` |
 | `colors.ip` | trace: the IPv4 and ARP layers | `35` |
 | `colors.transport` | trace: the UDP, TCP and ICMP layer | `36` |
 | `colors.app` | trace: the node's own frames inside the packet | `33` |
 | `colors.raw` | trace: the hex dump | `90` |
-| `colors.mix_udp` | dashboard protocol ranking: the UDP bar (a background) | `30;44` |
-| `colors.mix_tcp` | dashboard protocol ranking: the TCP bar | `30;42` |
-| `colors.mix_arp` | dashboard protocol ranking: the ARP bar | `30;43` |
-| `colors.mix_icmp` | dashboard protocol ranking: the ICMP bar | `30;45` |
-| `colors.mix_ip` | dashboard protocol ranking: other IPv4 protocols | `30;46` |
-| `colors.mix_other` | dashboard protocol ranking: everything else | `30;100` |
+| `colors.mix_udp` | a UDP badge in the trace, and its bar in the dashboard's protocol ranking | `30;48;5;218` |
+| `colors.mix_tcp` | the same for TCP | `30;48;5;157` |
+| `colors.mix_arp` | the same for ARP | `30;48;5;229` |
+| `colors.mix_icmp` | the same for ICMP | `30;48;5;183` |
+| `colors.mix_igmp` | the same for IGMP | `30;48;5;216` |
+| `colors.mix_ptp` | the same for PTP | `30;48;5;159` |
+| `colors.mix_ip` | the same for other IPv4 protocols | `30;48;5;252` |
+| `colors.mix_other` | the same for everything else (IPv6, LLDP...) | `30;48;5;247` |
+| `colors.mix_bad` | the badge of a frame that can't be decoded | `30;48;5;210` |

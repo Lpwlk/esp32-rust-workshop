@@ -177,9 +177,9 @@ rate_hz = 0
 # Colors of the console, by role: a value is the SGR parameters of an ANSI escape code, numbers separated by `;`
 # ("31" red, "1;33" bold yellow, "38;5;208" 256-color orange, "38;2;255;128;0" RGB, "" no color). Fixed at
 # build time: they are not runtime settings, `set` can't change them. Bold and faint are not roles: the
-# console adds them itself where they help. The `mix_*` roles are backgrounds ("30;44" is black on blue): the
-# bars of the dashboard's protocol ranking are spaces painted with them, and the text on a bar uses the
-# foreground.
+# console adds them itself where they help. The protocol roles (`mix_*`, `dat`, `evt`, `lnk`, `ua`) are
+# backgrounds, black text on a pastel 256-color one ("30;48;5;218"): the badge of a protocol in the trace, and the
+# bars of the dashboard's protocol ranking, which are spaces painted with them.
 [colors]
 # The time stamp at the start of a line.
 time      = "90"
@@ -207,12 +207,14 @@ info      = "34"
 prompt    = "35"
 # Link events and the negotiated speed.
 link      = "35"
-# The `DAT` badge (periodic data).
-dat       = "30;47"
-# The `EVT` badge (button events).
-evt       = "30;43"
-# The `ECH`/`BAU` badge (link control).
-lnk       = "30;45"
+# The `DAT` badge (the node's periodic data): the node frames' colour.
+dat       = "30;48;5;254"
+# The `EVT` badge (button events): the node frames' colour.
+evt       = "30;48;5;254"
+# The `ECH`/`BAU` badge (link control): the node frames' colour.
+lnk       = "30;48;5;254"
+# The `UA` badge (the address space protocol, UA-lite).
+ua        = "30;48;5;153"
 # Trace: the Ethernet layer.
 eth       = "34"
 # Trace: the IPv4 and ARP layers.
@@ -223,15 +225,21 @@ transport = "36"
 app       = "33"
 # Trace: the hex dump.
 raw       = "90"
-# Dashboard protocol ranking: the UDP bar (a background).
-mix_udp   = "30;44"
-# Dashboard protocol ranking: the TCP bar.
-mix_tcp   = "30;42"
-# Dashboard protocol ranking: the ARP bar.
-mix_arp   = "30;43"
-# Dashboard protocol ranking: the ICMP bar.
-mix_icmp  = "30;45"
-# Dashboard protocol ranking: other IPv4 protocols.
-mix_ip    = "30;46"
-# Dashboard protocol ranking: everything else.
-mix_other = "30;100"
+# A UDP badge in the trace, and its bar in the dashboard's protocol ranking.
+mix_udp   = "30;48;5;218"
+# The same for TCP.
+mix_tcp   = "30;48;5;157"
+# The same for ARP.
+mix_arp   = "30;48;5;229"
+# The same for ICMP.
+mix_icmp  = "30;48;5;183"
+# The same for IGMP.
+mix_igmp  = "30;48;5;216"
+# The same for PTP.
+mix_ptp   = "30;48;5;159"
+# The same for other IPv4 protocols.
+mix_ip    = "30;48;5;252"
+# The same for everything else (IPv6, LLDP...).
+mix_other = "30;48;5;247"
+# The badge of a frame that can't be decoded.
+mix_bad   = "30;48;5;210"

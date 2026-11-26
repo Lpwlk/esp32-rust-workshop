@@ -29,10 +29,10 @@ TX, RX, NODE, OK, WARN, ERROR = (
 )
 ACCENT, PROMPT, LINK = "\x1b[36m", "\x1b[35m", "\x1b[35m"
 BADGE = {
-    "DAT": "\x1b[30;47m",
-    "EVT": "\x1b[30;43m",
-    "ECH": "\x1b[30;45m",
-    "BAU": "\x1b[30;45m",
+    "DAT": "\x1b[30;48;5;254m",
+    "EVT": "\x1b[30;48;5;254m",
+    "ECH": "\x1b[30;48;5;254m",
+    "BAU": "\x1b[30;48;5;254m",
     "BST": "",
 }
 

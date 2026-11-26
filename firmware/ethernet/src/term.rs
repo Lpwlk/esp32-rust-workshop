@@ -1204,7 +1204,7 @@ pub fn space_event(now_ms: u64, rx: bool, args: core::fmt::Arguments<'_>) {
     }
     let (s, ms) = stamp(now_ms);
     let dir = Arrow(!rx);
-    out!("{TIME}{s:>6}.{ms:03}{RST} {dir} {LNK} UA {RST} {args}");
+    out!("{TIME}{s:>6}.{ms:03}{RST} {dir} {UA} UA {RST} {args}");
 }
 
 /// What a request from the peer says, for the console.
@@ -1370,7 +1370,7 @@ impl core::fmt::Display for ShortIp {
 /// How many lines of node frames one traced segment shows (a TCP segment can hold about 15).
 const TRACE_APP_LINES: usize = 4;
 /// Under the time stamp and the direction: the layers start here, so they line up below the header.
-const TRACE_INDENT: &str = "              ";
+const TRACE_INDENT: &str = "           ";
 /// Visible width of the `from → to` column of a header line. The longest thing it holds is
 /// `who-has 255.255.255.255 tell 255.255.255.255` (44) or two `255.255.255.255:65535`; the usual
 /// `192.168.77.11:7000 → 192.168.77.12:7000` is 39. A line that is longer would push the bar after it out of
@@ -1386,14 +1386,29 @@ fn compact_who_w() -> usize {
 /// The "what it is" column of the compact view: `[FIN,PSH,ACK] 1514 B` is the longest that follows a bar.
 const COMPACT_WHAT_W: usize = 22;
 
-/// `12.351420`: seconds, milliseconds and microseconds, in one color (the time stamp of the other lines, with
-/// three more digits).
+/// `12.351`: seconds and milliseconds, like the time stamp of every other line.
 struct Stamp(u64);
 
 impl core::fmt::Display for Stamp {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let (s, ms) = stamp(self.0 / 1000);
-        write!(f, "{TIME}{s:>6}.{ms:03}{:03}{RST}", self.0 % 1000)
+        write!(f, "{TIME}{s:>6}.{ms:03}{RST}")
+    }
+}
+
+/// The badge of a protocol name (`UDP`, `ARP`...): black text on the protocol's pastel background, the same colors
+/// as the dashboard's protocol ranking.
+fn protocol_paint(name: &str) -> workshop_core::theme::Paint {
+    match name {
+        "UDP" => MIX_UDP,
+        "TCP" => MIX_TCP,
+        "ARP" => MIX_ARP,
+        "ICMP" => MIX_ICMP,
+        "IGMP" => MIX_IGMP,
+        "PTP" => MIX_PTP,
+        "bad" => MIX_BAD,
+        "IPv4" => MIX_IP,
+        _ => MIX_OTHER,
     }
 }
 
@@ -1531,22 +1546,16 @@ fn trace_compact_line(c: &crate::trace::Captured, repeat: usize) -> heapless::St
         Err(why) => {
             let _ = write!(
                 line,
-                "{ts} {arrow} {ERROR}bad  {RST} {SEP}│{RST} {ERROR}{why}{RST} {SEP}│{RST} {DIM}{wire_len} B{RST}"
+                "{ts} {arrow} {MIX_BAD} bad {RST} {SEP}│{RST} {ERROR}{why}{RST} {SEP}│{RST} {DIM}{wire_len} B{RST}"
             );
             return line;
         }
     };
-    let tag = if packet.is_damaged() {
-        ERROR
-    } else if packet.is_control() {
-        WARN
-    } else {
-        INFO
-    };
+    let badge = protocol_paint(packet.protocol());
     let (mut who, mut what) = trace_who_what(&packet, true);
     pad_visible(&mut who, compact_who_w());
     pad_visible(&mut what, COMPACT_WHAT_W);
-    let _ = write!(line, "{ts} {arrow} {tag}{:<4}{RST} {SEP}│{RST} {who} {SEP}│{RST} {what}", packet.protocol());
+    let _ = write!(line, "{ts} {arrow} {badge} {:<4}{RST} {SEP}│{RST} {who} {SEP}│{RST} {what}", packet.protocol());
     let whole = whole_lines(packet.payload(), c.data.len() < wire_len);
     let count = dissect::app_lines(whole).count();
     if let Some(first) = dissect::app_lines(whole).next() {
@@ -1610,13 +1619,13 @@ pub fn trace_batch(frames: &[crate::trace::Captured], level: Trace, view: TraceV
 /// - `inside-out`: the same lines, the node's own frames first and the layers back out to the cable.
 ///
 /// ```text
-///  12.351420 TX ▶ UDP   │ 192.168.77.11:7000 → 192.168.77.12:7000   │ 78 B  payload 36 B
-///               app  │ DAT node-A #41 t=12351 ms  button released  events 3  period 2500.000 ms
-///               udp  │ 7000 → 7000  len 44 (payload 36 B)  cs ok
-///               ipv4 │ 192.168.77.11 → 192.168.77.12  ttl 64  proto 17 (UDP)  total 64  id 0x0000  DF  cs ok
-///               eth  │ 02:00:00:00:00:11 → 02:00:00:00:00:12  type 0x0800 (IPv4)
-///               raw  │ 0000 │ 02 00 00 00 00 12 02 00  00 00 00 11 08 00 45 00 │ ..............E.
-///                    │ … 46 B more
+///  12.351 TX ▶  UDP │ 192.168.77.11:7000 → 192.168.77.12:7000   │ 78 B  payload 36 B
+///            app  │ DAT node-A #41 t=12351 ms  button released  events 3  period 2500.000 ms
+///            udp  │ 7000 → 7000  len 44 (payload 36 B)  cs ok
+///            ipv4 │ 192.168.77.11 → 192.168.77.12  ttl 64  proto 17 (UDP)  total 64  id 0x0000  DF  cs ok
+///            eth  │ 02:00:00:00:00:11 → 02:00:00:00:00:12  type 0x0800 (IPv4)
+///            raw  │ 0000 │ 02 00 00 00 00 12 02 00  00 00 00 11 08 00 45 00 │ ..............E.
+///                 │ … 46 B more
 /// ```
 pub fn trace_frame(c: &crate::trace::Captured, level: Trace, view: TraceView, dump_bytes: usize) {
     use core::fmt::Write as _;
@@ -1659,7 +1668,7 @@ pub fn trace_frame(c: &crate::trace::Captured, level: Trace, view: TraceView, du
         Ok(p) => p,
         Err(why) => {
             crate::con_println!(
-                "{ts} {arrow} {ERROR}bad  {RST} {SEP}│{RST} {ERROR}{why}{RST} {SEP}│{RST} {DIM}{wire_len} B{RST}"
+                "{ts} {arrow} {MIX_BAD} bad {RST} {SEP}│{RST} {ERROR}{why}{RST} {SEP}│{RST} {DIM}{wire_len} B{RST}"
             );
             raw();
             prompt_draw();
@@ -1674,18 +1683,12 @@ pub fn trace_frame(c: &crate::trace::Captured, level: Trace, view: TraceView, du
     let app_count = dissect::app_lines(whole).count();
 
     // --- The header line: `time dir proto │ from → to │ what`
-    let tag = if packet.is_damaged() {
-        ERROR
-    } else if packet.is_control() {
-        WARN
-    } else {
-        INFO
-    };
+    let badge = protocol_paint(packet.protocol());
     let (mut who, what) = trace_who_what(&packet, false);
     pad_visible(&mut who, TRACE_WHO_W);
     let damaged = if packet.is_damaged() { " ✗ damaged" } else { "" };
     crate::con_println!(
-        "{ts} {arrow} {tag}{:<5}{RST} {SEP}│{RST} {who} {SEP}│{RST} {what}{ERROR}{damaged}{RST}",
+        "{ts} {arrow} {badge} {:<4}{RST} {SEP}│{RST} {who} {SEP}│{RST} {what}{ERROR}{damaged}{RST}",
         packet.protocol()
     );
 
@@ -2124,6 +2127,8 @@ fn class_paint(c: workshop_core::traffic::Class) -> workshop_core::theme::Paint 
         Class::Tcp => MIX_TCP,
         Class::Arp => MIX_ARP,
         Class::Icmp => MIX_ICMP,
+        Class::Igmp => MIX_IGMP,
+        Class::Ptp => MIX_PTP,
         Class::OtherIp => MIX_IP,
         Class::Other => MIX_OTHER,
     }

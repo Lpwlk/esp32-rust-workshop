@@ -35,6 +35,10 @@ pub enum Class {
     Udp,
     /// IPv4 + TCP.
     Tcp,
+    /// IPv4 + IGMP.
+    Igmp,
+    /// PTP: over Ethernet (type 0x88F7), or UDP to port 319 or 320.
+    Ptp,
     /// IPv4, another protocol.
     OtherIp,
     /// Anything else (IPv6, LLDP, a cut frame...).
@@ -42,7 +46,7 @@ pub enum Class {
 }
 
 /// Number of [`Class`]es.
-pub const CLASSES: usize = 6;
+pub const CLASSES: usize = 8;
 
 impl Class {
     /// Position in [`Mix::classes`].
@@ -57,13 +61,16 @@ impl Class {
             Class::Icmp => "ICMP",
             Class::Udp => "UDP",
             Class::Tcp => "TCP",
+            Class::Igmp => "IGMP",
+            Class::Ptp => "PTP",
             Class::OtherIp => "IP",
             Class::Other => "other",
         }
     }
 
     /// Every class, in [`Self::index`] order.
-    pub const ALL: [Class; CLASSES] = [Class::Udp, Class::Tcp, Class::Arp, Class::Icmp, Class::OtherIp, Class::Other];
+    pub const ALL: [Class; CLASSES] =
+        [Class::Udp, Class::Tcp, Class::Arp, Class::Icmp, Class::Igmp, Class::Ptp, Class::OtherIp, Class::Other];
 }
 
 /// Which [`Class`] a frame is, from its Ethernet and IPv4 headers (an 802.1Q tag is skipped).
@@ -75,10 +82,19 @@ pub fn classify(frame: &[u8]) -> Class {
     };
     match kind {
         Some(0x0806) => Class::Arp,
+        Some(0x88F7) => Class::Ptp,
         Some(0x0800) => match frame.get(ip + 9) {
             Some(1) => Class::Icmp,
+            Some(2) => Class::Igmp,
             Some(6) => Class::Tcp,
-            Some(17) => Class::Udp,
+            Some(17) => {
+                // PTP over UDP: event messages to port 319, general ones to 320 (the header is `ihl` words long).
+                let header = frame.get(ip).map_or(20, |b| usize::from(b & 0x0F) * 4);
+                match frame.get(ip + header + 2..ip + header + 4).map(|b| u16::from_be_bytes([b[0], b[1]])) {
+                    Some(319 | 320) => Class::Ptp,
+                    _ => Class::Udp,
+                }
+            }
             Some(_) => Class::OtherIp,
             None => Class::Other,
         },
@@ -490,7 +506,17 @@ mod tests {
         assert_eq!(classify(&eth([8, 0], &ip(17))), Class::Udp);
         assert_eq!(classify(&eth([8, 0], &ip(6))), Class::Tcp);
         assert_eq!(classify(&eth([8, 0], &ip(1))), Class::Icmp);
+        assert_eq!(classify(&eth([8, 0], &ip(2))), Class::Igmp);
         assert_eq!(classify(&eth([8, 0], &ip(89))), Class::OtherIp);
+        assert_eq!(classify(&eth([0x88, 0xF7], &[0; 44])), Class::Ptp, "PTP over Ethernet");
+        let udp_to = |port: u16| {
+            let mut h = ip(17);
+            h.extend([0x01, 0x3F, (port >> 8) as u8, port as u8, 0, 8, 0, 0]);
+            h
+        };
+        assert_eq!(classify(&eth([8, 0], &udp_to(319))), Class::Ptp, "PTP event messages");
+        assert_eq!(classify(&eth([8, 0], &udp_to(320))), Class::Ptp, "PTP general messages");
+        assert_eq!(classify(&eth([8, 0], &udp_to(7000))), Class::Udp);
         assert_eq!(classify(&eth([0x86, 0xDD], &[0; 40])), Class::Other);
         assert_eq!(classify(&eth([8, 0], &ip(17)[..5])), Class::Other, "an IPv4 header cut before its protocol");
         assert_eq!(classify(&[0; 5]), Class::Other);

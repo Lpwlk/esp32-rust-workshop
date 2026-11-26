@@ -128,20 +128,24 @@ roles! {
     Info INFO, "info", "34", "ordinary data frames in the trace";
     Prompt PROMPT, "prompt", "35", "the `cli ›` prompt and the echo of what you typed";
     Link LINK, "link", "35", "link events and the negotiated speed";
-    Dat DAT, "dat", "30;47", "the `DAT` badge (periodic data)";
-    Evt EVT, "evt", "30;43", "the `EVT` badge (button events)";
-    Lnk LNK, "lnk", "30;45", "the `ECH`/`BAU` badge (link control)";
+    Dat DAT, "dat", "30;48;5;254", "the `DAT` badge (the node's periodic data): the node frames' colour";
+    Evt EVT, "evt", "30;48;5;254", "the `EVT` badge (button events): the node frames' colour";
+    Lnk LNK, "lnk", "30;48;5;254", "the `ECH`/`BAU` badge (link control): the node frames' colour";
+    Ua UA, "ua", "30;48;5;153", "the `UA` badge (the address space protocol, UA-lite)";
     Eth ETH, "eth", "34", "trace: the Ethernet layer";
     Ip IP, "ip", "35", "trace: the IPv4 and ARP layers";
     Transport TRANSPORT, "transport", "36", "trace: the UDP, TCP and ICMP layer";
     App APP, "app", "33", "trace: the node's own frames inside the packet";
     Raw RAW, "raw", "90", "trace: the hex dump";
-    MixUdp MIX_UDP, "mix_udp", "30;44", "dashboard protocol ranking: the UDP bar (a background)";
-    MixTcp MIX_TCP, "mix_tcp", "30;42", "dashboard protocol ranking: the TCP bar";
-    MixArp MIX_ARP, "mix_arp", "30;43", "dashboard protocol ranking: the ARP bar";
-    MixIcmp MIX_ICMP, "mix_icmp", "30;45", "dashboard protocol ranking: the ICMP bar";
-    MixIp MIX_IP, "mix_ip", "30;46", "dashboard protocol ranking: other IPv4 protocols";
-    MixOther MIX_OTHER, "mix_other", "30;100", "dashboard protocol ranking: everything else";
+    MixUdp MIX_UDP, "mix_udp", "30;48;5;218", "a UDP badge in the trace, and its bar in the dashboard's protocol ranking";
+    MixTcp MIX_TCP, "mix_tcp", "30;48;5;157", "the same for TCP";
+    MixArp MIX_ARP, "mix_arp", "30;48;5;229", "the same for ARP";
+    MixIcmp MIX_ICMP, "mix_icmp", "30;48;5;183", "the same for ICMP";
+    MixIgmp MIX_IGMP, "mix_igmp", "30;48;5;216", "the same for IGMP";
+    MixPtp MIX_PTP, "mix_ptp", "30;48;5;159", "the same for PTP";
+    MixIp MIX_IP, "mix_ip", "30;48;5;252", "the same for other IPv4 protocols";
+    MixOther MIX_OTHER, "mix_other", "30;48;5;247", "the same for everything else (IPv6, LLDP...)";
+    MixBad MIX_BAD, "mix_bad", "30;48;5;210", "the badge of a frame that can't be decoded";
 }
 
 /// The colors of the console: one code per [`Role`].
@@ -249,7 +253,39 @@ mod tests {
         let t = Theme::DEFAULT;
         assert_eq!(t.get(Role::Tx).as_str(), "36");
         assert_eq!(t.get(Role::Rx).as_str(), "32");
-        assert_eq!(t.get(Role::Dat).as_str(), "30;47");
+    }
+
+    #[test]
+    fn every_protocol_badge_is_black_text_on_its_own_pastel() {
+        let t = Theme::DEFAULT;
+        let badges = [
+            "mix_udp",
+            "mix_tcp",
+            "mix_arp",
+            "mix_icmp",
+            "mix_igmp",
+            "mix_ptp",
+            "ua",
+            "dat",
+            "mix_ip",
+            "mix_other",
+            "mix_bad",
+        ];
+        let mut backgrounds = std::collections::HashSet::new();
+        for name in badges {
+            let code = t.value(name).unwrap();
+            assert!(code.starts_with("30;48;5;"), "{name}: black text on a 256-color background, not {code:?}");
+            backgrounds.insert(code);
+        }
+        // dat, evt and lnk share the node frames' color; every other protocol has a color of its own.
+        assert_eq!(backgrounds.len(), badges.len(), "two protocols share a background");
+        assert_eq!(t.value("dat"), t.value("evt"));
+        assert_eq!(t.value("dat"), t.value("lnk"));
+        // The ones that were asked for: ARP yellow, UDP pink, TCP green, UA-lite blue.
+        assert_eq!(t.value("mix_arp"), Some("30;48;5;229"));
+        assert_eq!(t.value("mix_udp"), Some("30;48;5;218"));
+        assert_eq!(t.value("mix_tcp"), Some("30;48;5;157"));
+        assert_eq!(t.value("ua"), Some("30;48;5;153"));
     }
 
     #[test]

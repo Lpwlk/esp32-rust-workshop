@@ -274,18 +274,20 @@ changes the next frame:
 have a fixed width (the label of a layer, the offset, the bytes, the characters), never free text:
 
 ```text
- 12.351420 TX ▶ UDP   │ 192.168.77.11:7000 → 192.168.77.12:7000   │ 78 B  payload 36 B
-               eth  │ 02:00:00:00:00:11 → 02:00:00:00:00:12  type 0x0800 (IPv4)
-               ipv4 │ 192.168.77.11 → 192.168.77.12  ttl 64  proto 17 (UDP)  total 64  id 0x0000  DF  cs ok
-               udp  │ 7000 → 7000  len 44 (payload 36 B)  cs ok
-               app  │ DAT node-A #41 t=12351 ms  button released  events 3  period 2500.000 ms
-               raw  │ 0000 │ 02 00 00 00 00 12 02 00  00 00 00 11 08 00 45 00 │ ..............E.
-                    │ 0010 │ 00 40 00 00 40 00 40 11  1f 45 c0 a8 4d 0b c0 a8 │ .@..@.@..E..M...
-                    │ … 46 B more
+   12.351 TX ▶  UDP │ 192.168.77.11:7000 → 192.168.77.12:7000   │ 78 B  payload 36 B
+           eth  │ 02:00:00:00:00:11 → 02:00:00:00:00:12  type 0x0800 (IPv4)
+           ipv4 │ 192.168.77.11 → 192.168.77.12  ttl 64  proto 17 (UDP)  total 64  id 0x0000  DF  cs ok
+           udp  │ 7000 → 7000  len 44 (payload 36 B)  cs ok
+           app  │ DAT node-A #41 t=12351 ms  button released  events 3  period 2500.000 ms
+           raw  │ 0000 │ 02 00 00 00 00 12 02 00  00 00 00 11 08 00 45 00 │ ..............E.
+                │ 0010 │ 00 40 00 00 40 00 40 11  1f 45 c0 a8 4d 0b c0 a8 │ .@..@.@..E..M...
+                │ … 46 B more
 ```
 
 Each layer has its own color (`eth`, `ip`, `transport`, `app`, `raw`, see [Colors](#colors)). The header's
-protocol is blue for ordinary traffic, yellow for a control frame (ARP, ICMP, `SYN` / `FIN`), red for a damaged one.
+protocol is a **badge**, black text on the protocol's own pastel background, the same in the trace, in the node's
+own lines and in the dashboard's protocol ranking ([Protocol colors](#protocol-colors)). A damaged frame says
+`✗ damaged` in red after its header. Every time stamp, in every line, is seconds and milliseconds (`12.351`).
 
 Checksums (IPv4 header, UDP, TCP, ICMP) are verified when the whole frame was kept: `cs ok`, `cs BAD`, or `cs -`
 when the frame was longer than the 256 bytes kept. A damaged frame is marked in red.
@@ -301,10 +303,10 @@ settings read the same on both, and do nothing.
 #### Reading the compact view at speed
 
 ```text
-    12.351420 RX ◀ TCP  │ .11:49152→.12:7000     │ [SYN] 58 B
-    12.351990 TX ▶ ARP  │ who-has .12 tell .11   │ 42 B
-    12.354000 TX ▶ UDP  │ .11:7000→.12:7000      │ 79 B             │ DAT node-A #105 t=12351 ms  button released … │ ×6
-    12.355000 RX ◀ TCP  │ .11:49152→.12:7000     │ [RST,ACK] 54 B
+    12.351 RX ◀  TCP │ .11:49152→.12:7000     │ [SYN] 58 B
+    12.351 TX ▶  ARP │ who-has .12 tell .11   │ 42 B
+    12.354 TX ▶  UDP │ .11:7000→.12:7000      │ 79 B             │ DAT node-A #105 t=12351 ms  button released … │ ×6
+    12.355 RX ◀  TCP │ .11:49152→.12:7000     │ [RST,ACK] 54 B
 ```
 
 - **Short addresses, if you ask.** `set trace_short_ip on` drops what every address has in common with this node's
@@ -371,9 +373,10 @@ second, the average frame size, the peak and the use of the link.
 
 The chart, and under it the protocols that went by (both directions, since the graphs started), ranked by the
 number of frames as horizontal bars. A bar is a row of spaces on an ANSI **background color**, one per protocol
-(UDP, TCP, ARP, ICMP, other IPv4, anything else), so it reads at a glance and can be changed:
-`mix_udp`, `mix_tcp`, `mix_arp`, `mix_icmp`, `mix_ip` and `mix_other` in `[colors]` (see [Colors](#colors)), as
-backgrounds, e.g. `"30;44"` is black on blue and `"48;5;208"` a 256-color orange.
+(UDP, TCP, ARP, ICMP, IGMP, PTP, other IPv4, anything else), so it reads at a glance and can be changed:
+`mix_udp`, `mix_tcp`, `mix_arp`, `mix_icmp`, `mix_igmp`, `mix_ptp`, `mix_ip` and `mix_other` in `[colors]` (see
+[Colors](#colors)), as backgrounds, e.g. `"30;44"` is black on blue and `"30;48;5;208"` black on a 256-color orange.
+They are the colors of the trace's protocol badges too.
 
 ```text
             UDP │███████████████████████████████████████ │  95.46% 55500 frames · rx 54000 · tx 1500  (since the graphs started)
@@ -496,6 +499,28 @@ A value is the SGR parameters of an ANSI escape code, numbers separated by `;`. 
 defaults is in the [configuration reference](reference/config.md#colors-colors-in-a-preset) (and, for the Ethernet
 app, [here](reference/eth-config.md#colors-colors-in-a-preset)). Bold and faint are not roles: the console adds them itself
 where they help, so a theme only has to pick hues.
+
+### Protocol colors
+
+Every protocol has one look wherever it appears: the header of a traced frame, the `DAT` / `EVT` / `UA` badges of
+the node's own lines, and the bars of the dashboard's protocol ranking. It is **black text on a pastel
+background** (a 256-color `30;48;5;N`), so the badges read the same on a dark or a light terminal:
+
+| Badge | Color | Role |
+|---|---|---|
+| <span style="background:#ffffaf;color:#000;padding:0 .6em;font-family:monospace">ARP</span> | 229 · yellow | `mix_arp` |
+| <span style="background:#ffafd7;color:#000;padding:0 .6em;font-family:monospace">UDP</span> | 218 · pink | `mix_udp` |
+| <span style="background:#afffaf;color:#000;padding:0 .6em;font-family:monospace">TCP</span> | 157 · green | `mix_tcp` |
+| <span style="background:#afd7ff;color:#000;padding:0 .6em;font-family:monospace">UA</span> | 153 · blue | `ua`: the address space protocol (UA-lite) |
+| <span style="background:#d7afff;color:#000;padding:0 .6em;font-family:monospace">ICMP</span> | 183 · lavender | `mix_icmp` |
+| <span style="background:#ffaf87;color:#000;padding:0 .6em;font-family:monospace">IGMP</span> | 216 · orange | `mix_igmp` |
+| <span style="background:#afffff;color:#000;padding:0 .6em;font-family:monospace">PTP</span> | 159 · cyan | `mix_ptp` |
+| <span style="background:#e4e4e4;color:#000;padding:0 .6em;font-family:monospace">DAT</span> | 254 · light grey | `dat`, `evt`, `lnk`: the node's own frames (`DAT`, `EVT`, `ECH`, `BAU`) |
+| <span style="background:#d0d0d0;color:#000;padding:0 .6em;font-family:monospace">IPv4</span> | 252 · grey | `mix_ip`: another IPv4 protocol |
+| <span style="background:#9e9e9e;color:#000;padding:0 .6em;font-family:monospace">other</span> | 247 · dark grey | `mix_other`: IPv6, LLDP... |
+| <span style="background:#ff8787;color:#000;padding:0 .6em;font-family:monospace">bad</span> | 210 · red | `mix_bad`: a frame that can't be decoded |
+
+Change one in `[colors]` like any other role, as a background (`mix_udp = "30;48;5;208"`).
 
 ## Recording a session
 

@@ -110,6 +110,7 @@ fn ethertype_name(t: u16) -> &'static str {
         ETHERTYPE_ARP => "ARP",
         0x86DD => "IPv6",
         0x88CC => "LLDP",
+        0x88F7 => "PTP",
         0x8808 => "pause",
         _ => "?",
     }
@@ -528,13 +529,15 @@ impl<'a> Packet<'a> {
         }
     }
 
-    /// Short name of the top protocol: `ARP`, `ICMP`, `UDP`, `TCP`, `IPv4`, or the ethertype's name.
+    /// Short name of the top protocol: `ARP`, `ICMP`, `IGMP`, `UDP`, `TCP`, `PTP`, `IPv4`, or the ethertype's name.
     pub fn protocol(&self) -> &'static str {
         match self.net {
             Net::Arp(_) => "ARP",
+            Net::Ipv4(_, L4::Udp(u, _)) if matches!(u.dst_port, 319 | 320) => "PTP",
             Net::Ipv4(_, L4::Udp(..)) => "UDP",
             Net::Ipv4(_, L4::Tcp(..)) => "TCP",
             Net::Ipv4(_, L4::Icmp(_)) => "ICMP",
+            Net::Ipv4(_, L4::Other(2)) => "IGMP",
             Net::Ipv4(..) => "IPv4",
             Net::Other(t) => ethertype_name(t),
             Net::Malformed(_) => "bad",
@@ -1206,6 +1209,25 @@ mod tests {
         icmp[8] ^= 1;
         let f = ipv4_frame(1, &icmp, 0);
         assert!(dissect(&f, f.len()).unwrap().is_damaged());
+    }
+
+    #[test]
+    fn igmp_and_ptp_have_their_own_names() {
+        let name = |frame: &[u8]| dissect(frame, frame.len()).unwrap().protocol();
+        assert_eq!(name(&ipv4_frame(2, &[0x11, 0, 0, 0, 0, 0, 0, 0], 0)), "IGMP");
+        assert_eq!(name(&ipv4_frame(89, &[0; 8], 0)), "IPv4", "another IP protocol");
+        let mut ptp = udp(b"x");
+        ptp[2..4].copy_from_slice(&319u16.to_be_bytes());
+        fix(&mut ptp, 6, Some((17, A, B)));
+        assert_eq!(name(&ipv4_frame(17, &ptp, 0)), "PTP", "event messages go to UDP port 319");
+        ptp[2..4].copy_from_slice(&320u16.to_be_bytes());
+        fix(&mut ptp, 6, Some((17, A, B)));
+        assert_eq!(name(&ipv4_frame(17, &ptp, 0)), "PTP");
+        assert_eq!(name(&ipv4_frame(17, &udp(b"x"), 0)), "UDP");
+        let mut layer2 = MAC_B.to_vec();
+        layer2.extend(MAC_A);
+        layer2.extend([0x88, 0xF7, 0, 2, 0, 0]);
+        assert_eq!(name(&layer2), "PTP", "PTP straight over Ethernet");
     }
 
     #[test]
