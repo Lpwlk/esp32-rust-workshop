@@ -82,6 +82,12 @@ def check_tables():
         f"udp_table:add({re.search(r'pub const PORT: u16 = (\d+);', adc).group(1)}, adc)" in text,
         "ADC port",
     )
+    pot = (ROOT / "firmware/adc-stream/src/pot.rs").read_text()
+    check(
+        f"POT_DATAGRAM = {re.search(r'pub const DATAGRAM: usize = (\d+);', pot).group(1)}" in text
+        and b"POT1" in pot.encode(),
+        "POT1 datagram length",
+    )
     base = (ROOT / "firmware/ethernet/presets/base.toml").read_text()
     port = int(re.search(r"^port\s*=\s*(\d+)", base, re.M).group(1))
     check(
@@ -129,7 +135,7 @@ def check_captures(tshark):
         count = lambda flt, pcap=udp: len(fields(tshark, pcap, flt, "frame.number"))
         check(count("wsnode") == 31, "31 node frames (heuristic and port)")
         check(count("wsgen") == 5, "5 generator datagrams")
-        check(count("wsadc") == 12, "12 ADC datagrams")
+        check(count("wsadc") == 13, "13 ADC datagrams (the POT1 one included)")
         check(count("_ws.malformed || _ws.expert.severity == error") == 0, "nothing malformed")
 
         lost = fields(tshark, udp, "wsnode.lost", "frame.number", "wsnode.lost")
@@ -195,6 +201,23 @@ def check_captures(tshark):
             fields(tshark, udp, "wsadc.ok.rate_mhz", "wsadc.ok.rate_mhz", "wsadc.ok.pin")[0]
             == ["20000000", "43"],
             "the answer to start is read",
+        )
+        check(
+            fields(
+                tshark,
+                udp,
+                "wsadc.pot.mode",
+                "wsadc.pot.mode",
+                "wsadc.pot.position",
+                "wsadc.pot.code",
+                "wsadc.pot.value",
+            )
+            == [["1", "5000", "3295", "707.25"]],
+            "the POT1 datagram is read",
+        )
+        check(
+            fields(tshark, udp, "wsadc.ok.pot_pin", "wsadc.ok.pot_pin")[0] == ["44"],
+            "the potentiometer's pin in the answer to start",
         )
         check(
             fields(tshark, udp, "wsadc.start.rate", "wsadc.start.rate", "wsadc.start.n")[0]

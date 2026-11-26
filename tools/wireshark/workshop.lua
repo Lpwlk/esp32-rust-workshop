@@ -9,8 +9,9 @@
                           round-trip times (ECH) are computed.
     wsgen   UDP 7001      the traffic generator's datagrams (`gen` in the CLI): "WGEN" header, loss,
                           order and RFC 3550 jitter per stream.
-    wsadc   UDP 7100      the ADC streaming firmware: ADC1 sample datagrams, LOG1/RPL1 log datagrams,
-                          and the ASCII commands (`start rate=20000 n=256`, `stop`, `info`...).
+    wsadc   UDP 7100      the ADC streaming firmware: ADC1 sample datagrams, LOG1/RPL1 log datagrams, POT1
+                          (the potentiometer's live position), and the ASCII commands (`start rate=20000
+                          n=256`, `stop`, `info`, `pot freq`...).
 
   Install:  ln -s "$PWD/tools/wireshark/workshop.lua" ~/.local/lib/wireshark/plugins/workshop.lua
   (the folder is the "Personal Lua Plugins" one of Help > About Wireshark > Folders), then restart
@@ -677,7 +678,9 @@ local adc = Proto("wsadc", "Workshop ADC stream")
 adc.prefs.port = Pref.uint("UDP port", 7100, "UDP port of the ADC board")
 
 local LOG_LEVELS = { [0] = "Info", "Ok", "Warn", "Error", "Stat", "Reply", "Debug" }
+local POT_MODES = { [0] = "off", "freq", "duty" }
 local ADC_HEADER = 20
+local POT_DATAGRAM = 16
 
 local AD = {
   magic = ProtoField.string("wsadc.magic", "Magic"),
@@ -697,6 +700,11 @@ local AD = {
   ms = ProtoField.uint32("wsadc.ms", "Board uptime (ms)"),
   level = ProtoField.uint8("wsadc.level", "Level", base.DEC, LOG_LEVELS),
   text = ProtoField.string("wsadc.text", "Text", base.UNICODE),
+  -- potentiometer
+  pot_mode = ProtoField.uint8("wsadc.pot.mode", "Mode", base.DEC, POT_MODES),
+  pot_position = ProtoField.uint16("wsadc.pot.position", "Knob position (1/100 % of the travel)"),
+  pot_code = ProtoField.uint16("wsadc.pot.code", "Averaged ADC code"),
+  pot_value = ProtoField.float("wsadc.pot.value", "Value given to the generator (Hz or %)"),
   -- commands and the answer to start
   command = ProtoField.string("wsadc.command", "Command"),
   reply = ProtoField.string("wsadc.reply", "Answer"),
@@ -708,6 +716,7 @@ local AD = {
   ok_zero = ProtoField.uint32("wsadc.ok.zero", "Code read at 0 V"),
   ok_full = ProtoField.uint32("wsadc.ok.full", "Full-scale code"),
   ok_verbose = ProtoField.uint32("wsadc.ok.verbose", "Verbose"),
+  ok_pot_pin = ProtoField.uint32("wsadc.ok.pot_pin", "Potentiometer GPIO"),
 }
 local adf = {}
 for _, f in pairs(AD) do adf[#adf + 1] = f end
@@ -807,6 +816,18 @@ local function dissect_log(tvb, pinfo, item, magic)
   return string.format("%s %s%s: %s", magic, label, magic == "LOG1" and (" #" .. seq) or "", text), text
 end
 
+local function dissect_pot(tvb, item)
+  local mode = tvb(4, 1):uint()
+  local position = tvb(6, 2):le_uint()
+  local value = tvb(12, 4):le_float()
+  item:add(AD.pot_mode, tvb(4, 1))
+  item:add_le(AD.pot_position, tvb(6, 2))
+  item:add_le(AD.pot_code, tvb(8, 2))
+  item:add_le(AD.pot_value, tvb(12, 4))
+  return string.format("POT1 %s  knob %.2f %%  → %.4g %s", POT_MODES[mode] or "?", position / 100, value,
+    mode == 2 and "%" or "Hz")
+end
+
 local function key_values(item, tvb, text, fields)
   for key, value in text:gmatch("([%w_]+)=(%d+)") do
     local pf = fields[key]
@@ -828,6 +849,9 @@ function adc.dissector(tvb, pinfo, tree)
   if magic == "ADC1" and len >= ADC_HEADER then
     item:add(AD.magic, tvb(0, 4))
     info = dissect_samples(tvb, pinfo, item, len)
+  elseif magic == "POT1" and len >= POT_DATAGRAM then
+    item:add(AD.magic, tvb(0, 4))
+    info = dissect_pot(tvb, item)
   elseif (magic == "LOG1" or magic == "RPL1") and len >= 13 then
     item:add(AD.magic, tvb(0, 4))
     info = dissect_log(tvb, pinfo, item, magic)
@@ -847,7 +871,7 @@ function adc.dissector(tvb, pinfo, tree)
       item:add(AD.reply, tvb(0, #text))
       key_values(item, tvb, text, {
         rate_mhz = AD.ok_rate_mhz, n = AD.ok_n, pin = AD.ok_pin,
-        zero = AD.ok_zero, full = AD.ok_full, verbose = AD.ok_verbose,
+        zero = AD.ok_zero, full = AD.ok_full, verbose = AD.ok_verbose, pot_pin = AD.ok_pot_pin,
       })
       info = "answer: " .. text
     end

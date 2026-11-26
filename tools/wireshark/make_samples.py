@@ -220,7 +220,16 @@ def make_udp():
         PC,
         7100,
         port,
-        f"ok rate_mhz={rate_mhz} n={n} pin=43 zero=2198 full=4393 verbose=0".encode(),
+        f"ok rate_mhz={rate_mhz} n={n} pin=43 zero=2198 full=4393 verbose=0 pot=freq pot_pin=44 pot_lo=100 pot_hi=5000".encode(),
+    )
+    # The potentiometer's live position: mode freq, knob at 50 %, averaged code 3295, 707.25 Hz given to the generator.
+    cap.udp(
+        T0 + t + 0.0004,
+        BOARD,
+        PC,
+        7100,
+        port,
+        b"POT1" + struct.pack("<BxHHxxf", 1, 5000, 3295, 707.25),
     )
 
     def log(magic, seq, ms, level, text):
