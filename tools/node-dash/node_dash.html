@@ -54,6 +54,9 @@
   header.top h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
   header.top .sub { color: var(--text-muted); font-size: 13px; }
   header.top .grow { flex: 1; }
+  .fpsbox { padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+  .fpsbox b { display: inline-block; min-width: 4em; font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .fpsbox.slow { border-color: var(--warning); }
   .status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); font-size: 13px; color: var(--text-secondary); }
   .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--me, var(--text-muted)); }
   .status svg { flex: none; }
@@ -251,6 +254,7 @@
     <nav class="jump" id="jump" aria-label="Sections"></nav>
     <span class="grow"></span>
     <span class="status" id="status" role="status" aria-live="polite"></span>
+    <span class="fpsbox" id="fpsbox">Page <b id="fps-t">– fps</b></span>
     <button id="resetlayout" title="Put the blocks back in their default order, and the charts, terminals and columns at their default size">Reset layout</button>
     <button id="foldall" title="Fold every block">Fold all</button>
     <button id="unfoldall" title="Unfold every block">Unfold all</button>
@@ -1193,11 +1197,33 @@ function connect() {
   es.addEventListener("log", (e) => { const m = JSON.parse(e.data); addLogs(m.board, m.rows); });
   es.onerror = () => { $("status").innerHTML = "<span>Server not reachable, retrying…</span>"; };
 }
+// How fast the page is drawing, live: the updates it shows each second (the server sends `--fps` of them) and how
+// often the charts are redrawn (twice a second at most).
+const drawTimes = [], chartTimes = [];
+let frameCost = 0, chartCost = 0;
+function rate(times, over, now) {
+  while (times.length && now - times[0] > over) times.shift();
+  return times.length > 1 ? ((times.length - 1) * 1000) / (times[times.length - 1] - times[0]) : 0;
+}
+setInterval(() => {
+  const now = performance.now(), fps = rate(drawTimes, 3000, now), sent = (frame && frame.fps) || 0;
+  $("fps-t").textContent = fps ? `${fps.toFixed(fps < 9.5 ? 1 : 0)} fps` : "– fps";
+  $("fpsbox").classList.toggle("slow", !!(fps && sent && fps < 0.8 * sent));
+  $("fpsbox").title = `Updates the page draws each second, of the ${sent || "–"} the server sends (--fps). One takes ${frameCost.toFixed(0)} ms here (plus the browser's own painting).\n` +
+    `The charts are redrawn twice a second at most: ${rate(chartTimes, 6000, now).toFixed(1)}/s now, ${chartCost.toFixed(0)} ms each.`;
+}, 500);
 function tick() {
   try {
-    if (frame && frame !== drawn) { drawn = frame; for (const k of BK) if (B[k].snap) updateBoard(B[k]); updateHeader(); }
+    if (frame && frame !== drawn) {
+      const t0 = performance.now();
+      drawn = frame; for (const k of BK) if (B[k].snap) updateBoard(B[k]); updateHeader();
+      drawTimes.push(t0); const ms = performance.now() - t0; frameCost = frameCost ? 0.9 * frameCost + 0.1 * ms : ms;
+    }
     const now = performance.now();
-    if (frame && !dragging && (plotsDirty || (following && now - lastPlot > 1500)) && now - lastPlot > 500) { lastPlot = now; plotsDirty = false; drawPlots(); drawTests(); }
+    if (frame && !dragging && (plotsDirty || (following && now - lastPlot > 1500)) && now - lastPlot > 500) {
+      lastPlot = now; plotsDirty = false; drawPlots(); drawTests();
+      chartTimes.push(now); const ms = performance.now() - now; chartCost = chartCost ? 0.8 * chartCost + 0.2 * ms : ms;
+    }
   } catch (e) { console.error(e); document.title = "Node dashboard: " + e.message; }
   requestAnimationFrame(tick);
 }

@@ -86,6 +86,11 @@ arrangement** with its other view settings ([Saved settings and git](#saved-sett
 A plot is redrawn at its new size while you drag. The bars work with a finger or a pen too, and below 1000 px (860 on the ADC
 page) the columns stack, so the vertical bar goes away.
 
+Both pages show in their header how many frames a second they are **really drawing** (*Page … fps*; the box turns amber
+under 80 % of what the server sends, and its tooltip says what drawing costs). The ADC page is sent 30 a second
+([how it keeps up](adc-stream.md#frame-rate)); the node dashboard 5, with its charts redrawn twice a second at most
+(`--fps` changes either).
+
 ### Saved settings and git
 
 Like the firmware's [presets](presets.md), what you set up on the dashboards lives in the repository. Each page writes a

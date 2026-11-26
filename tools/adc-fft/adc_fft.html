@@ -100,6 +100,8 @@
   .chip.demo { color: var(--text-primary); border-color: var(--series-2); }
   .wirenote { margin: 0 0 8px; padding: 6px 10px; font-size: 13px; border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 8px; background: var(--surface-2); }
   .chip.pwm { border-color: var(--accent); }
+  .chip.fps b { font-variant-numeric: tabular-nums; min-width: 4.2em; }
+  .chip.fps.slow { border-color: var(--warning); }
   .chip select { border: 0; background: transparent; padding: 0 2px; min-height: 22px; font-size: 12.5px; }
   .chip:focus-within { border-color: var(--accent); }
   #theme { border-radius: 999px; min-height: 28px; padding: 3px 11px; background: var(--surface-2); }
@@ -314,6 +316,7 @@
     <div class="chips">
       <span class="chip demo hidden" id="demochip" title="No board: the signal is simulated by this tool">Demo</span>
       <span class="chip" id="status" role="status" aria-live="polite"></span>
+      <span class="chip fps" id="fpschip"><span class="k">Page</span><b id="fps-t">– fps</b></span>
       <span class="chip" id="boardchip" title="The analog input and the board's address"><span class="k">Board</span><span id="boardinfo">waiting for the board</span></span>
       <span class="chip pwm hidden" id="pwmchip" title="The board's PWM generator is running"><span class="k">PWM</span><b id="pwmchip-t"></b></span>
       <span class="chip pot hidden" id="potchip" title="The potentiometer sets the generator's frequency or duty cycle"><span class="k">Pot</span><b id="potchip-t"></b></span>
@@ -891,7 +894,6 @@ let xsKey = "", xs = [];
 const WATER_ROWS = 120;
 let rows = [], rowsKey = "", lastRowAt = 0, lastLinesAt = 0;
 let rowSoFar = null;                    // the spectra gathered for the next row
-let waterStale = false, lastWaterAt = 0;  // rows not drawn yet, and when it was last drawn
 let ref = null; // a spectrum kept for comparison: {df, y}
 let wref = null; // a waveform kept for comparison: {fs, y}
 // Trace colours: the theme's unless the user picked one (the palette select or a colour input).
@@ -1722,6 +1724,43 @@ function drawHarms(f) {
     (folded.length ? ` · <b>${folded.length}</b> above half the sample rate (${fmtHz(f.fs / 2)}), ${seen.length} still visible folded back` : " · none above half the sample rate");
 }
 
+// The waterfall's columns. A long FFT has thousands of bins per row and the plot is about a thousand pixels wide:
+// drawing every bin costs 3 to 4 times more for nothing to see. Neighbouring bins share a column that keeps the
+// strongest of them (a line never disappears), and zooming in gives more columns, down to one per bin.
+const COLUMNS_MIN = 512, COLUMNS_MAX = 1600;
+let columnsPlan = { key: "" };
+const slimRows = new WeakMap();   // row -> { key, v }: each row is reduced once per plan
+function waterColumns(bins, dfk, hi, zoom, width) {
+  const target = Math.round(Math.min(COLUMNS_MAX, Math.max(COLUMNS_MIN, width)) * Math.max(1, Math.round(zoom * 4) / 4));
+  const key = [bins, dfk, hi, target, ui.logx].join("|");
+  if (columnsPlan.key === key) return columnsPlan;
+  const band = Math.min(bins, Math.ceil(hi / dfk) + 1), starts = [0];
+  if (ui.logx) {  // columns of equal width on the screen: single bins at the low end, wider groups going up
+    const ratio = band ** (1 / target);
+    for (let edge = 1, i = 1; i < bins; i = Math.max(i + 1, Math.round(edge))) { starts.push(i); edge = Math.max(edge, i) * ratio; }
+  } else {
+    const g = Math.max(1, Math.ceil(band / target));
+    for (let i = g; i < bins; i += g) starts.push(i);
+  }
+  starts.push(bins);
+  const step = starts[1] - starts[0];
+  const x = starts.slice(0, -1).map((a, j) => (ui.logx ? (a + starts[j + 1] - 1) / 2 : a + (step - 1) / 2) * dfk);
+  columnsPlan = { key, starts, x };
+  return columnsPlan;
+}
+function slimRow(row, plan) {
+  const kept = slimRows.get(row);
+  if (kept && kept.key === plan.key) return kept.v;
+  const { starts } = plan, v = new Array(starts.length - 1);
+  for (let j = 0; j < v.length; j++) {
+    let m = -Infinity;
+    for (let i = starts[j]; i < starts[j + 1]; i++) if (row[i] > m) m = row[i];
+    v[j] = m;
+  }
+  slimRows.set(row, { key: plan.key, v });
+  return v;
+}
+
 function drawWater(f) {
   const dark = isDark();
   // One-hue sequential ramp (blue 100 -> 700); stronger is brighter on dark, darker on light.
@@ -1730,7 +1769,7 @@ function drawWater(f) {
   if (ui.cmrev) colours = colours.slice().reverse();
   const stops = colours.map((c, i, a) => [i / (a.length - 1), c]);
   const L = baseLayout();
-  const dfk = f.spec.df / 1000, x = xsFor(f.spec.y.length, dfk), nyq = f.fs / 2000;
+  const dfk = f.spec.df / 1000, nyq = f.fs / 2000;
   const hi = ui.range ? Math.min(ui.range / 1000, nyq) : nyq;
   const minutes = ui.wspan >= 120, unit = minutes ? 60000 : 1000, every = (ui.wspan * 1000) / WATER_ROWS;
   const age = rows.map((_, i) => (i * every) / unit);
@@ -1741,12 +1780,23 @@ function drawWater(f) {
   L.yaxis = { ...L.yaxis, title: { text: minutes ? "minutes ago" : "seconds ago" },
               range: [(ui.wspan * 1000) / unit, -every / 2 / unit], autorange: false };
   L.hovermode = "closest";
-  Plotly.react("water", [{
-    type: "heatmap", x, y: age, z: rows, zmin: ui.wfloor, zmax: 0, colorscale: stops, zsmooth: false,
+  const gd = $("water");
+  // how far the user has zoomed in on the frequency axis (a drag on the plot), while that zoom is kept
+  let zoom = 1;
+  const seen = gd._waterRevision === L.uirevision && gd._fullLayout && gd._fullLayout.xaxis.range;
+  if (seen) zoom = Math.abs((L.xaxis.range[1] - L.xaxis.range[0]) / (seen[1] - seen[0])) || 1;
+  const plan = waterColumns(rows.length ? rows[0].length : f.spec.y.length, dfk, hi, zoom, (gd.clientWidth || 1200) - 150);
+  gd._waterRevision = L.uirevision;
+  Plotly.react(gd, [{
+    type: "heatmap", x: plan.x, y: age, z: rows.map((row) => slimRow(row, plan)), zmin: ui.wfloor, zmax: 0, colorscale: stops, zsmooth: false,
     colorbar: { thickness: 10, len: 0.9, outlinewidth: 0, tickfont: { color: css("--text-secondary"), size: 11 },
                 ticksuffix: " dB" },
     hovertemplate: `%{x:.2f} kHz · %{y:.${minutes ? 2 : 1}f} ${minutes ? "min" : "s"} ago<br>%{z:.1f} dB<extra></extra>`,
   }], L, plotCfg);
+  if (!gd._waterZoomBound) {  // a zoom or its reset: draw again at once, with the columns it calls for
+    gd._waterZoomBound = true;
+    gd.on("plotly_relayout", (ev) => { if (Object.keys(ev).some((k) => k.startsWith("xaxis"))) drawn = null; });
+  }
 }
 
 function drawLines(f) {
@@ -1914,6 +1964,74 @@ const SETTING_DEFAULTS = { hum: "off", filt: "off", filt_f1: 1000, filt_f2: 5000
 // One plot failing (bad data, a Plotly error) must not blank the others.
 function guard(name, fn) { try { fn(); } catch (e) { console.error(name + ":", e); } }
 
+// ---- keeping up on an ordinary computer ---------------------------------------------------------------------
+// The spectrum and the waveform are drawn with every frame. The histogram, the harmonics and the waterfall change
+// more slowly or cost more: at most one of them is drawn with a frame, each about 8 times a second, and less often
+// if drawing it is slow (never more than a quarter of the time). A plot that is folded or scrolled out of view
+// isn't drawn at all; it is, at once, when it comes back.
+const inView = {};   // plot id -> false while it is out of view (unknown: taken as in view)
+const needed = (id) => inView[id] !== false || !$(id)._fullLayout;   // every plot is drawn once, seen or not
+if ("IntersectionObserver" in window) {
+  const watcher = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const back = e.isIntersecting && inView[e.target.id] === false;
+      inView[e.target.id] = e.isIntersecting;
+      if (back) drawn = null;   // redraw: what it shows is from when it left
+    }
+  }, { rootMargin: "120px" });
+  for (const id of ["spec", "scope", "hist", "harms", "water"]) watcher.observe($(id));
+}
+const SLOW_EVERY = 125;   // ms
+const slow = { hist: { at: 0, cost: 0 }, harms: { at: 0, cost: 0 }, water: { at: 0, cost: 0 } };
+const slowInterval = (id) => Math.min(1000, Math.max(SLOW_EVERY, 4 * slow[id].cost));
+let waterStale = false;   // rows not drawn yet
+function drawSlow(id, fn) {
+  const t0 = performance.now();
+  guard(id, fn);
+  const s = slow[id], ms = performance.now() - t0;
+  s.cost = s.cost ? 0.7 * s.cost + 0.3 * ms : ms;
+  s.at = t0;
+  if (id === "water") waterStale = false;
+}
+function drawSlowPlots(f, force) {
+  const jobs = { hist: () => drawHist(f), harms: () => drawHarms(f), water: () => drawWater(f) };
+  const wanted = Object.keys(jobs).filter((id) => needed(id) && (id !== "water" || (ui.water && rows.length && (force || waterStale))));
+  if (force) { for (const id of wanted) drawSlow(id, jobs[id]); return; }
+  const now = performance.now();
+  if (sentFps && sentFps <= 12) {  // frames far apart: there is time for all of them with each one
+    for (const id of wanted) if (now - slow[id].at >= slowInterval(id) - 45) drawSlow(id, jobs[id]);  // 45: a frame a little early
+    return;
+  }
+  let next = null, most = 1;
+  for (const id of wanted) {
+    const due = (now - slow[id].at) / slowInterval(id);   // 1 or more: its turn has come; the most overdue goes
+    if (due >= most) { most = due; next = id; }
+  }
+  if (next) drawSlow(next, jobs[next]);
+}
+
+// ---- how fast the page is drawing, live ---------------------------------------------------------------------
+const drawTimes = [];     // when each live frame was drawn, over the last 2 s
+let frameCost = 0, sentFps = 0, framePaused = false;
+function countFrame(f, ms) {
+  sentFps = (f.app || {}).fps || sentFps;
+  framePaused = !!f.frozen;
+  if (f.frozen || !f.spec) return;
+  drawTimes.push(performance.now());
+  frameCost = frameCost ? 0.9 * frameCost + 0.1 * ms : ms;
+}
+setInterval(() => {
+  const now = performance.now();
+  while (drawTimes.length && now - drawTimes[0] > 2000) drawTimes.shift();
+  const fps = drawTimes.length > 1 ? ((drawTimes.length - 1) * 1000) / (drawTimes[drawTimes.length - 1] - drawTimes[0]) : 0;
+  const live = !framePaused && fps > 0;
+  $("fps-t").textContent = framePaused ? "paused" : live ? `${fps.toFixed(0)} fps` : "– fps";
+  $("fpschip").classList.toggle("slow", live && sentFps > 0 && fps < 0.8 * sentFps);
+  const every = (id, name) => `${name} ${(1000 / slowInterval(id)).toFixed(0)}/s`;
+  $("fpschip").title = `Frames the page draws each second, of the ${sentFps || "–"} the tool sends (--fps). Drawing one takes ${frameCost.toFixed(0)} ms here (plus the browser's own painting).\n` +
+    `At most: ${every("water", "waterfall")}, ${every("hist", "histogram")}, ${every("harms", "harmonics")}. Plots folded or out of view aren't drawn.`;
+}, 500);
+
 function render(f, force) {
   f.settings = { ...SETTING_DEFAULTS, ...f.settings };
   if (nyq !== f.fs / 2) { nyq = f.fs / 2; lastSettings = ""; }  // the sliders' scale follows the sample rate
@@ -1926,19 +2044,14 @@ function render(f, force) {
   if (!f.spec) return;
   // Paused: the server repeats the frozen data; only a change of view (theme, axis...) redraws it.
   if (f.frozen && !force) return;
-  guard("spectrum", () => drawSpectrum(f));
-  if (f.scope) guard("waveform", () => drawScope(f));
-  guard("histogram", () => drawHist(f));
-  guard("harmonics", () => drawHarms(f));
+  if (needed("spec")) guard("spectrum", () => drawSpectrum(f));
+  if (f.scope && needed("scope")) guard("waveform", () => drawScope(f));
   $("foot").textContent = `Band 0 – ${(f.fs / 2000).toFixed(f.fs % 2000 ? 2 : 1)} kHz · FFT bin ${(f.fs / f.settings.fft).toFixed(2)} Hz · window ${(f.settings.fft / f.fs * 1000).toFixed(0)} ms`;
   if (force) guard("colours", syncColourInputs);
   const now = performance.now();
   if (force || now - lastLinesAt > 300) { lastLinesAt = now; guard("lines", () => drawLines(f)); }
-  const pushed = f.frozen ? false : pushWater(f);
-  // The waterfall is the heaviest plot (up to half a million cells): about 8 redraws a second at most, however
-  // fast its rows come, so that a short span doesn't slow the other plots down. No row is lost, only drawings.
-  waterStale = waterStale || pushed;
-  if (ui.water && (force || (waterStale && now - lastWaterAt >= 110))) { lastWaterAt = now; waterStale = false; guard("waterfall", () => drawWater(f)); }
+  if (!f.frozen && pushWater(f)) waterStale = true;   // the history is kept whether or not it is looked at
+  drawSlowPlots(f, force);
 }
 
 // ---- the board's log ----------------------------------------------------------------------
@@ -2608,7 +2721,9 @@ function tick() {
   if (frame && frame !== drawn && !dragging) {
     const force = drawn === null;
     drawn = frame;
+    const t0 = performance.now();
     try { render(frame, force); } catch (e) { console.error("render:", e); }
+    countFrame(frame, performance.now() - t0);
   }
 }
 // ---- order: drag a card by its grip to move it; kept with the other view settings ---------------------------

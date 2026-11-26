@@ -39,7 +39,7 @@ can then change the settings and reboot the board, so use it on a network you tr
 board ──UDP──▶ Stream (thread: datagrams → last samples)
                   │
                Analyzer (windowed FFT, averaging, peak hold, filter, trigger)  ◀── POST /api/config
-                  │ one JSON frame every 1/fps (20 per second)
+                  │ one JSON frame every 1/fps (30 per second)
                Hub ──▶ GET /events (Server-Sent Events) ──▶ the page draws it with Plotly
 ```
 
@@ -131,7 +131,31 @@ that time**. *A row keeps* chooses what of them: **the peak** (the default: a sh
 (calmer, a short burst is weaker) or **the latest** only (short events between two rows are missed). The axis shows the
 whole span from the start, in minutes from 2 min up, and fills from the top; changing the span or what a row keeps starts
 over. The history lives in the page: a reload, or hiding the tab, doesn't keep or fill it.
-The picture itself is redrawn about 8 times a second at most (no row is lost): it is the heaviest plot of the page.
+The picture itself is redrawn about 8 times a second at most (no row is lost), with about as many columns as it has
+pixels across: with a long FFT, neighbouring bins share a column that keeps the **strongest** of them. Zoom in (drag on
+the picture) for more columns, down to one per bin; double-click to see the whole band again.
+
+### Frame rate
+
+The tool sends **30 frames per second** (`--fps`), and the **Page** chip in the header shows what your browser really
+draws. It turns amber under 80 % of what is sent; its tooltip says what a frame costs here. To keep up:
+
+- the spectrum and the waveform are drawn with every frame;
+- the waterfall, the histogram and the harmonics take turns, one with a frame, each about 8 times a second at most
+  (less often if drawing one is slow, so that none takes more than a quarter of the time);
+- a plot that is **folded or scrolled out of view isn't drawn**, and is as soon as it comes back. The waterfall's
+  history is kept all the same.
+
+Measured with the simulated board in headless Chrome on an Apple M2, at 20 kS/s with a 4096-point FFT and at 83.3 kS/s
+with 32768 (the two gave nearly the same figures). The second column slows the browser's processor by half, as a rough
+stand-in for an ordinary computer a few years old; **it is not a measurement on one**.
+
+| Window | As it is | Processor at half speed |
+| --- | --- | --- |
+| 1536×740, spectrum or waterfall in view | 30 fps | 29 to 30 fps |
+| very tall, all five plots in view at once | 30 fps | 20 to 23 fps |
+
+If the chip stays low: fold the plots you don't watch, make the window smaller, or send less (`--fps 20`).
 
 ### Fold what you don't need
 

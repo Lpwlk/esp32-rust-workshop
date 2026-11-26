@@ -1626,8 +1626,8 @@ class Server:
     def _produce(self) -> None:
         period = 1.0 / self.fps
         stream = self.analyzer.stream
+        due = time.monotonic()
         while not self.stop_flag.is_set():
-            t0 = time.monotonic()
             self._watch_board(stream)
             self._save_prefs()
             entries, self._log_cursor = stream.logs_since(self._log_cursor)
@@ -1637,7 +1637,8 @@ class Server:
                 frame = self.analyzer.frame()
                 frame["app"] = self.app_info()
                 self.hub.publish(json.dumps(frame, separators=(",", ":")).encode())
-            time.sleep(max(0.005, period - (time.monotonic() - t0)))
+            due = next_due(due, period, time.monotonic())
+            time.sleep(max(0.0, due - time.monotonic()))
 
     def _watch_board(self, stream: Stream) -> None:
         """Says in the log when samples start or stop coming."""
@@ -2374,6 +2375,14 @@ class FakeBoard:
 
 
 # --------------------------------------------------------------------------------------------
+
+
+def next_due(due: float, period: float, now: float) -> float:
+    """When the next frame is due. The deadlines are `period` apart, so a sleep that runs long is made up for
+    (sleeping `period` after each frame gave 25 frames a second when asked for 30). A frame so slow that its
+    successor is already due moves the schedule instead: no burst to catch up, and always a little rest.
+    """
+    return max(due + period, now + 0.005)
 
 
 def lan_address() -> str | None:
@@ -3268,6 +3277,18 @@ def selftest() -> int:
         f"the simulated wire changes frequency without a jump of phase ({len(periods)} periods)",
     )
 
+    # the pace of the frames: sleeps that run long don't slow it, and a slow frame brings no burst after it
+    due = now = 0.0
+    for _ in range(300):
+        due = next_due(due, 1 / 30, now)
+        now = due + 0.004  # the sleep ran 4 ms long, then the frame took its time
+    check(abs(due - 10.0) < 0.05, f"300 frames at 30 per second take 10 s ({due:.2f} s)")
+    late = next_due(1.0, 1 / 30, 3.0)
+    check(
+        late == 3.005 and abs(next_due(late, 1 / 30, late) - late - 1 / 30) < 1e-9,
+        "after a 2 s stall the pace resumes without a burst",
+    )
+
     # 2b. settings kept between runs: written, read back by the next run, bad files and resets survived
     import tempfile
 
@@ -3450,7 +3471,7 @@ def main() -> int:
     ap.add_argument(
         "--fps",
         type=int,
-        default=20,
+        default=30,
         help="frames per second sent to the page (default: %(default)s)",
     )
     ap.add_argument(

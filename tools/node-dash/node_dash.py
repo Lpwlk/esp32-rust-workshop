@@ -1365,6 +1365,7 @@ class Server:
                 cursors: dict = {}
                 log_cursors = {k: 0 for k in server.boards}
                 period = 1.0 / server.fps
+                due = time.monotonic()
                 try:
                     while not server.stop_flag.is_set():
                         for k, b in server.boards.items():
@@ -1378,11 +1379,14 @@ class Server:
                                 )
                         frame = {
                             "t": time.time(),
+                            "fps": server.fps,
                             "boards": {k: b.snapshot(cursors) for k, b in server.boards.items()},
                         }
                         self._sse(None, json.dumps(frame, separators=(",", ":")).encode())
                         self.wfile.flush()
-                        time.sleep(period)
+                        # deadlines `period` apart, so the time it takes doesn't slow the pace; no burst after a stall
+                        due = max(due + period, time.monotonic() + 0.005)
+                        time.sleep(max(0.0, due - time.monotonic()))
                 except OSError:
                     pass  # the page went away
 
