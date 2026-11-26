@@ -790,6 +790,22 @@ pub async fn run(spawner: Spawner) -> ! {
                             }
                         }
                         say_pot(&socket, meta.endpoint, &pot_config, pwm.as_ref().map(Pwm::state)).await;
+                        if let (true, Some(adc)) = (adc_pot, adc.as_ref()) {
+                            let word = adc.pot_last_word;
+                            say(
+                                &socket,
+                                meta.endpoint,
+                                Level::Reply,
+                                format_args!(
+                                    "pot reads: {} conversions · last result {word:#010x} (channel {}, code {}) · average {:.1}",
+                                    adc.pot_conversions,
+                                    (word >> 17) & 0x1F,
+                                    word & 0x1_FFFF,
+                                    knob.code().unwrap_or(0.0)
+                                ),
+                            )
+                            .await;
+                        }
                     }
                     Command::Reboot => {
                         say(&socket, meta.endpoint, Level::Reply, format_args!("rebooting…")).await;

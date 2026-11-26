@@ -86,6 +86,9 @@ pub struct AdcDma {
     pub stalls: u32,
     /// DMA buffers handed over since the start of the program (for the verbose statistics).
     pub buffers: u32,
+    /// The potentiometer's conversions since the stream started, and the last whole result word (`pot` shows them).
+    pub pot_conversions: u32,
+    pub pot_last_word: u32,
 }
 
 impl AdcDma {
@@ -109,7 +112,17 @@ impl AdcDma {
             .write(|w| unsafe { w.ahb_dma_access_intr_mem_start_addr().bits(0x2E00_0000) });
         dma.ahb_dma_intr_mem_end_addr().write(|w| unsafe { w.ahb_dma_access_intr_mem_end_addr().bits(0x53FF_FFFF) });
 
-        Self { _adc: adc, _pin: pin, _pot_pin: pot_pin, next: 0, running: false, stalls: 0, buffers: 0 }
+        Self {
+            _adc: adc,
+            _pin: pin,
+            _pot_pin: pot_pin,
+            next: 0,
+            running: false,
+            stalls: 0,
+            buffers: 0,
+            pot_conversions: 0,
+            pot_last_word: 0,
+        }
     }
 
     /// Starts sampling the signal at about `rate_hz`, and the potentiometer too when `pot` is set (the conversions
@@ -120,6 +133,8 @@ impl AdcDma {
             self.stop();
         }
         let pins = if pot { 2 } else { 1 };
+        self.pot_conversions = 0;
+        self.pot_last_word = 0;
         let rate = u64::from((rate_hz * pins).clamp(MIN_RATE_HZ, MAX_RATE_HZ));
         // The digital controller's clock is the crystal divided by `div`; it triggers a conversion every
         // `interval` cycles of its half-rate clock (a 12-bit counter), as in ESP-IDF's
@@ -212,6 +227,8 @@ impl AdcDma {
                 let result = unsafe { core::ptr::read_volatile(word) };
                 let code = (result & 0x1_FFFF) as u16;
                 if (result >> 17) & 0xF == u32::from(POT_CHANNEL) {
+                    self.pot_conversions = self.pot_conversions.wrapping_add(1);
+                    self.pot_last_word = result;
                     pot_sink(code);
                 } else {
                     sink(code);
