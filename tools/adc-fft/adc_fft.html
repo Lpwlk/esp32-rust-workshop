@@ -196,6 +196,11 @@
   #spec { height: clamp(340px, 36vh, 640px); }
   #scope { height: clamp(230px, 27vh, 440px); }
   #water { height: clamp(240px, 30vh, 460px); }
+  /* The grip under a plot you can resize: drag it, or use the arrow keys when it has the focus. */
+  .grip { height: 14px; margin-top: 2px; display: flex; align-items: center; justify-content: center; cursor: ns-resize;
+    touch-action: none; user-select: none; border-radius: 7px; outline-offset: -2px; }
+  .grip::before { content: ""; width: 56px; height: 4px; border-radius: 2px; background: var(--grid); transition: background 0.12s, width 0.12s; }
+  .grip:hover::before, .grip:focus-visible::before, .grip.drag::before { background: var(--accent); width: 80px; }
   .stack { display: grid; gap: 12px; align-content: start; min-width: 0; }
   #hist { height: clamp(180px, 23vh, 300px); }
   input[type="color"] { width: 28px; height: 26px; padding: 2px; border: 1px solid var(--border); border-radius: 8px;
@@ -758,6 +763,9 @@
         <div class="row"><button id="showwater" aria-pressed="true">Show</button></div></div>
     </div>
     <div id="water" class="plot"></div>
+    <div class="grip" id="water-grip" role="separator" aria-orientation="horizontal" tabindex="0" aria-valuemin="160" aria-valuemax="1600"
+         aria-label="Waterfall height: drag, or press the up and down arrows (shift for bigger steps, Home for the default)"
+         title="Drag to resize the waterfall · double-click for the default size"></div>
   </section>
 
   <section class="card" id="logcard">
@@ -817,7 +825,7 @@ const ui = { floor: -100, logx: false, auto: false, water: true, wfloor: -100, w
              harm: "off", labels: 1, view: "all", sstyle: "line", swidth: "auto", wstyle: "line", wwidth: "auto",
              cmap: "theme", cmrev: false, col: {}, palette: "default", wunit: "codes", mvcode: 0.7, keepdc: false,
              wrange: 0, amargin: 5, adamp: 1, wx: false, wsrc: "filtered", f_info: true, f_ok: true, f_warn: true, f_error: true, f_stat: true, f_debug: true,
-             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
+             f_host: true, follow: true, pwmf: 1000, pwmd: 50, potfl: 100, potfh: 5000, potdl: 0, potdh: 100, pote: 16, waterh: 0, hn: 16, hscale: "dbc", href: "none", statusOpen: true,
              avol: 70, amute: false, aauto: false, afilt: false, fold: {} };
 // Only the keys we know, with the type we expect (a file edited by hand, or written by another version).
 function adopt(saved) {
@@ -1056,6 +1064,48 @@ function resizePlots() {  // a plot that is not on screen can't be resized: that
     try { Promise.resolve(Plotly.Plots.resize($(id))).catch(() => {}); } catch (_) {}
   }
 }
+// A plot the user can make taller or shorter: `ui.waterh` is its height in pixels (0: the default, which depends
+// on the view and the window). The size is kept with the other settings.
+const GRIP_MIN = 160, GRIP_MAX = 1600;
+function applyWaterHeight() {
+  $("water").style.height = ui.waterh ? ui.waterh + "px" : "";
+  $("water-grip").setAttribute("aria-valuenow", String(Math.round($("water").offsetHeight)));
+  requestAnimationFrame(resizePlots);
+}
+function setWaterHeight(px, keep) {
+  ui.waterh = px ? Math.min(GRIP_MAX, Math.max(GRIP_MIN, Math.round(px))) : 0;
+  applyWaterHeight();
+  if (keep) saveUi();
+}
+(function () {
+  const grip = $("water-grip");
+  let start = null;
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button > 0) return;
+    start = { y: e.clientY, h: $("water").offsetHeight };
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add("drag");
+    e.preventDefault();
+  });
+  grip.addEventListener("pointermove", (e) => { if (start) setWaterHeight(start.h + e.clientY - start.y, false); });
+  const end = () => {
+    if (!start) return;
+    start = null;
+    grip.classList.remove("drag");
+    saveUi();
+  };
+  grip.addEventListener("pointerup", end);
+  grip.addEventListener("pointercancel", end);
+  grip.addEventListener("dblclick", () => setWaterHeight(0, true));
+  grip.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 96 : 24, h = $("water").offsetHeight;
+    if (e.key === "ArrowDown") setWaterHeight(h + step, true);
+    else if (e.key === "ArrowUp") setWaterHeight(h - step, true);
+    else if (e.key === "Home") setWaterHeight(0, true);
+    else return;
+    e.preventDefault();
+  });
+})();
 function applyView() {
   if (!VIEWS[ui.view]) ui.view = "all";
   const on = VIEWS[ui.view], hide = (id, off) => $(id).classList.toggle("hidden", off);
@@ -2115,6 +2165,7 @@ function makeFoldable(el, key, after) {
 }
 if (!ui.fold || typeof ui.fold !== "object") ui.fold = {};
 for (const id of ["c-acq", "c-filter", "c-gen", "c-pwm", "c-pot", "c-spec", "c-scope", "c-lines", "c-hist", "c-harms", "watercard", "logcard"]) makeFoldable($(id), id);
+applyWaterHeight();
 for (const tile of document.querySelectorAll(".tile")) makeFoldable(tile, "tile-" + tile.querySelector(".label").textContent.trim().toLowerCase().replace(/[^a-z]+/g, "-"));
 // The Measurements title folds or unfolds all the tiles at once (each one is still its own).
 {
