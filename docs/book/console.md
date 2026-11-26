@@ -480,6 +480,32 @@ are counted** too; if the marker itself is lost it closes the stream after a sec
 boards' clocks needn't agree. Every datagram starts with a 16-byte header (`WGEN`, stream, flags, sequence number,
 sender's clock) and the rest is filler.
 
+## The node dashboard
+
+Both nodes on one page, in your browser: the same consoles, with controls and charts around them.
+
+```sh
+python3 scripts/dev.py boards assign a 6C:1A   # once per board: which one is node A, which is B
+python3 scripts/dev.py dash                    # the two boards (close their serial monitors first)
+python3 scripts/dev.py dash --demo             # two simulated nodes, no hardware (--demo uart: the UART app)
+```
+
+The page is at `http://127.0.0.1:8060`. **Nothing is added to the firmware**: the tool opens each board's USB console,
+shows what it prints and reads the numbers out of it (counters, rates, round-trip times, link state, bursts, settings).
+What you type in a console of the page goes to the board as if typed in `dev.py monitor`.
+
+| Section | What is there |
+| --- | --- |
+| **Boards** | each node's state and its console, with the colors, the live line, filters and a command line |
+| **Control** | what the CLI does, as controls: console verbosity, RGB LED, breadboard LEDs, traffic period and mode, bursts, the link (baud rate, or network settings and trace), the traffic generator |
+| **Measure** | both boards on one time axis: frames per second, round-trip times, the interval between data frames, link and button events, burst and generator runs |
+| **Configure** | the settings with *save*, the peer's settings side by side to pull or push, and the peer's address space |
+
+Round-trip times and frame intervals come from the frame lines, so those charts need `verbose frames` on the nodes
+(the page offers a button for it), and round trips need `tx on-rx` on the peer. The cards move, fold and resize
+([Arranging the two dashboards](tools.md#arranging-the-two-dashboards)), and the view is
+[saved in the repository](tools.md#saved-settings-and-git).
+
 ## Colors
 
 Every colored part of the console has a **role** (the time stamp, the `TX ▶` arrow, node names, errors, each

@@ -167,6 +167,19 @@ body:has(.custom-hero) .md-content__button {
     display: none;
 }
 
+/* Sections of four cards on the home page: two by two where there is room (three would leave one alone) */
+@media screen and (min-width: 45em) {
+    .md-typeset .grid.cards.ws-pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* The home page's pictures of the dashboards */
+.md-typeset img.shot {
+    width: 100%;
+    margin-top: 0.8em;
+    border: 1px solid var(--md-default-fg-color--lightest);
+    border-radius: 0.4rem;
+}
+
 /* Console recordings (javascripts/casts.js): full width, rounded like code blocks */
 .asciicast {
     margin: 1.2em 0 0.4em;

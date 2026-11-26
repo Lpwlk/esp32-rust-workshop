@@ -57,7 +57,7 @@ pyserial, zensical, black, numpy, plotly). `dev.py` relaunches itself there, so 
 | **Zensical** | builds this site from `docs/book/` and `docs/zensical.toml` | `dev.py docs serve --open`, `dev.py docs build -r` |
 | **black** | formats the Python (`--line-length 100`) | `dev.py format` |
 | [`tools/adc-fft/`](adc-stream.md) | the ADC app's live page (spectrum, waveform, waterfall, filter, PWM generator, potentiometer); **keeps your settings** between runs | `dev.py fft`, `dev.py fft --demo` |
-| [`tools/node-dash/`](console.md) | a page around the consoles of both nodes (Ethernet or UART app): every CLI command as a control, charts read from what the boards print. Nothing changes in the firmware | `dev.py dash`, `dev.py dash --demo [uart]` |
+| [`tools/node-dash/`](console.md#the-node-dashboard) | a page around the consoles of both nodes (Ethernet or UART app): every CLI command as a control, charts read from what the boards print. Nothing changes in the firmware | `dev.py dash`, `dev.py dash --demo [uart]` |
 | `tools/wireshark/` | Lua dissectors for what the boards put on the cable, see below | `tshark -X lua_script:tools/wireshark/workshop.lua -r capture.pcap` |
 | `scripts/record_demos.py`, `render_demos.py`, `record.py`, `gifrender.py` | record the console GIFs from two real boards (`brew install agg gifsicle`), or re-render saved recordings without a board | `python3 scripts/record_demos.py boot` |
 
