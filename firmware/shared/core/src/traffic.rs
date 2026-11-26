@@ -104,8 +104,6 @@ pub fn classify(frame: &[u8]) -> Class {
 
 /// Number of frame size bins (the usual RMON ones).
 pub const SIZE_BINS: usize = 6;
-/// Names of the bins, bytes on the wire.
-pub const SIZE_BIN_NAMES: [&str; SIZE_BINS] = ["≤64", "65-127", "128-255", "256-511", "512-1023", "≥1024"];
 
 /// The bin of a frame of `len` bytes.
 pub const fn size_bin(len: usize) -> usize {

@@ -283,20 +283,6 @@ pub fn kind_of(node: &NodeDesc) -> [u8; 3] {
     ]
 }
 
-/// What a `<kind>` says, spelled out: `variable text read-write`.
-pub fn describe_kind(kind: [u8; 3]) -> String<32> {
-    let mut s = String::new();
-    let class = if kind[0] == b'O' { "object" } else { "variable" };
-    let ty = match kind[1] {
-        b'B' => " bool",
-        b'U' => " u32",
-        b'T' => " text",
-        _ => "",
-    };
-    let _ = write!(s, "{class}{ty}{}", if kind[2] == b'W' { " read-write" } else { "" });
-    s
-}
-
 /// What a frame carries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Body {

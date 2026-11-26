@@ -67,8 +67,6 @@ SETTERS = {
 # The terminal: the board's bytes (text with ANSI escape codes) become lines
 # --------------------------------------------------------------------------------------------
 
-XTERM_BASE = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
-
 
 def _color256(n: int):
     """A 256-colour index as what the page draws: 0-15 stay an index (the page's palette), the rest are hex."""
@@ -488,7 +486,6 @@ class Board:
         self.name: str | None = None
         self.app: str | None = None  # "eth" | "uart", from the settings
         self.settings: dict[str, list] = {}  # key -> [value, build value, read-only, changed]
-        self.settings_v = 0
         self.card: dict[str, str] = {}
         self.net: dict[str, str] = {}
         self.counters: dict = {"tx": None, "rx": None, "lost": None, "bad": None}
@@ -831,7 +828,6 @@ class Board:
         )
         if self.settings.get(key) != [value, build_value, ro, changed]:
             self.settings[key] = [value, build_value, ro, changed]
-            self.settings_v += 1
         if key == "name":
             self.name = value
         elif key == "net.transport":
@@ -1158,7 +1154,6 @@ class Server:
             b.other = boards.get("b" if k == "a" else "a")
         self.fps = fps
         self.stop_flag = threading.Event()
-        self.clients = 0
         self.httpd = http.server.ThreadingHTTPServer((host, port), self._handler())
         self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]

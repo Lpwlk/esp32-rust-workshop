@@ -17,7 +17,7 @@ import re
 import threading
 import time
 
-RST, BOLD, FAINT = "\x1b[0m", "\x1b[1m", "\x1b[2m"
+RST, BOLD = "\x1b[0m", "\x1b[1m"
 TIME = DIM = SEP = "\x1b[90m"
 TX, RX, NODE, OK, WARN, ERROR = (
     "\x1b[36m",
@@ -530,13 +530,7 @@ class SimNode:
         if cmd in ("verbose", "v", "trace", "t", "tr") and not args:
             key = SHORT[cmd]
             names = ENUMS[key]
-            nxt = {"verbose": ("frames", "wire", "silent", "live")}.get(key)
-            value = (
-                nxt[names.index(s[key]) - 1]
-                if nxt and False
-                else names[(names.index(s[key]) + 1) % len(names)]
-            )
-            return self.set_key(key, value)
+            return self.set_key(key, names[(names.index(s[key]) + 1) % len(names)])
         if cmd in ("dash", "ds") and self.app == "eth":
             if not args:
                 return self.set_key(

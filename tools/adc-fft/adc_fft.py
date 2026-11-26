@@ -1839,7 +1839,6 @@ class Server:
 
 # The signal generator of the simulated board: up to eight components (added and removed in the page), noise, mains hum, an offset.
 GEN_KINDS = ("sine", "square", "pwm", "sawtooth", "triangle", "sweep", "noise")
-GEN_TONES = 4  # what the demo starts with
 GEN_TONES_MAX = 8  # and the most the page can add
 # field: (lowest, highest) of a component
 GEN_TONE_LIMITS = {
