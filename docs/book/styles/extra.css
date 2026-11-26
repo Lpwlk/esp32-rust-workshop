@@ -83,16 +83,7 @@
 
 }
 
-[data-md-color-scheme=slate] .custom-hero {
-    background-image: url("../assets/banners/hero-background-dark.svg");
-}
-
-[data-md-color-scheme=default] .custom-hero {
-    background-image: url("../assets/banners/hero-background-light.svg");
-}
-
-
-
+/* Its picture: set by docs/templates/home.html from zensical.toml (extra.hero_background). */
 
 .hero-container {
     display: flex;
@@ -147,6 +138,7 @@
 /* Responsive */
 @media (max-width: 900px) {
     .hero-container {
+        gap: 1rem;
         flex-direction: column;
         text-align: center;
     }
@@ -225,8 +217,11 @@ html.reveal-on .md-typeset .grid.cards > ul > li.reveal.in {
 }
 
 /* The hero drifts and fades a little as it leaves (the script sets --hero-shift and --hero-fade). */
-html.reveal-on .custom-hero {
-    background-position: center calc(50% + var(--hero-shift, 0px));
+/* Only on a wide screen is the picture taller than the banner; on a narrow one it would drift off its top edge. */
+@media (min-width: 901px) {
+    html.reveal-on .custom-hero {
+        background-position: center calc(50% + var(--hero-shift, 0px));
+    }
 }
 html.reveal-on .custom-hero .hero-container {
     opacity: var(--hero-fade, 1);

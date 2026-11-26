@@ -145,6 +145,12 @@ code = "JetBrains Mono"
 # Extra: header logo per color scheme (docs/templates/partials/logo.html)
 # ----------------------------------------------------------------------------
 [project.extra]
+# The picture behind the home page's banner (book/assets/banners/hero-background-*):
+#   classic    the bright waves
+#   deep       the same waves, darkened: the logo and the title stand out the most
+#   spotlight  the bright waves with a soft dark pool behind the logo
+#   horizon    a calm dark sky with low waves along the bottom
+hero_background = "classic"
 logo_light_mode = "assets/logo/logo-plain-light.svg"
 logo_dark_mode = "assets/logo/logo-plain-dark.svg"
 

@@ -3,6 +3,25 @@
 {% extends "main.html" %}
 
 {% block hero %}
+  {#- The banner's picture is chosen in zensical.toml (extra.hero_background); "classic" has no suffix. #}
+  {%- set bg = config.extra.hero_background | default("classic") %}
+  {%- set stem = "assets/banners/hero-background-" ~ ("" if bg == "classic" else bg ~ "-") %}
+  <style>
+    [data-md-color-scheme="slate"] .custom-hero { background-image: url("{{ (stem ~ 'dark.svg') | url }}"); }
+    [data-md-color-scheme="default"] .custom-hero { background-image: url("{{ (stem ~ 'light.svg') | url }}"); }
+    {%- if bg == "spotlight" %}
+    {#- On a phone the logo moves above the title, and the pool of shade with it. #}
+    @media (max-width: 900px) {
+      [data-md-color-scheme="slate"] .custom-hero { background-image: url("{{ (stem ~ 'narrow-dark.svg') | url }}"); }
+      [data-md-color-scheme="default"] .custom-hero { background-image: url("{{ (stem ~ 'narrow-light.svg') | url }}"); }
+    }
+    {%- endif %}
+    {%- if bg == "horizon" %}
+    {#- This one is exactly the banner's size: no drifting, it would leave a gap at the top. #}
+    html.reveal-on .custom-hero { background-position: center; }
+    @media (max-width: 900px) { .custom-hero { padding-bottom: 3.6rem; } }   {#- room for the strip under the buttons #}
+    {%- endif %}
+  </style>
   <section class="custom-hero">
     <div class="hero-container">
       <div class="hero-text">
