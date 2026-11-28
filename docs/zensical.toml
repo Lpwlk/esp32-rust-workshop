@@ -150,7 +150,7 @@ code = "JetBrains Mono"
 #   deep       the same waves, darkened: the logo and the title stand out the most
 #   spotlight  the bright waves with a soft dark pool behind the logo
 #   horizon    a calm dark sky with low waves along the bottom
-hero_background = "classic"
+hero_background = "horizon"
 logo_light_mode = "assets/logo/logo-plain-light.svg"
 logo_dark_mode = "assets/logo/logo-plain-dark.svg"
 
